@@ -13,7 +13,6 @@ REGISTRY = ServiceRegistry.new(
   idle_ttl: ENV.fetch("RQ_IDLE_TTL", "3600").to_i,
   max_users: ENV.fetch("RQ_MAX_USERS", "25").to_i,
   scope: ENV.fetch("RQ_SCOPE", "repo:ubicloud/ubicloud"),
-  label: ENV.fetch("RQ_LABEL", "clickhouse"),
   warn_days: ENV.fetch("RQ_WARN_DAYS", "2").to_i,
   hot_days: ENV.fetch("RQ_HOT_DAYS", "4").to_i,
   stale_days: ENV.fetch("RQ_STALE_DAYS", "7").to_i,
@@ -23,6 +22,10 @@ REGISTRY = ServiceRegistry.new(
 )
 
 SNOOZE_SECONDS = ENV.fetch("RQ_SNOOZE_DAYS", "7").to_i * 86_400
+
+# Only a hint in the settings box. It is deliberately NOT applied as a default:
+# a shared default is what made every user inherit one person's topic feed.
+SUGGESTED_LABEL = ENV.fetch("RQ_LABEL", "")
 
 # Fails closed: with no allowlist nobody gets in, rather than everybody.
 ALLOWED_LOGINS = env_required("RQ_ALLOWED_LOGINS")
@@ -108,11 +111,17 @@ class ReviewQueue < Roda
 
     next r.redirect "/login" unless current_login && current_token
 
-    service = REGISTRY.for(current_login, current_token)
+    service = REGISTRY.for(current_login, current_token, label: session["label"].to_s)
 
     r.post "refresh" do
       check_csrf!
       service.snapshot(force: true)
+      r.redirect "/?#{r.query_string}"
+    end
+
+    r.post "settings" do
+      check_csrf!
+      session["label"] = QueueService.clean_label(r.params["label"])
       r.redirect "/?#{r.query_string}"
     end
 
@@ -161,6 +170,8 @@ class ReviewQueue < Roda
                              login: current_login, csrf: csrf_tag("/refresh"),
                              csrf_logout: csrf_tag("/logout"),
                              csrf_snooze: csrf_tag("/snooze"),
+                             csrf_settings: csrf_tag("/settings"),
+                             suggested_label: SUGGESTED_LABEL,
                              csrf_unsnooze: csrf_tag("/unsnooze"),
                              snooze: snooze},
         layout: false)

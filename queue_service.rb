@@ -48,7 +48,7 @@ class QueueService
     quick_lines: 50, lines_per_min: 20)
     @gh = GitHubClient.new(token)
     @scope = scope
-    @label = label
+    @label = self.class.clean_label(label)
     @warn_days = warn_days
     @hot_days = hot_days
     @stale_days = stale_days
@@ -63,13 +63,25 @@ class QueueService
 
   attr_reader :scope, :label, :quick_lines
 
+  # Only " and \ can break out of the quoted search term. Commas and spaces are
+  # legal in a GitHub label, so they stay. Strip last: removing a character can
+  # leave whitespace at either end, and so can the length cap.
+  def self.clean_label(value)
+    value.to_s.delete('"').delete("\\").strip[0, 64].to_s.strip
+  end
+
+  def watch_label? = !@label.empty?
+
   def buckets
-    [
+    list = [
       {key: :review, label: "Review requested", q: "#{@scope} is:open is:pr review-requested:@me"},
-      {key: :mention, label: "Mentions me", q: "#{@scope} is:open is:pr mentions:@me"},
-      {key: :label, label: @label, q: %(#{@scope} is:open is:pr label:"#{@label}")},
-      {key: :mine, label: "My PRs", q: "#{@scope} is:open is:pr author:@me"}
+      {key: :mention, label: "Mentions me", q: "#{@scope} is:open is:pr mentions:@me"}
     ]
+    if watch_label?
+      list << {key: :label, label: @label, q: %(#{@scope} is:open is:pr label:"#{@label}")}
+    end
+    list << {key: :mine, label: "My PRs", q: "#{@scope} is:open is:pr author:@me"}
+    list
   end
 
   def tabs

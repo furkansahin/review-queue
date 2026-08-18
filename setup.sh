@@ -43,6 +43,7 @@ dokku config:set --no-restart "$APP" \
   RQ_BASE_URL="$BASE_URL" \
   RQ_SCOPE=repo:ubicloud/ubicloud \
   RQ_LABEL=clickhouse \
+  `# placeholder only; each user picks their own watch label` \
   RQ_WARN_DAYS=2 \
   RQ_HOT_DAYS=4 \
   RQ_STALE_DAYS=7 \

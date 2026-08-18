@@ -220,8 +220,19 @@
   <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Review queue</div>
   <div class="mono" style="font-size: 12px; color: var(--tag-fg); background: var(--tag-bg);
        border: 1px solid var(--tag-border); padding: 3px 8px; border-radius: 4px;">
-    <%= service.scope %> · label:<%= service.label %>
+    <%= service.scope %>
   </div>
+  <form method="post" action="/settings?tab=<%= tab %><%= hide ? "&hide=1" : "" %>"
+        style="margin: 0; display: flex; align-items: center; gap: 6px;">
+    <%== csrf_settings %>
+    <label class="mono" for="label" style="font-size: 11px; color: var(--muted-2);">watch label</label>
+    <input class="mono" id="label" name="label" value="<%= service.label %>" maxlength="64"
+           placeholder="<%= suggested_label.empty? ? "none" : suggested_label %>"
+           title="Show every open PR with this label, even when nobody asked you. Leave empty to watch nothing."
+           style="font-size: 12px; width: 108px; padding: 4px 8px; border-radius: 5px;
+                  border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg);" />
+    <button class="mini" type="submit">Set</button>
+  </form>
   <div style="flex: 1;"></div>
   <div class="mono" style="font-size: 11px; color: var(--muted-2);">
     <% meta = [] %>

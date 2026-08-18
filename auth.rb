@@ -53,7 +53,7 @@ end
 # keeps their own TTL cache. Evicts on idle and caps total users, since every
 # live entry holds a snapshot in memory and a rebuild fans out worker threads.
 class ServiceRegistry
-  Entry = Struct.new(:service, :token, :last_used)
+  Entry = Struct.new(:service, :token, :label, :last_used)
 
   def initialize(idle_ttl:, max_users:, **service_opts)
     @idle_ttl = idle_ttl
@@ -63,13 +63,19 @@ class ServiceRegistry
     @lock = Mutex.new
   end
 
-  def for(login, token)
+  # label is the user's own watched label, so it is passed for each request
+  # and not baked into the shared options.
+  def for(login, token, label: "")
+    label = QueueService.clean_label(label)
     @lock.synchronize do
       sweep
       entry = @entries[login]
-      # A fresh sign-in issues a new token; drop the stale service with it.
-      if entry.nil? || entry.token != token
-        entry = Entry.new(QueueService.new(token: token, **@service_opts), token, nil)
+      # A fresh sign-in issues a new token, and changing the watched label
+      # changes the search queries. Either one needs a new service, because the
+      # cached snapshot no longer answers the right question.
+      if entry.nil? || entry.token != token || entry.label != label
+        service = QueueService.new(token: token, label: label, **@service_opts)
+        entry = Entry.new(service, token, label, nil)
         @entries[login] = entry
       end
       entry.last_used = Time.now

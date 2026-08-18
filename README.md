@@ -2,8 +2,8 @@
 
 # pr-review-queue
 
-Dashboard for the pull requests that actually need you: review requests, mentions, a watched
-label, and your own PRs. Sign in with GitHub and the queue is fetched with your own account,
+Dashboard for the pull requests that actually need you: review requests, mentions, your own PRs,
+and a watched label you choose yourself. Sign in with GitHub and the queue is fetched with your own account,
 so each person sees their own. Rendered server-side — no JS.
 
 ## State model
@@ -130,8 +130,22 @@ dokku letsencrypt:set review-queue email you@example.com
 dokku letsencrypt:enable review-queue
 ```
 
-Config lives in `dokku config`. `dokku config:set review-queue RQ_LABEL=foo` restarts the app
-with the new watch label; no code change needed.
+Config lives in `dokku config`. `dokku config:set review-queue RQ_SCOPE=repo:owner/name`
+restarts the app with the new scope; no code change needed.
+
+## Watch label
+
+The watched label is **per user**, not global. Set it in the box in the top bar. It shows every
+open pull request with that label, even when nobody asked you to look, which makes it a personal
+topic feed.
+
+It is empty by default, and `RQ_LABEL` is only the placeholder text in that box. It is
+deliberately **not** applied as a default. An earlier version made it a global setting, and every
+user then inherited one person's topic: a teammate with nothing requested from them and no
+mentions still saw 15 pull requests they had no connection to, which was most of their page.
+
+An empty label removes the tab and saves one search call for each rebuild. The choice lives in
+your session cookie, so it is per browser, like the snooze list.
 
 ## Access
 
