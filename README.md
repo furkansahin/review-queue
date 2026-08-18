@@ -39,6 +39,22 @@ less — the cheapest way to make the number go down.
 derived from timelines already fetched, so it costs no extra API calls, but it only sees
 PRs still matching `RQ_SCOPE` and undercounts once a PR drops out of the queue.
 
+## Snooze
+
+`Snooze` on a row hides it for `RQ_SNOOZE_DAYS` days. The **Snoozed** tab shows what you hid,
+and `Wake` puts a row back immediately.
+
+A snoozed row also comes back on its own when there is new activity on it. If a person pushes
+a commit or writes a comment after you snooze the pull request, the row returns to the queue
+at the next rebuild. You do not hide the pull request. You say "nothing for me until this
+changes".
+
+The list is per browser. It lives in the session cookie, so there is no database. A cookie
+holds about 4 KB, so the list keeps at most 25 entries and drops the oldest snoozes first.
+Entries also go away when the snooze time is complete or when the pull request leaves the
+queue. Clearing your cookies clears the list, and the list does not follow you to another
+browser.
+
 ## Layout
 
 ```
@@ -46,6 +62,7 @@ app.rb             routes, session/OAuth, allowlist, env config
 queue_service.rb   GitHub client, threaded fetch, timeline/state/age logic, TTL cache
 views/queue.erb    the table (no JS — tabs and filters are links)
 auth.rb            GitHub OAuth flow + per-user service registry
+snooze.rb          per-browser snooze list, kept in the session cookie
 views/login.erb    the sign-in page
 Procfile app.json  Dokku process + zero-downtime health check
 setup.sh           one-shot dokku app create + config:set

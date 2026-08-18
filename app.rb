@@ -2,6 +2,7 @@ require "roda"
 require "securerandom"
 require_relative "queue_service"
 require_relative "auth"
+require_relative "snooze"
 
 def env_required(key)
   ENV[key] || abort("missing required env var #{key}")
@@ -20,6 +21,8 @@ REGISTRY = ServiceRegistry.new(
   quick_lines: ENV.fetch("RQ_QUICK_LINES", "50").to_i,
   lines_per_min: ENV.fetch("RQ_LINES_PER_MIN", "20").to_i
 )
+
+SNOOZE_SECONDS = ENV.fetch("RQ_SNOOZE_DAYS", "7").to_i * 86_400
 
 # Fails closed: with no allowlist nobody gets in, rather than everybody.
 ALLOWED_LOGINS = env_required("RQ_ALLOWED_LOGINS")
@@ -113,15 +116,53 @@ class ReviewQueue < Roda
       r.redirect "/?#{r.query_string}"
     end
 
+    r.post "snooze" do
+      check_csrf!
+      key = r.params["key"].to_s
+      unless key.empty?
+        session["snoozed"] = Snooze.new(session["snoozed"]).add(key, SNOOZE_SECONDS).to_h
+      end
+      r.redirect "/?#{r.query_string}"
+    end
+
+    r.post "unsnooze" do
+      check_csrf!
+      key = r.params["key"].to_s
+      session["snoozed"] = Snooze.new(session["snoozed"]).remove(key).to_h unless key.empty?
+      r.redirect "/?#{r.query_string}"
+    end
+
     r.root do
       snap = service.snapshot
       tab = (r.params["tab"] || "all").to_sym
       hide = r.params["hide"] == "1"
-      rows = snap[:rows].select { |row| tab == :all || row[:buckets].include?(tab) }
-      rows = rows.reject { |row| row[:settled] } if hide
+
+      # sweep first: it wakes every row that expired or that has new activity.
+      snooze = Snooze.new(session["snoozed"]).sweep(snap[:rows])
+      session["snoozed"] = snooze.to_h
+
+      awake = snap[:rows].reject { |row| snooze.hidden?(row) }
+      asleep = snap[:rows].select { |row| snooze.hidden?(row) }
+
+      if tab == :snoozed
+        rows = asleep
+      else
+        rows = awake.select { |row| tab == :all || row[:buckets].include?(tab) }
+        rows = rows.reject { |row| row[:settled] } if hide
+      end
+
+      # Counts come from the awake rows only, or the tab badges show work that
+      # the user cannot see.
+      counts = service.counts(awake)
+      counts[:snoozed] = {open: asleep.count { |row| !row[:settled] }, total: asleep.size}
+      snap = snap.merge(counts: counts)
+
       view("queue", locals: {snap: snap, rows: rows, tab: tab, hide: hide, service: service,
                              login: current_login, csrf: csrf_tag("/refresh"),
-                             csrf_logout: csrf_tag("/logout")},
+                             csrf_logout: csrf_tag("/logout"),
+                             csrf_snooze: csrf_tag("/snooze"),
+                             csrf_unsnooze: csrf_tag("/unsnooze"),
+                             snooze: snooze},
         layout: false)
     end
   end

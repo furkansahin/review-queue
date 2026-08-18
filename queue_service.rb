@@ -75,7 +75,7 @@ class QueueService
   def tabs
     [{key: :all, label: "All"}] +
       buckets.map { |b| {key: b[:key], label: b[:label]} } +
-      [{key: :quick, label: "Quick wins"}]
+      [{key: :quick, label: "Quick wins"}, {key: :snoozed, label: "Snoozed"}]
   end
 
   def snapshot(force: false)
@@ -92,6 +92,15 @@ class QueueService
       end
       @snapshot
     end
+  end
+
+  def counts(rows)
+    out = {all: {open: rows.count { |r| !r[:settled] }, total: rows.size}}
+    (buckets.map { |b| b[:key] } + [:quick]).each do |key|
+      in_b = rows.select { |r| r[:buckets].include?(key) }
+      out[key] = {open: in_b.count { |r| !r[:settled] }, total: in_b.size}
+    end
+    out
   end
 
   private
@@ -129,15 +138,6 @@ class QueueService
       m = pr[:my_last]
       m && !pr[:mine] && m[:at] >= cutoff && REVIEW_KINDS.include?(m[:kind])
     end
-  end
-
-  def counts(rows)
-    out = {all: {open: rows.count { |r| !r[:settled] }, total: rows.size}}
-    (buckets.map { |b| b[:key] } + [:quick]).each do |key|
-      in_b = rows.select { |r| r[:buckets].include?(key) }
-      out[key] = {open: in_b.count { |r| !r[:settled] }, total: in_b.size}
-    end
-    out
   end
 
   def threaded(items)
@@ -259,6 +259,8 @@ class QueueService
     chips.compact!
 
     {
+      key: "#{pr[:repo]}##{pr[:number]}",
+      last_at: pr.dig(:last, :at),
       buckets: pr[:buckets] + (quick ? [:quick] : []), settled: settled,
       # Reddest first: oldest wait_from means most days waiting, which is what
       # age_colors ramps red. Settled rows ("Reviewed" / "Waiting on them") are

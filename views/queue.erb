@@ -2,13 +2,14 @@
   tabs = service.tabs
   counts = snap[:counts] || {}
   qs = ->(t, h) { "/?tab=#{t}#{h ? "&hide=1" : ""}" }
-  cols = "4px 132px 1fr 92px 132px 150px 84px 76px"
+  cols = "4px 132px 1fr 92px 132px 150px 84px 76px 92px"
+  snoozing = tab == :snoozed
 
   total = rows.size
   done = rows.count { |r| r[:settled] }
   active = total - done
   pct = total.zero? ? 100 : (done * 100.0 / total).round
-  hero = rows.find { |r| !r[:settled] }
+  hero = snoozing ? nil : rows.find { |r| !r[:settled] }
   reviews_7d = snap[:reviews_7d]
 %>
 <!DOCTYPE html>
@@ -178,6 +179,11 @@
   .sub { font-size: 11px; color: var(--muted-3); font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
   .cell { font-size: 12px; color: var(--cell); }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
+  .mini { font: 500 11px 'IBM Plex Mono', monospace; padding: 4px 9px; border-radius: 5px;
+          border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--muted);
+          cursor: pointer; opacity: 0.35; transition: opacity 120ms ease; }
+  .row:hover .mini, .hero .mini { opacity: 1; }
+  .mini:hover { background: var(--btn-hover-bg); color: var(--fg); }
 
   /* progress: how much of this view is already dealt with */
   .track { height: 4px; background: var(--track); border-radius: 2px; overflow: hidden; flex: 1; }
@@ -276,6 +282,11 @@
       </div>
     </div>
     <span class="pill" style="background: <%= hero[:state_bg] %>; color: <%= hero[:state_color] %>;"><%= hero[:state] %></span>
+    <form method="post" action="/snooze?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+      <%== csrf_snooze %>
+      <input type="hidden" name="key" value="<%= hero[:key] %>" />
+      <button class="mini" type="submit" title="Hide until there is new activity">Not now</button>
+    </form>
     <a class="go" href="<%= hero[:url] %>" target="_blank" rel="noreferrer">Review it →</a>
   </div>
 <% end %>
@@ -283,7 +294,7 @@
 <div style="padding-bottom: 80px;">
   <div class="grid head">
     <div></div><div>State</div><div>Pull request</div><div>Size</div><div>Last activity</div>
-    <div>My last action</div><div>CI</div><div style="text-align: right;">Waiting</div>
+    <div>My last action</div><div>CI</div><div style="text-align: right;">Waiting</div><div></div>
   </div>
 
   <% rows.each do |r| %>
@@ -321,10 +332,30 @@
         <span class="mono" style="font-size: 11px;"><%= r[:ci] %></span>
       </div>
       <div class="mono" style="text-align: right; font-weight: 500; font-size: 13px; color: <%= r[:age_text_color] %>;"><%= r[:age] %></div>
+      <div style="text-align: right;">
+        <% if snoozing %>
+          <form method="post" action="/unsnooze?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+            <%== csrf_unsnooze %>
+            <input type="hidden" name="key" value="<%= r[:key] %>" />
+            <button class="mini" type="submit" title="Put this back in the queue now">Wake</button>
+          </form>
+        <% else %>
+          <form method="post" action="/snooze?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+            <%== csrf_snooze %>
+            <input type="hidden" name="key" value="<%= r[:key] %>" />
+            <button class="mini" type="submit" title="Hide until there is new activity">Snooze</button>
+          </form>
+        <% end %>
+      </div>
     </div>
   <% end %>
 
-  <% if active.zero? %>
+  <% if snoozing && rows.empty? %>
+    <div style="padding: 72px 24px; text-align: center; color: var(--muted-2); font-size: 13px;">
+      Nothing is snoozed. Use <span class="mono">Snooze</span> on a row to hide it until
+      there is new activity on it.
+    </div>
+  <% elsif active.zero? && !snoozing %>
     <div class="win">
       <div class="win-mark">🎉</div>
       <div class="win-head">

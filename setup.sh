@@ -50,6 +50,7 @@ dokku config:set --no-restart "$APP" \
   RQ_QUICK_LINES=50 \
   RQ_LINES_PER_MIN=20 \
   RQ_IDLE_TTL=3600 \
+  RQ_SNOOZE_DAYS=7 \
   RQ_MAX_USERS=25 \
   RACK_ENV=production
 
