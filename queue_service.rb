@@ -214,13 +214,13 @@ class QueueService
 
     state, state_bg, state_color =
       if settled && pr[:mine]
-        ["Waiting on them", "oklch(0.95 0.01 250)", "oklch(0.45 0.1 250)"]
+        ["Waiting on them", "var(--state-them-bg)", "var(--state-them-fg)"]
       elsif settled
-        ["Reviewed", "oklch(0.955 0.004 70)", "oklch(0.55 0.01 60)"]
+        ["Reviewed", "var(--state-done-bg)", "var(--state-done-fg)"]
       elsif pr[:mine]
-        ["Your turn", "oklch(0.95 0.05 85)", "oklch(0.45 0.11 65)"]
+        ["Your turn", "var(--state-yours-bg)", "var(--state-yours-fg)"]
       else
-        ["To review", "oklch(0.94 0.06 25)", "oklch(0.45 0.14 25)"]
+        ["To review", "var(--state-todo-bg)", "var(--state-todo-fg)"]
       end
 
     chips = []
@@ -235,35 +235,35 @@ class QueueService
       sort_key: (settled ? 10**12 : 0) - (wait_from ? wait_from.to_i : 0),
       url: pr[:url], title: pr[:title], ref: "#{pr[:repo]} ##{pr[:number]}", author: pr[:author],
       state: state, state_bg: state_bg, state_color: state_color, chips: chips,
-      row_bg: settled ? "oklch(0.995 0.002 70)" : "oklch(1 0 0)",
+      row_bg: settled ? "var(--row-settled)" : "var(--row)",
       age_color: bar, age_text_color: text, age: ago(wait_from),
       last_activity: "#{ago(pr.dig(:last, :at))} ago",
       last_actor: pr[:last] ? "#{pr[:last][:who] == login ? "you" : pr[:last][:who]} · #{pr[:last][:kind]}" : "—",
       my_action: pr[:my_last] ? "#{ago(pr[:my_last][:at])} ago" : "never",
       my_action_kind: pr[:my_last] ? pr[:my_last][:kind] : "no activity from you",
       ci: pr[:ci] == :none ? "—" : pr[:ci].to_s,
-      ci_color: {fail: "oklch(0.58 0.17 25)", pass: "oklch(0.68 0.14 150)",
-                 pending: "oklch(0.78 0.13 85)", none: "oklch(0.88 0.005 70)"}[pr[:ci]]
+      ci_color: {fail: "var(--ci-fail)", pass: "var(--ci-pass)",
+                 pending: "var(--ci-pending)", none: "var(--ci-none)"}[pr[:ci]]
     }
   end
 
   def chip(text, tone)
     return nil unless text
     palette = {
-      grey: ["oklch(0.96 0.003 70)", "oklch(0.9 0.006 70)", "oklch(0.6 0.01 60)"],
-      blue: ["oklch(0.96 0.03 250)", "oklch(0.88 0.05 250)", "oklch(0.45 0.1 250)"],
-      violet: ["oklch(0.97 0.02 300)", "oklch(0.9 0.04 300)", "oklch(0.47 0.1 300)"],
-      faint: ["oklch(0.98 0.002 70)", "oklch(0.92 0.006 70)", "oklch(0.62 0.01 60)"]
+      grey: ["var(--chip-grey-bg)", "var(--chip-grey-br)", "var(--chip-grey-fg)"],
+      blue: ["var(--chip-blue-bg)", "var(--chip-blue-br)", "var(--chip-blue-fg)"],
+      violet: ["var(--chip-violet-bg)", "var(--chip-violet-br)", "var(--chip-violet-fg)"],
+      faint: ["var(--chip-faint-bg)", "var(--chip-faint-br)", "var(--chip-faint-fg)"]
     }[tone]
     {text: text, bg: palette[0], border: palette[1], color: palette[2]}
   end
 
   def age_colors(days, settled)
-    return ["oklch(0.9 0.005 70)", "oklch(0.66 0.01 60)"] if settled
-    return ["oklch(0.55 0.17 25)", "oklch(0.48 0.16 25)"] if days >= @stale_days
-    return ["oklch(0.66 0.16 45)", "oklch(0.52 0.14 45)"] if days >= @hot_days
-    return ["oklch(0.78 0.14 85)", "oklch(0.55 0.11 75)"] if days >= @warn_days
-    ["oklch(0.72 0.13 150)", "oklch(0.48 0.1 150)"]
+    return ["var(--age-idle-bar)", "var(--age-idle-fg)"] if settled
+    return ["var(--age-stale-bar)", "var(--age-stale-fg)"] if days >= @stale_days
+    return ["var(--age-hot-bar)", "var(--age-hot-fg)"] if days >= @hot_days
+    return ["var(--age-warn-bar)", "var(--age-warn-fg)"] if days >= @warn_days
+    ["var(--age-fresh-bar)", "var(--age-fresh-fg)"]
   end
 
   def ago(time)

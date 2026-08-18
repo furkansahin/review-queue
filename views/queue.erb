@@ -15,36 +15,149 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
-  body { margin: 0; background: oklch(0.985 0.004 70); color: oklch(0.26 0.01 60);
+  /* Light is the base palette; the dark block below only redefines the tokens.
+     Row colours (state pills, age bars, CI dots, chips) are emitted as
+     var(--...) by queue_service.rb, so both themes resolve from here. */
+  :root {
+    color-scheme: light;
+    --bg: oklch(0.985 0.004 70);
+    --fg: oklch(0.26 0.01 60);
+    --surface: oklch(1 0 0);
+    --border: oklch(0.9 0.006 70);
+    --border-soft: oklch(0.94 0.004 70);
+    --border-head: oklch(0.92 0.006 70);
+    --muted: oklch(0.58 0.01 60);
+    --muted-2: oklch(0.62 0.01 60);
+    --muted-3: oklch(0.65 0.01 60);
+    --cell: oklch(0.45 0.01 60);
+    --link: oklch(0.45 0.11 250);
+    --link-hover: oklch(0.38 0.13 250);
+    --accent: oklch(0.45 0.11 250);
+    --tab-on-fg: oklch(0.28 0.02 250);
+    --tab-hover-fg: oklch(0.35 0.01 60);
+    --badge-bg: oklch(0.96 0.004 70);
+    --badge-fg: oklch(0.6 0.01 60);
+    --badge-on-bg: oklch(0.95 0.03 250);
+    --badge-on-fg: oklch(0.45 0.1 250);
+    --btn-bg: oklch(1 0 0);
+    --btn-border: oklch(0.88 0.006 70);
+    --btn-fg: oklch(0.3 0.01 60);
+    --btn-hover-bg: oklch(0.96 0.004 70);
+    --row-hover: oklch(0.965 0.004 70);
+    --tag-bg: oklch(0.96 0.004 70);
+    --tag-border: oklch(0.91 0.006 70);
+    --tag-fg: oklch(0.55 0.01 60);
+    --err-bg: oklch(0.97 0.02 25);
+    --err-border: oklch(0.82 0.09 25);
+    --err-fg: oklch(0.42 0.12 25);
+
+    --row: oklch(1 0 0);
+    --row-settled: oklch(0.995 0.002 70);
+    --state-them-bg: oklch(0.95 0.01 250);   --state-them-fg: oklch(0.45 0.1 250);
+    --state-done-bg: oklch(0.955 0.004 70);  --state-done-fg: oklch(0.55 0.01 60);
+    --state-yours-bg: oklch(0.95 0.05 85);   --state-yours-fg: oklch(0.45 0.11 65);
+    --state-todo-bg: oklch(0.94 0.06 25);    --state-todo-fg: oklch(0.45 0.14 25);
+    --age-idle-bar: oklch(0.9 0.005 70);     --age-idle-fg: oklch(0.66 0.01 60);
+    --age-stale-bar: oklch(0.55 0.17 25);    --age-stale-fg: oklch(0.48 0.16 25);
+    --age-hot-bar: oklch(0.66 0.16 45);      --age-hot-fg: oklch(0.52 0.14 45);
+    --age-warn-bar: oklch(0.78 0.14 85);     --age-warn-fg: oklch(0.55 0.11 75);
+    --age-fresh-bar: oklch(0.72 0.13 150);   --age-fresh-fg: oklch(0.48 0.1 150);
+    --ci-fail: oklch(0.58 0.17 25);
+    --ci-pass: oklch(0.68 0.14 150);
+    --ci-pending: oklch(0.78 0.13 85);
+    --ci-none: oklch(0.88 0.005 70);
+    --chip-grey-bg: oklch(0.96 0.003 70);    --chip-grey-br: oklch(0.9 0.006 70);    --chip-grey-fg: oklch(0.6 0.01 60);
+    --chip-blue-bg: oklch(0.96 0.03 250);    --chip-blue-br: oklch(0.88 0.05 250);   --chip-blue-fg: oklch(0.45 0.1 250);
+    --chip-violet-bg: oklch(0.97 0.02 300);  --chip-violet-br: oklch(0.9 0.04 300);  --chip-violet-fg: oklch(0.47 0.1 300);
+    --chip-faint-bg: oklch(0.98 0.002 70);   --chip-faint-br: oklch(0.92 0.006 70);  --chip-faint-fg: oklch(0.62 0.01 60);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: oklch(0.19 0.006 70);
+      --fg: oklch(0.91 0.006 70);
+      --surface: oklch(0.235 0.006 70);
+      --border: oklch(0.32 0.008 70);
+      --border-soft: oklch(0.28 0.007 70);
+      --border-head: oklch(0.31 0.008 70);
+      --muted: oklch(0.66 0.008 70);
+      --muted-2: oklch(0.6 0.008 70);
+      --muted-3: oklch(0.63 0.008 70);
+      --cell: oklch(0.78 0.008 70);
+      --link: oklch(0.76 0.1 250);
+      --link-hover: oklch(0.84 0.11 250);
+      --accent: oklch(0.7 0.12 250);
+      --tab-on-fg: oklch(0.85 0.07 250);
+      --tab-hover-fg: oklch(0.86 0.008 70);
+      --badge-bg: oklch(0.3 0.006 70);
+      --badge-fg: oklch(0.7 0.008 70);
+      --badge-on-bg: oklch(0.33 0.06 250);
+      --badge-on-fg: oklch(0.83 0.09 250);
+      --btn-bg: oklch(0.28 0.007 70);
+      --btn-border: oklch(0.38 0.009 70);
+      --btn-fg: oklch(0.88 0.006 70);
+      --btn-hover-bg: oklch(0.33 0.008 70);
+      --row-hover: oklch(0.28 0.008 70);
+      --tag-bg: oklch(0.28 0.006 70);
+      --tag-border: oklch(0.35 0.008 70);
+      --tag-fg: oklch(0.72 0.008 70);
+      --err-bg: oklch(0.27 0.05 25);
+      --err-border: oklch(0.44 0.1 25);
+      --err-fg: oklch(0.83 0.11 25);
+
+      --row: oklch(0.235 0.006 70);
+      --row-settled: oklch(0.215 0.005 70);
+      --state-them-bg: oklch(0.31 0.05 250);   --state-them-fg: oklch(0.82 0.09 250);
+      --state-done-bg: oklch(0.29 0.005 70);   --state-done-fg: oklch(0.72 0.008 70);
+      --state-yours-bg: oklch(0.33 0.06 85);   --state-yours-fg: oklch(0.87 0.1 85);
+      --state-todo-bg: oklch(0.32 0.07 25);    --state-todo-fg: oklch(0.85 0.1 25);
+      --age-idle-bar: oklch(0.38 0.006 70);    --age-idle-fg: oklch(0.62 0.008 70);
+      --age-stale-bar: oklch(0.62 0.18 25);    --age-stale-fg: oklch(0.75 0.15 25);
+      --age-hot-bar: oklch(0.7 0.16 45);       --age-hot-fg: oklch(0.8 0.13 45);
+      --age-warn-bar: oklch(0.8 0.14 85);      --age-warn-fg: oklch(0.85 0.12 85);
+      --age-fresh-bar: oklch(0.72 0.14 150);   --age-fresh-fg: oklch(0.8 0.12 150);
+      --ci-fail: oklch(0.64 0.18 25);
+      --ci-pass: oklch(0.72 0.15 150);
+      --ci-pending: oklch(0.81 0.13 85);
+      --ci-none: oklch(0.42 0.006 70);
+      --chip-grey-bg: oklch(0.29 0.005 70);    --chip-grey-br: oklch(0.37 0.008 70);   --chip-grey-fg: oklch(0.72 0.008 70);
+      --chip-blue-bg: oklch(0.3 0.045 250);    --chip-blue-br: oklch(0.41 0.06 250);   --chip-blue-fg: oklch(0.8 0.09 250);
+      --chip-violet-bg: oklch(0.31 0.045 300); --chip-violet-br: oklch(0.41 0.06 300); --chip-violet-fg: oklch(0.81 0.08 300);
+      --chip-faint-bg: oklch(0.25 0.004 70);   --chip-faint-br: oklch(0.33 0.006 70);  --chip-faint-fg: oklch(0.64 0.008 70);
+    }
+  }
+
+  body { margin: 0; background: var(--bg); color: var(--fg);
          font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
-  a { color: oklch(0.45 0.11 250); text-decoration: none; }
-  a:hover { color: oklch(0.38 0.13 250); text-decoration: underline; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
   .mono { font-family: 'IBM Plex Mono', monospace; }
-  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: oklch(1 0 0);
-         border-bottom: 1px solid oklch(0.9 0.006 70); position: sticky; top: 0; z-index: 5; }
-  .btn { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 6px 14px; border: 1px solid oklch(0.88 0.006 70);
-         background: oklch(1 0 0); border-radius: 6px; cursor: pointer; color: oklch(0.3 0.01 60); }
-  .btn:hover { background: oklch(0.96 0.004 70); }
-  .tabs { display: flex; align-items: stretch; padding: 0 24px; background: oklch(1 0 0);
-          border-bottom: 1px solid oklch(0.9 0.006 70); }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
+         border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  .btn { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 6px 14px; border: 1px solid var(--btn-border);
+         background: var(--btn-bg); border-radius: 6px; cursor: pointer; color: var(--btn-fg); }
+  .btn:hover { background: var(--btn-hover-bg); }
+  .tabs { display: flex; align-items: stretch; padding: 0 24px; background: var(--surface);
+          border-bottom: 1px solid var(--border); }
   .tab { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 11px 14px; display: flex; align-items: center;
-         gap: 7px; border-bottom: 2px solid transparent; color: oklch(0.58 0.01 60); margin-bottom: -1px; }
-  .tab:hover { text-decoration: none; color: oklch(0.35 0.01 60); }
-  .tab.on { border-bottom-color: oklch(0.45 0.11 250); color: oklch(0.28 0.02 250); }
-  .badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: oklch(0.96 0.004 70);
-           color: oklch(0.6 0.01 60); padding: 2px 6px; border-radius: 10px; }
-  .tab.on .badge { background: oklch(0.95 0.03 250); color: oklch(0.45 0.1 250); }
+         gap: 7px; border-bottom: 2px solid transparent; color: var(--muted); margin-bottom: -1px; }
+  .tab:hover { text-decoration: none; color: var(--tab-hover-fg); }
+  .tab.on { border-bottom-color: var(--accent); color: var(--tab-on-fg); }
+  .badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: var(--badge-bg);
+           color: var(--badge-fg); padding: 2px 6px; border-radius: 10px; }
+  .tab.on .badge { background: var(--badge-on-bg); color: var(--badge-on-fg); }
   .grid { display: grid; grid-template-columns: <%= cols %>; align-items: center; }
   .head { padding: 9px 24px 9px 20px; font-family: 'IBM Plex Mono', monospace; font-size: 10px;
-          letter-spacing: 0.08em; text-transform: uppercase; color: oklch(0.62 0.01 60);
-          border-bottom: 1px solid oklch(0.92 0.006 70); }
-  .row { padding: 11px 24px 11px 20px; border-bottom: 1px solid oklch(0.94 0.004 70); }
-  .row:hover { background: oklch(0.965 0.004 70) !important; }
+          letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2);
+          border-bottom: 1px solid var(--border-head); }
+  .row { padding: 11px 24px 11px 20px; border-bottom: 1px solid var(--border-soft); }
+  .row:hover { background: var(--row-hover) !important; }
   .pill { font: 500 11px 'IBM Plex Mono', monospace; padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
   .chip { font-size: 10px; font-family: 'IBM Plex Mono', monospace; padding: 2px 6px; border-radius: 3px; border: 1px solid; }
   .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sub { font-size: 11px; color: oklch(0.65 0.01 60); font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
-  .cell { font-size: 12px; color: oklch(0.45 0.01 60); }
+  .sub { font-size: 11px; color: var(--muted-3); font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
+  .cell { font-size: 12px; color: var(--cell); }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
 </style>
 </head>
@@ -52,12 +165,12 @@
 
 <div class="bar">
   <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Review queue</div>
-  <div class="mono" style="font-size: 12px; color: oklch(0.55 0.01 60); background: oklch(0.96 0.004 70);
-       border: 1px solid oklch(0.91 0.006 70); padding: 3px 8px; border-radius: 4px;">
+  <div class="mono" style="font-size: 12px; color: var(--tag-fg); background: var(--tag-bg);
+       border: 1px solid var(--tag-border); padding: 3px 8px; border-radius: 4px;">
     <%= service.scope %> · label:<%= service.label %>
   </div>
   <div style="flex: 1;"></div>
-  <div class="mono" style="font-size: 11px; color: oklch(0.6 0.01 60);">
+  <div class="mono" style="font-size: 11px; color: var(--muted-2);">
     <% meta = [] %>
     <% meta << "@#{snap[:login]}" if snap[:login] %>
     <% meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at] %>
@@ -78,14 +191,14 @@
     </a>
   <% end %>
   <div style="flex: 1;"></div>
-  <a class="tab" href="<%= qs.call(tab, !hide) %>" style="color: oklch(0.5 0.01 60);">
+  <a class="tab" href="<%= qs.call(tab, !hide) %>" style="color: var(--muted);">
     <%= hide ? "Show settled" : "Hide settled" %>
   </a>
 </div>
 
 <% if snap[:error] %>
-  <div class="mono" style="margin: 24px; padding: 12px 16px; border: 1px solid oklch(0.82 0.09 25);
-       background: oklch(0.97 0.02 25); border-radius: 8px; font-size: 12px; color: oklch(0.42 0.12 25);">
+  <div class="mono" style="margin: 24px; padding: 12px 16px; border: 1px solid var(--err-border);
+       background: var(--err-bg); border-radius: 8px; font-size: 12px; color: var(--err-fg);">
     <%= snap[:error] %>
   </div>
 <% end %>
@@ -105,10 +218,10 @@
       <div style="min-width: 0; padding-right: 24px;">
         <div style="display: flex; align-items: baseline; gap: 8px;">
           <a class="title" href="<%= r[:url] %>" target="_blank" rel="noreferrer"><%= r[:title] %></a>
-          <span class="mono" style="font-size: 11px; color: oklch(0.65 0.01 60); flex: none;"><%= r[:ref] %></span>
+          <span class="mono" style="font-size: 11px; color: var(--muted-3); flex: none;"><%= r[:ref] %></span>
         </div>
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
-          <span class="mono" style="font-size: 11px; color: oklch(0.58 0.01 60);"><%= r[:author] %></span>
+          <span class="mono" style="font-size: 11px; color: var(--muted);"><%= r[:author] %></span>
           <% r[:chips].each do |c| %>
             <span class="chip" style="background: <%= c[:bg] %>; border-color: <%= c[:border] %>; color: <%= c[:color] %>;"><%= c[:text] %></span>
           <% end %>
@@ -131,7 +244,7 @@
   <% end %>
 
   <% if rows.empty? %>
-    <div style="padding: 80px 24px; text-align: center; color: oklch(0.62 0.01 60); font-size: 13px;">
+    <div style="padding: 80px 24px; text-align: center; color: var(--muted-2); font-size: 13px;">
       <%= hide ? "Nothing waiting on you." : "No open pull requests matched." %>
     </div>
   <% end %>
