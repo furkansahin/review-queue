@@ -222,7 +222,9 @@
   <div class="mono" style="font-size: 11px; color: var(--muted-2);">
     <% meta = [] %>
     <% meta << "@#{login}" if login %>
-    <% meta << "#{reviews_7d} reviewed this week" if reviews_7d %>
+    <% if reviews_7d %>
+      <% meta << "#{reviews_7d[:count]}#{reviews_7d[:complete] ? "" : "+"} reviewed this week" %>
+    <% end %>
     <% meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at] %>
     <% meta << "#{snap[:rate]} api calls left" if snap[:rate] %>
     <%= meta.join("  ·  ") %>
@@ -362,8 +364,9 @@
         <%= total.zero? ? "Nothing in the queue." : "Queue clear — nothing waiting on you." %>
       </div>
       <div class="mono" style="margin-top: 8px; font-size: 12px; color: var(--muted-2);">
-        <% if reviews_7d && reviews_7d.positive? %>
-          <%= reviews_7d %> <%= reviews_7d == 1 ? "review" : "reviews" %> in the last 7 days<%= done.positive? ? " · #{done} settled here" : "" %>
+        <% if reviews_7d && reviews_7d[:count].positive? %>
+          <%= reviews_7d[:count] %><%= reviews_7d[:complete] ? "" : "+" %>
+          <%= reviews_7d[:count] == 1 ? "pull request" : "pull requests" %> reviewed in the last 7 days<%= done.positive? ? " · #{done} settled here" : "" %>
         <% else %>
           <%= hide ? "Nothing waiting on you." : "No open pull requests matched." %>
         <% end %>

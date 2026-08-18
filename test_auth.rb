@@ -19,7 +19,7 @@ GitHubClient.class_eval do
     raise "unexpected #{path}"
   end
 end
-QueueService.class_eval { define_method(:snapshot) { |force: false| {rows: [], counts: {}, login: STUB[:login], fetched_at: Time.now, rate: 5000, error: nil, reviews_7d: 0} } }
+QueueService.class_eval { define_method(:snapshot) { |force: false| {rows: [], counts: {}, login: STUB[:login], fetched_at: Time.now, rate: 5000, error: nil, reviews_7d: {count: 0, complete: true}} } }
 
 include Rack::Test::Methods
 def app = ReviewQueue.freeze.app

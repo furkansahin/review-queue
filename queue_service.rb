@@ -124,20 +124,74 @@ class QueueService
     rows = prs.map { |pr| row(pr, login) }.sort_by { |r| r[:sort_key] }
 
     {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
-     counts: counts(rows), reviews_7d: reviews_this_week(prs)}
+     counts: counts(rows), reviews_7d: reviews_this_week(login)}
   end
 
-  # Reviews I posted in the last 7 days. Derived from timelines already
-  # fetched, so it costs no extra API calls -- but it only sees PRs still
-  # matching RQ_SCOPE, so it undercounts once a PR drops out of the queue.
-  REVIEW_KINDS = ["approved", "changes requested", "review", "review comment"].freeze
+  # Pull requests you reviewed in the last 7 days.
+  #
+  # This must NOT come from the queue. GitHub removes you from the requested
+  # reviewers as soon as you submit a review, and a reviewed pull request is
+  # usually merged soon after. So a reviewed pull request leaves the queue
+  # almost immediately, and counting inside the queue returns close to zero
+  # every time. The public events feed holds the real review events instead,
+  # with their own timestamps, and it still sees closed pull requests.
+  #
+  # Cost is one extra API call for each rebuild. The feed holds public events
+  # only, which is sufficient because RQ_SCOPE must be public repos anyway.
+  # Returns {count:, complete:}. complete is false when the pages we read did
+  # not reach back past the cutoff, so the count is a floor, not a total.
+  # Returns nil when the feed cannot be read, and then the page shows nothing.
+  MAX_EVENT_PAGES = 3
 
-  def reviews_this_week(prs)
-    cutoff = Time.now - (7 * 86_400)
-    prs.count do |pr|
-      m = pr[:my_last]
-      m && !pr[:mine] && m[:at] >= cutoff && REVIEW_KINDS.include?(m[:kind])
+  def reviews_this_week(login, now: Time.now)
+    cutoff = now - (7 * 86_400)
+    seen = {}
+    oldest = nil
+    read_any = false
+
+    (1..MAX_EVENT_PAGES).each do |page|
+      events = @gh.try("/users/#{login}/events/public?per_page=100&page=#{page}")
+      break unless events.is_a?(Array)
+      read_any = true
+      break if events.empty?
+
+      events.each do |e|
+        at = begin
+          Time.parse(e["created_at"].to_s)
+        rescue StandardError
+          next
+        end
+        oldest = at if oldest.nil? || at < oldest
+        next unless e["type"] == "PullRequestReviewEvent"
+        next if at < cutoff
+        repo = e.dig("repo", "name")
+        next unless in_scope?(repo)
+        number = e.dig("payload", "pull_request", "number")
+        seen["#{repo}##{number}"] = true
+      end
+      break if oldest && oldest < cutoff
     end
+
+    return nil unless read_any
+    {count: seen.size, complete: !!(oldest && oldest < cutoff)}
+  end
+
+  # RQ_SCOPE is a GitHub search fragment. Read the repositories and the owners
+  # out of it, so the event feed can be limited to the same repositories.
+  def scope_repos
+    @scope_repos ||= @scope.scan(%r{repo:([\w.\-]+/[\w.\-]+)}i).flatten.map(&:downcase)
+  end
+
+  def scope_owners
+    @scope_owners ||= @scope.scan(/(?:org|user|owner):([\w.\-]+)/i).flatten.map(&:downcase)
+  end
+
+  def in_scope?(full_name)
+    return false unless full_name
+    name = full_name.downcase
+    return true if scope_repos.include?(name)
+    return true if scope_owners.include?(name.split("/").first)
+    scope_repos.empty? && scope_owners.empty?
   end
 
   def threaded(items)

@@ -29,7 +29,7 @@ GitHubClient.class_eval { define_method(:get) { |_| {"login" => "furkansahin"} }
 QueueService.class_eval do
   define_method(:snapshot) do |force: false|
     {rows: [mkrow("o/r#1", 5), mkrow("o/r#2", 2)], counts: {}, login: "furkansahin",
-     fetched_at: NOW, rate: 5000, error: nil, reviews_7d: 0}
+     fetched_at: NOW, rate: 5000, error: nil, reviews_7d: {count: 0, complete: true}}
   end
 end
 

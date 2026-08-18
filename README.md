@@ -35,9 +35,16 @@ The **Size** column estimates reading time from the diff churn at `RQ_LINES_PER_
 lines per minute. **Quick wins** filters to non-draft PRs of `RQ_QUICK_LINES` churn or
 less — the cheapest way to make the number go down.
 
-`N reviewed this week` in the header counts reviews you posted in the last 7 days. It is
-derived from timelines already fetched, so it costs no extra API calls, but it only sees
-PRs still matching `RQ_SCOPE` and undercounts once a PR drops out of the queue.
+`N reviewed this week` in the header counts the pull requests you reviewed in the last 7
+days. It reads your public events feed, not the queue. This matters: GitHub removes you from
+the requested reviewers as soon as you submit a review, and a reviewed pull request is usually
+merged soon after, so a reviewed pull request leaves the queue almost immediately. An earlier
+version counted inside the queue and showed `0` while 25 reviews had been done that week.
+
+The feed costs one extra API call for each rebuild. It holds **public** events only, which is
+sufficient because `RQ_SCOPE` must be public repositories anyway — if you ever add a private
+repository, this counter stops seeing those reviews. A `+` after the number (`18+`) means the
+pages read did not reach back a full 7 days, so the number is a floor, not a total.
 
 ## Snooze
 
