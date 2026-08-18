@@ -30,7 +30,7 @@ Snapshots cache for `RQ_CACHE_TTL` seconds; the page self-refreshes every 3 minu
 app.rb             routes, HTTP basic auth, env config
 queue_service.rb   GitHub client, threaded fetch, timeline/state/age logic, TTL cache
 views/queue.erb    the table (no JS — tabs and filters are links)
-Procfile CHECKS    Dokku process + zero-downtime health check
+Procfile app.json  Dokku process + zero-downtime health check
 setup.sh           one-shot dokku app create + config:set
 ```
 

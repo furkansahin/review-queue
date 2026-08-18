@@ -1,0 +1,16 @@
+{
+  "healthchecks": {
+    "web": [
+      {
+        "type": "startup",
+        "name": "healthz",
+        "description": "GET /healthz must return ok before traffic switches over",
+        "path": "/healthz",
+        "content": "ok",
+        "attempts": 6,
+        "wait": 5,
+        "timeout": 20
+      }
+    ]
+  }
+}
