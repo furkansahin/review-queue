@@ -177,7 +177,11 @@
   .chip { font-size: 10px; font-family: 'IBM Plex Mono', monospace; padding: 2px 6px; border-radius: 3px; border: 1px solid; }
   .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { font-size: 11px; color: var(--muted-3); font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
-  .cell { font-size: 12px; color: var(--cell); }
+  /* padding-right is the gutter: without it a full-width cell runs straight
+     into the next column and reads as one word ("pushreview"). min-width and
+     the ellipsis keep a long login on one line instead of wrapping. */
+  .cell { font-size: 12px; color: var(--cell); min-width: 0; padding-right: 14px; }
+  .cell > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
   .mini { font: 500 11px 'IBM Plex Mono', monospace; padding: 4px 9px; border-radius: 5px;
           border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--muted);
@@ -323,11 +327,11 @@
       </div>
       <div class="cell">
         <div><%= r[:last_activity] %></div>
-        <div class="sub"><%= r[:last_actor] %></div>
+        <div class="sub" title="<%= r[:last_actor] %>"><%= r[:last_actor] %></div>
       </div>
       <div class="cell">
         <div><%= r[:my_action] %></div>
-        <div class="sub"><%= r[:my_action_kind] %></div>
+        <div class="sub" title="<%= r[:my_action_kind] %>"><%= r[:my_action_kind] %></div>
       </div>
       <div class="cell" style="display: flex; align-items: center; gap: 6px;">
         <span class="dot" style="background: <%= r[:ci_color] %>;"></span>
