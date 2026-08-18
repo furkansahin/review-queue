@@ -2,7 +2,7 @@
   tabs = [{key: :all, label: "All"}] + service.buckets.map { |b| {key: b[:key], label: b[:label]} }
   counts = snap[:counts] || {}
   qs = ->(t, h) { "/?tab=#{t}#{h ? "&hide=1" : ""}" }
-  cols = "4px 108px 1fr 132px 150px 84px 76px"
+  cols = "4px 132px 1fr 132px 150px 84px 76px"
 %>
 <!DOCTYPE html>
 <html lang="en">

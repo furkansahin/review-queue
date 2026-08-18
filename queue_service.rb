@@ -232,7 +232,11 @@ class QueueService
 
     {
       buckets: pr[:buckets], settled: settled,
-      sort_key: (settled ? 10**12 : 0) - (wait_from ? wait_from.to_i : 0),
+      # Reddest first: oldest wait_from means most days waiting, which is what
+      # age_colors ramps red. Settled rows ("Reviewed" / "Waiting on them") are
+      # grey regardless of age, so they sink below everything. A row with no
+      # timeline events reads as fresh, so it sorts last within its group.
+      sort_key: [settled ? 1 : 0, wait_from ? wait_from.to_i : Float::INFINITY],
       url: pr[:url], title: pr[:title], ref: "#{pr[:repo]} ##{pr[:number]}", author: pr[:author],
       state: state, state_bg: state_bg, state_color: state_color, chips: chips,
       row_bg: settled ? "var(--row-settled)" : "var(--row)",
