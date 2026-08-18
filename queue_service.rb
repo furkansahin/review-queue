@@ -42,7 +42,10 @@ end
 class QueueService
   BUCKET_LABELS = {review: "Review requested", mention: "Mentions me", label: nil, mine: "My PRs"}.freeze
 
-  def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 5, per_page: 50)
+  # quick_lines: churn at or below which a PR counts as a "quick win".
+  # lines_per_min: rough review-reading rate behind the "~3m" estimate.
+  def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 5, per_page: 50,
+    quick_lines: 50, lines_per_min: 20)
     @gh = GitHubClient.new(token)
     @scope = scope
     @label = label
@@ -52,11 +55,13 @@ class QueueService
     @ttl = ttl
     @concurrency = concurrency
     @per_page = per_page
+    @quick_lines = quick_lines
+    @lines_per_min = lines_per_min
     @lock = Mutex.new
     @snapshot = nil
   end
 
-  attr_reader :scope, :label
+  attr_reader :scope, :label, :quick_lines
 
   def buckets
     [
@@ -65,6 +70,12 @@ class QueueService
       {key: :label, label: @label, q: %(#{@scope} is:open is:pr label:"#{@label}")},
       {key: :mine, label: "My PRs", q: "#{@scope} is:open is:pr author:@me"}
     ]
+  end
+
+  def tabs
+    [{key: :all, label: "All"}] +
+      buckets.map { |b| {key: b[:key], label: b[:label]} } +
+      [{key: :quick, label: "Quick wins"}]
   end
 
   def snapshot(force: false)
@@ -104,14 +115,27 @@ class QueueService
     rows = prs.map { |pr| row(pr, login) }.sort_by { |r| r[:sort_key] }
 
     {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
-     counts: counts(rows)}
+     counts: counts(rows), reviews_7d: reviews_this_week(prs)}
+  end
+
+  # Reviews I posted in the last 7 days. Derived from timelines already
+  # fetched, so it costs no extra API calls -- but it only sees PRs still
+  # matching RQ_SCOPE, so it undercounts once a PR drops out of the queue.
+  REVIEW_KINDS = ["approved", "changes requested", "review", "review comment"].freeze
+
+  def reviews_this_week(prs)
+    cutoff = Time.now - (7 * 86_400)
+    prs.count do |pr|
+      m = pr[:my_last]
+      m && !pr[:mine] && m[:at] >= cutoff && REVIEW_KINDS.include?(m[:kind])
+    end
   end
 
   def counts(rows)
     out = {all: {open: rows.count { |r| !r[:settled] }, total: rows.size}}
-    buckets.each do |b|
-      in_b = rows.select { |r| r[:buckets].include?(b[:key]) }
-      out[b[:key]] = {open: in_b.count { |r| !r[:settled] }, total: in_b.size}
+    (buckets.map { |b| b[:key] } + [:quick]).each do |key|
+      in_b = rows.select { |r| r[:buckets].include?(key) }
+      out[key] = {open: in_b.count { |r| !r[:settled] }, total: in_b.size}
     end
     out
   end
@@ -223,15 +247,19 @@ class QueueService
         ["To review", "var(--state-todo-bg)", "var(--state-todo-fg)"]
       end
 
+    churn = pr[:churn].to_i
+    # A quick win is small and not a draft. Deliberately independent of whether
+    # it is settled -- the "Hide settled" toggle already covers that axis.
+    quick = churn.positive? && churn <= @quick_lines && !pr[:draft]
+
     chips = []
     chips << chip(pr[:draft] ? "draft" : nil, :grey)
     pr[:labels].select { |l| l.downcase == @label.downcase }.each { |l| chips << chip(l, :blue) }
     chips << chip("@#{login}", :violet) if pr[:buckets].include?(:mention)
-    chips << chip(pr[:changed] ? "#{pr[:changed]} files ±#{pr[:churn]}" : nil, :faint)
     chips.compact!
 
     {
-      buckets: pr[:buckets], settled: settled,
+      buckets: pr[:buckets] + (quick ? [:quick] : []), settled: settled,
       # Reddest first: oldest wait_from means most days waiting, which is what
       # age_colors ramps red. Settled rows ("Reviewed" / "Waiting on them") are
       # grey regardless of age, so they sink below everything. A row with no
@@ -245,6 +273,9 @@ class QueueService
       last_actor: pr[:last] ? "#{pr[:last][:who] == login ? "you" : pr[:last][:who]} · #{pr[:last][:kind]}" : "—",
       my_action: pr[:my_last] ? "#{ago(pr[:my_last][:at])} ago" : "never",
       my_action_kind: pr[:my_last] ? pr[:my_last][:kind] : "no activity from you",
+      quick: quick, churn: churn, changed: pr[:changed].to_i,
+      read_est: churn.positive? ? "~#{[(churn / @lines_per_min.to_f).ceil, 1].max}m" : "—",
+      size_sub: churn.positive? ? "±#{churn} · #{pr[:changed].to_i}f" : "no diff data",
       ci: pr[:ci] == :none ? "—" : pr[:ci].to_s,
       ci_color: {fail: "var(--ci-fail)", pass: "var(--ci-pass)",
                  pending: "var(--ci-pending)", none: "var(--ci-none)"}[pr[:ci]]

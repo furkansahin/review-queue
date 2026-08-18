@@ -1,8 +1,15 @@
 <%
-  tabs = [{key: :all, label: "All"}] + service.buckets.map { |b| {key: b[:key], label: b[:label]} }
+  tabs = service.tabs
   counts = snap[:counts] || {}
   qs = ->(t, h) { "/?tab=#{t}#{h ? "&hide=1" : ""}" }
-  cols = "4px 132px 1fr 132px 150px 84px 76px"
+  cols = "4px 132px 1fr 92px 132px 150px 84px 76px"
+
+  total = rows.size
+  done = rows.count { |r| r[:settled] }
+  active = total - done
+  pct = total.zero? ? 100 : (done * 100.0 / total).round
+  hero = rows.find { |r| !r[:settled] }
+  reviews_7d = snap[:reviews_7d]
 %>
 <!DOCTYPE html>
 <html lang="en">
@@ -10,7 +17,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="refresh" content="180" />
-<title>Review queue</title>
+<title><%= active.zero? ? "" : "(#{active}) " %>Review queue</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -50,6 +57,12 @@
     --err-bg: oklch(0.97 0.02 25);
     --err-border: oklch(0.82 0.09 25);
     --err-fg: oklch(0.42 0.12 25);
+    --hero-bg: oklch(0.985 0.012 250);
+    --hero-border: oklch(0.88 0.04 250);
+    --track: oklch(0.93 0.005 70);
+    --track-fill: oklch(0.72 0.13 150);
+    --win-fg: oklch(0.5 0.13 150);
+    --quick-fg: oklch(0.48 0.12 150);
 
     --row: oklch(1 0 0);
     --row-settled: oklch(0.995 0.002 70);
@@ -105,6 +118,12 @@
       --err-bg: oklch(0.27 0.05 25);
       --err-border: oklch(0.44 0.1 25);
       --err-fg: oklch(0.83 0.11 25);
+      --hero-bg: oklch(0.255 0.025 250);
+      --hero-border: oklch(0.4 0.06 250);
+      --track: oklch(0.3 0.006 70);
+      --track-fill: oklch(0.68 0.14 150);
+      --win-fg: oklch(0.79 0.13 150);
+      --quick-fg: oklch(0.77 0.12 150);
 
       --row: oklch(0.235 0.006 70);
       --row-settled: oklch(0.215 0.005 70);
@@ -159,6 +178,30 @@
   .sub { font-size: 11px; color: var(--muted-3); font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
   .cell { font-size: 12px; color: var(--cell); }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
+
+  /* progress: how much of this view is already dealt with */
+  .track { height: 4px; background: var(--track); border-radius: 2px; overflow: hidden; flex: 1; }
+  .fill { height: 100%; background: var(--track-fill); border-radius: 2px; transition: width 400ms ease; }
+
+  /* hero: the single next thing to review */
+  .hero { margin: 16px 24px 4px; padding: 14px 18px; background: var(--hero-bg);
+          border: 1px solid var(--hero-border); border-radius: 10px;
+          display: flex; align-items: center; gap: 16px; }
+  .hero-label { font: 600 10px 'IBM Plex Mono', monospace; letter-spacing: 0.1em;
+                text-transform: uppercase; color: var(--muted-2); }
+  .go { font: 600 13px 'IBM Plex Sans', sans-serif; padding: 8px 16px; border-radius: 7px;
+        background: var(--accent); color: var(--surface); white-space: nowrap; }
+  .go:hover { text-decoration: none; color: var(--surface); filter: brightness(1.08); }
+
+  .win { padding: 72px 24px; text-align: center; animation: pop 420ms ease-out; }
+  .win-mark { font-size: 40px; line-height: 1; animation: bob 2.6s ease-in-out infinite; }
+  .win-head { margin-top: 14px; font-weight: 600; font-size: 20px; color: var(--win-fg); }
+  @keyframes pop { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .win, .win-mark { animation: none; }
+    .fill { transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -173,6 +216,7 @@
   <div class="mono" style="font-size: 11px; color: var(--muted-2);">
     <% meta = [] %>
     <% meta << "@#{snap[:login]}" if snap[:login] %>
+    <% meta << "#{reviews_7d} reviewed this week" if reviews_7d %>
     <% meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at] %>
     <% meta << "#{snap[:rate]} api calls left" if snap[:rate] %>
     <%= meta.join("  ·  ") %>
@@ -196,6 +240,16 @@
   </a>
 </div>
 
+<% unless total.zero? %>
+  <div style="display: flex; align-items: center; gap: 12px; padding: 10px 24px 0;">
+    <div class="mono" style="font-size: 11px; color: var(--muted-2); white-space: nowrap;">
+      <%= active %> to go<%= done.positive? ? " · #{done} done" : "" %>
+    </div>
+    <div class="track"><div class="fill" style="width: <%= pct %>%;"></div></div>
+    <div class="mono" style="font-size: 11px; color: var(--muted-2);"><%= pct %>%</div>
+  </div>
+<% end %>
+
 <% if snap[:error] %>
   <div class="mono" style="margin: 24px; padding: 12px 16px; border: 1px solid var(--err-border);
        background: var(--err-bg); border-radius: 8px; font-size: 12px; color: var(--err-fg);">
@@ -203,9 +257,27 @@
   </div>
 <% end %>
 
+<% if hero %>
+  <div class="hero">
+    <div style="min-width: 0; flex: 1;">
+      <div class="hero-label">Next up<%= hero[:quick] ? " · quick win" : "" %></div>
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 5px;">
+        <a class="title" href="<%= hero[:url] %>" target="_blank" rel="noreferrer"
+           style="font-size: 15px;"><%= hero[:title] %></a>
+        <span class="mono" style="font-size: 11px; color: var(--muted-3); flex: none;"><%= hero[:ref] %></span>
+      </div>
+      <div class="mono" style="font-size: 11px; color: var(--muted); margin-top: 6px;">
+        <%= hero[:read_est] %> read · <%= hero[:size_sub] %> · waiting <%= hero[:age] %> · <%= hero[:author] %>
+      </div>
+    </div>
+    <span class="pill" style="background: <%= hero[:state_bg] %>; color: <%= hero[:state_color] %>;"><%= hero[:state] %></span>
+    <a class="go" href="<%= hero[:url] %>" target="_blank" rel="noreferrer">Review it →</a>
+  </div>
+<% end %>
+
 <div style="padding-bottom: 80px;">
   <div class="grid head">
-    <div></div><div>State</div><div>Pull request</div><div>Last activity</div>
+    <div></div><div>State</div><div>Pull request</div><div>Size</div><div>Last activity</div>
     <div>My last action</div><div>CI</div><div style="text-align: right;">Waiting</div>
   </div>
 
@@ -228,6 +300,10 @@
         </div>
       </div>
       <div class="cell">
+        <div class="mono" style="font-weight: 500; color: <%= r[:quick] ? "var(--quick-fg)" : "var(--cell)" %>;"><%= r[:read_est] %></div>
+        <div class="sub"><%= r[:size_sub] %></div>
+      </div>
+      <div class="cell">
         <div><%= r[:last_activity] %></div>
         <div class="sub"><%= r[:last_actor] %></div>
       </div>
@@ -243,9 +319,19 @@
     </div>
   <% end %>
 
-  <% if rows.empty? %>
-    <div style="padding: 80px 24px; text-align: center; color: var(--muted-2); font-size: 13px;">
-      <%= hide ? "Nothing waiting on you." : "No open pull requests matched." %>
+  <% if active.zero? %>
+    <div class="win">
+      <div class="win-mark">🎉</div>
+      <div class="win-head">
+        <%= total.zero? ? "Nothing in the queue." : "Queue clear — nothing waiting on you." %>
+      </div>
+      <div class="mono" style="margin-top: 8px; font-size: 12px; color: var(--muted-2);">
+        <% if reviews_7d && reviews_7d.positive? %>
+          <%= reviews_7d %> <%= reviews_7d == 1 ? "review" : "reviews" %> in the last 7 days<%= done.positive? ? " · #{done} settled here" : "" %>
+        <% else %>
+          <%= hide ? "Nothing waiting on you." : "No open pull requests matched." %>
+        <% end %>
+      </div>
     </div>
   <% end %>
 </div>

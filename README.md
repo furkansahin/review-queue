@@ -24,6 +24,21 @@ re-push resets the clock: green below `RQ_WARN_DAYS`, amber at `RQ_WARN_DAYS`, o
 Snapshots cache for `RQ_CACHE_TTL` seconds; the page self-refreshes every 3 minutes and
 `Refresh` forces a rebuild. Roughly 6 GitHub API calls per PR per rebuild.
 
+## Getting through the queue
+
+The list is ordered reddest-first, so row one is always the next thing to review; it is
+also lifted into a **Next up** card above the table. A progress bar and the tab title
+(`(4) Review queue`) count what is still waiting, and clearing the list earns a proper
+empty state.
+
+The **Size** column estimates reading time from the diff churn at `RQ_LINES_PER_MIN`
+lines per minute. **Quick wins** filters to non-draft PRs of `RQ_QUICK_LINES` churn or
+less — the cheapest way to make the number go down.
+
+`N reviewed this week` in the header counts reviews you posted in the last 7 days. It is
+derived from timelines already fetched, so it costs no extra API calls, but it only sees
+PRs still matching `RQ_SCOPE` and undercounts once a PR drops out of the queue.
+
 ## Layout
 
 ```
