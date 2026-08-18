@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sign in · Review queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: light;
+    --bg: oklch(0.985 0.004 70); --fg: oklch(0.26 0.01 60);
+    --surface: oklch(1 0 0); --border: oklch(0.9 0.006 70);
+    --muted: oklch(0.58 0.01 60); --accent: oklch(0.45 0.11 250);
+    --err-bg: oklch(0.97 0.02 25); --err-border: oklch(0.82 0.09 25); --err-fg: oklch(0.42 0.12 25);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: oklch(0.19 0.006 70); --fg: oklch(0.91 0.006 70);
+      --surface: oklch(0.235 0.006 70); --border: oklch(0.32 0.008 70);
+      --muted: oklch(0.66 0.008 70); --accent: oklch(0.7 0.12 250);
+      --err-bg: oklch(0.27 0.05 25); --err-border: oklch(0.44 0.1 25); --err-fg: oklch(0.83 0.11 25);
+    }
+  }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: var(--bg); color: var(--fg);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px;
+         -webkit-font-smoothing: antialiased; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+          padding: 34px 36px; width: 360px; text-align: center; }
+  h1 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
+  p { color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .go { display: block; margin-top: 22px; padding: 11px 18px; border-radius: 8px;
+        background: var(--accent); color: var(--surface); text-decoration: none;
+        font-weight: 600; font-size: 14px; }
+  .go:hover { filter: brightness(1.08); }
+  .err { margin-top: 18px; padding: 10px 12px; border-radius: 8px; font-size: 12px;
+         font-family: 'IBM Plex Mono', monospace; text-align: left;
+         background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg); }
+  .fine { margin-top: 20px; font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+          color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Review queue</h1>
+    <p>Signs you in with GitHub and shows the pull requests waiting on you, read with your own account.</p>
+    <a class="go" href="/auth/start">Sign in with GitHub</a>
+    <% if error %>
+      <div class="err"><%= error %></div>
+    <% end %>
+    <div class="fine">Requests no scopes — read-only, and cannot write to any repo.</div>
+  </div>
+</body>
+</html>

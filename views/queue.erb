@@ -215,14 +215,19 @@
   <div style="flex: 1;"></div>
   <div class="mono" style="font-size: 11px; color: var(--muted-2);">
     <% meta = [] %>
-    <% meta << "@#{snap[:login]}" if snap[:login] %>
+    <% meta << "@#{login}" if login %>
     <% meta << "#{reviews_7d} reviewed this week" if reviews_7d %>
     <% meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at] %>
     <% meta << "#{snap[:rate]} api calls left" if snap[:rate] %>
     <%= meta.join("  ·  ") %>
   </div>
   <form method="post" action="/refresh?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+    <%== csrf %>
     <button class="btn" type="submit">Refresh</button>
+  </form>
+  <form method="post" action="/logout" style="margin: 0;">
+    <%== csrf_logout %>
+    <button class="btn" type="submit">Sign out</button>
   </form>
 </div>
 

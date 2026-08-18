@@ -2,9 +2,9 @@
 
 # pr-review-queue
 
-Private, single-user dashboard for the pull requests that actually need me: review requests,
-mentions, a watched label, and my own PRs. Rendered server-side — the GitHub token never
-reaches the browser.
+Dashboard for the pull requests that actually need you: review requests, mentions, a watched
+label, and your own PRs. Sign in with GitHub and the queue is fetched with your own account,
+so each person sees their own. Rendered server-side — no JS.
 
 ## State model
 
@@ -42,9 +42,11 @@ PRs still matching `RQ_SCOPE` and undercounts once a PR drops out of the queue.
 ## Layout
 
 ```
-app.rb             routes, HTTP basic auth, env config
+app.rb             routes, session/OAuth, allowlist, env config
 queue_service.rb   GitHub client, threaded fetch, timeline/state/age logic, TTL cache
 views/queue.erb    the table (no JS — tabs and filters are links)
+auth.rb            GitHub OAuth flow + per-user service registry
+views/login.erb    the sign-in page
 Procfile app.json  Dokku process + zero-downtime health check
 setup.sh           one-shot dokku app create + config:set
 ```
@@ -109,14 +111,34 @@ with the new watch label; no code change needed.
 
 ## Access
 
-The app requires HTTP basic auth (`RQ_USER` / `RQ_PASSWORD`) on every path except `/healthz`.
-Only run it behind TLS — basic auth is plaintext. To keep it off the public internet entirely,
-skip the domain and reach it over an SSH tunnel to the host's app port instead.
+Sign-in is GitHub OAuth. Every path except `/healthz` and the auth routes requires a session.
 
-## Token
+`RQ_ALLOWED_LOGINS` is a required, comma-separated, case-insensitive list of GitHub logins.
+It **fails closed**: the app refuses to boot without it, and a login that is not on the list is
+rejected after the OAuth round-trip. Without this anyone with a GitHub account could sign in
+and spend your server's CPU on their own queue.
 
-Fine-grained PAT with **Pull requests: Read** and **Metadata: Read** on the repos in
-`RQ_SCOPE` (classic `repo` also works for private repos).
+Sessions are signed and encrypted cookies (`RQ_SESSION_SECRET`, at least 64 chars), so there
+is no database. Changing that secret signs everyone out.
+
+## OAuth App
+
+Register one at **Settings → Developer settings → OAuth Apps**:
+
+- Homepage URL: `https://review.furkansahin.work`
+- Authorization callback URL: `https://review.furkansahin.work/auth/callback` (must match exactly)
+
+Put the Client ID and Secret in `RQ_GITHUB_CLIENT_ID` / `RQ_GITHUB_CLIENT_SECRET`.
+
+The app requests **no scopes at all**. A scopeless user token still resolves `GET /user` (needed
+to expand `@me` in the search queries) and still gets the 5000/hr authenticated rate limit, but
+it cannot write to anything. This is only sufficient because `RQ_SCOPE` covers **public** repos —
+pointing it at a private repo would require the classic `repo` scope, which also grants *write*
+access to every repo the user can reach. Revisit this choice before adding a private repo.
+
+Rate limits are per user token, so they scale with users. The server-side cost does not:
+each rebuild fans out worker threads, so `RQ_MAX_USERS` caps concurrently cached users and
+`RQ_IDLE_TTL` drops a user's cached queue once they go idle.
 
 ## Local dev
 
@@ -125,3 +147,7 @@ cp .env.example .env && $EDITOR .env
 set -a && source .env && set +a
 bundle exec puma -b tcp://127.0.0.1:9292
 ```
+
+For local sign-in, register a second OAuth App with callback `http://127.0.0.1:9292/auth/callback`
+and keep `RQ_INSECURE_COOKIES=1` set — otherwise the session cookie is `Secure` and the browser
+will drop it over plain http.
