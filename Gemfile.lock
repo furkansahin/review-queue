@@ -1,0 +1,37 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    erubi (1.13.1)
+    nio4r (2.7.5)
+    puma (6.6.1)
+      nio4r (~> 2.0)
+    rack (3.2.7)
+    roda (3.107.0)
+      rack
+    tilt (2.9.0)
+
+PLATFORMS
+  aarch64-linux
+  arm64-darwin-23
+  ruby
+  x86_64-linux
+
+DEPENDENCIES
+  erubi (~> 1.13)
+  puma (~> 6.4)
+  roda (~> 3.86)
+  tilt (~> 2.4)
+
+CHECKSUMS
+  erubi (1.13.1) sha256=a082103b0885dbc5ecf1172fede897f9ebdb745a4b97a5e8dc63953db1ee4ad9
+  nio4r (2.7.5) sha256=6c90168e48fb5f8e768419c93abb94ba2b892a1d0602cb06eef16d8b7df1dca1
+  puma (6.6.1) sha256=b9b56e4a4ea75d1bfa6d9e1972ee2c9f43d0883f011826d914e8e37b3694ea1e
+  rack (3.2.7) sha256=93e13e1c24f93556671d85d2d79fa228c3485815c50d7e2f265b5330c6528fb7
+  roda (3.107.0) sha256=bf40c7a0f1fcd037ec10589a1dc98fc52ced1aece803670194ec7af0f0c77c06
+  tilt (2.9.0) sha256=da5735d0280bba96e9a91041bb14aee435ccad5c17b0fa519249ae543d9aa3a5
+
+RUBY VERSION
+  ruby 4.0.6
+
+BUNDLED WITH
+  4.0.16

@@ -1,0 +1,141 @@
+<%
+  tabs = [{key: :all, label: "All"}] + service.buckets.map { |b| {key: b[:key], label: b[:label]} }
+  counts = snap[:counts] || {}
+  qs = ->(t, h) { "/?tab=#{t}#{h ? "&hide=1" : ""}" }
+  cols = "4px 108px 1fr 132px 150px 84px 76px"
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="refresh" content="180" />
+<title>Review queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: oklch(0.985 0.004 70); color: oklch(0.26 0.01 60);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: oklch(0.45 0.11 250); text-decoration: none; }
+  a:hover { color: oklch(0.38 0.13 250); text-decoration: underline; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: oklch(1 0 0);
+         border-bottom: 1px solid oklch(0.9 0.006 70); position: sticky; top: 0; z-index: 5; }
+  .btn { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 6px 14px; border: 1px solid oklch(0.88 0.006 70);
+         background: oklch(1 0 0); border-radius: 6px; cursor: pointer; color: oklch(0.3 0.01 60); }
+  .btn:hover { background: oklch(0.96 0.004 70); }
+  .tabs { display: flex; align-items: stretch; padding: 0 24px; background: oklch(1 0 0);
+          border-bottom: 1px solid oklch(0.9 0.006 70); }
+  .tab { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 11px 14px; display: flex; align-items: center;
+         gap: 7px; border-bottom: 2px solid transparent; color: oklch(0.58 0.01 60); margin-bottom: -1px; }
+  .tab:hover { text-decoration: none; color: oklch(0.35 0.01 60); }
+  .tab.on { border-bottom-color: oklch(0.45 0.11 250); color: oklch(0.28 0.02 250); }
+  .badge { font-family: 'IBM Plex Mono', monospace; font-size: 11px; background: oklch(0.96 0.004 70);
+           color: oklch(0.6 0.01 60); padding: 2px 6px; border-radius: 10px; }
+  .tab.on .badge { background: oklch(0.95 0.03 250); color: oklch(0.45 0.1 250); }
+  .grid { display: grid; grid-template-columns: <%= cols %>; align-items: center; }
+  .head { padding: 9px 24px 9px 20px; font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+          letter-spacing: 0.08em; text-transform: uppercase; color: oklch(0.62 0.01 60);
+          border-bottom: 1px solid oklch(0.92 0.006 70); }
+  .row { padding: 11px 24px 11px 20px; border-bottom: 1px solid oklch(0.94 0.004 70); }
+  .row:hover { background: oklch(0.965 0.004 70) !important; }
+  .pill { font: 500 11px 'IBM Plex Mono', monospace; padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
+  .chip { font-size: 10px; font-family: 'IBM Plex Mono', monospace; padding: 2px 6px; border-radius: 3px; border: 1px solid; }
+  .title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { font-size: 11px; color: oklch(0.65 0.01 60); font-family: 'IBM Plex Mono', monospace; margin-top: 2px; }
+  .cell { font-size: 12px; color: oklch(0.45 0.01 60); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; display: inline-block; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Review queue</div>
+  <div class="mono" style="font-size: 12px; color: oklch(0.55 0.01 60); background: oklch(0.96 0.004 70);
+       border: 1px solid oklch(0.91 0.006 70); padding: 3px 8px; border-radius: 4px;">
+    <%= service.scope %> · label:<%= service.label %>
+  </div>
+  <div style="flex: 1;"></div>
+  <div class="mono" style="font-size: 11px; color: oklch(0.6 0.01 60);">
+    <% meta = [] %>
+    <% meta << "@#{snap[:login]}" if snap[:login] %>
+    <% meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at] %>
+    <% meta << "#{snap[:rate]} api calls left" if snap[:rate] %>
+    <%= meta.join("  ·  ") %>
+  </div>
+  <form method="post" action="/refresh?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+    <button class="btn" type="submit">Refresh</button>
+  </form>
+</div>
+
+<div class="tabs">
+  <% tabs.each do |t| %>
+    <% c = counts[t[:key]] || {open: 0, total: 0} %>
+    <a class="tab <%= "on" if tab == t[:key] %>" href="<%= qs.call(t[:key], hide) %>">
+      <span><%= t[:label] %></span>
+      <span class="badge"><%= c[:open] %>/<%= c[:total] %></span>
+    </a>
+  <% end %>
+  <div style="flex: 1;"></div>
+  <a class="tab" href="<%= qs.call(tab, !hide) %>" style="color: oklch(0.5 0.01 60);">
+    <%= hide ? "Show settled" : "Hide settled" %>
+  </a>
+</div>
+
+<% if snap[:error] %>
+  <div class="mono" style="margin: 24px; padding: 12px 16px; border: 1px solid oklch(0.82 0.09 25);
+       background: oklch(0.97 0.02 25); border-radius: 8px; font-size: 12px; color: oklch(0.42 0.12 25);">
+    <%= snap[:error] %>
+  </div>
+<% end %>
+
+<div style="padding-bottom: 80px;">
+  <div class="grid head">
+    <div></div><div>State</div><div>Pull request</div><div>Last activity</div>
+    <div>My last action</div><div>CI</div><div style="text-align: right;">Waiting</div>
+  </div>
+
+  <% rows.each do |r| %>
+    <div class="grid row" style="background: <%= r[:row_bg] %>;">
+      <div style="width: 4px; height: 30px; border-radius: 2px; background: <%= r[:age_color] %>;"></div>
+      <div style="padding-left: 12px;">
+        <span class="pill" style="background: <%= r[:state_bg] %>; color: <%= r[:state_color] %>;"><%= r[:state] %></span>
+      </div>
+      <div style="min-width: 0; padding-right: 24px;">
+        <div style="display: flex; align-items: baseline; gap: 8px;">
+          <a class="title" href="<%= r[:url] %>" target="_blank" rel="noreferrer"><%= r[:title] %></a>
+          <span class="mono" style="font-size: 11px; color: oklch(0.65 0.01 60); flex: none;"><%= r[:ref] %></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+          <span class="mono" style="font-size: 11px; color: oklch(0.58 0.01 60);"><%= r[:author] %></span>
+          <% r[:chips].each do |c| %>
+            <span class="chip" style="background: <%= c[:bg] %>; border-color: <%= c[:border] %>; color: <%= c[:color] %>;"><%= c[:text] %></span>
+          <% end %>
+        </div>
+      </div>
+      <div class="cell">
+        <div><%= r[:last_activity] %></div>
+        <div class="sub"><%= r[:last_actor] %></div>
+      </div>
+      <div class="cell">
+        <div><%= r[:my_action] %></div>
+        <div class="sub"><%= r[:my_action_kind] %></div>
+      </div>
+      <div class="cell" style="display: flex; align-items: center; gap: 6px;">
+        <span class="dot" style="background: <%= r[:ci_color] %>;"></span>
+        <span class="mono" style="font-size: 11px;"><%= r[:ci] %></span>
+      </div>
+      <div class="mono" style="text-align: right; font-weight: 500; font-size: 13px; color: <%= r[:age_text_color] %>;"><%= r[:age] %></div>
+    </div>
+  <% end %>
+
+  <% if rows.empty? %>
+    <div style="padding: 80px 24px; text-align: center; color: oklch(0.62 0.01 60); font-size: 13px;">
+      <%= hide ? "Nothing waiting on you." : "No open pull requests matched." %>
+    </div>
+  <% end %>
+</div>
+
+</body>
+</html>

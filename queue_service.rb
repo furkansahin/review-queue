@@ -1,0 +1,279 @@
+require "net/http"
+require "json"
+require "uri"
+require "time"
+
+class GitHubClient
+  API = "https://api.github.com"
+
+  attr_reader :rate_remaining
+
+  def initialize(token)
+    @token = token
+    @mutex = Mutex.new
+  end
+
+  def get(path)
+    uri = URI(path.start_with?("http") ? path : API + path)
+    req = Net::HTTP::Get.new(uri)
+    req["Authorization"] = "Bearer #{@token}"
+    req["Accept"] = "application/vnd.github+json"
+    req["X-GitHub-Api-Version"] = "2022-11-28"
+    req["User-Agent"] = "review-queue"
+    res = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 25) do |http|
+      http.request(req)
+    end
+    @mutex.synchronize { @rate_remaining = res["x-ratelimit-remaining"] }
+    unless res.is_a?(Net::HTTPSuccess)
+      raise "GitHub #{res.code} on #{uri.path}: #{res.body.to_s[0, 200]}"
+    end
+    JSON.parse(res.body)
+  end
+
+  # Best-effort: nil instead of raising (used for optional data like check runs).
+  def try(path)
+    get(path)
+  rescue StandardError
+    nil
+  end
+end
+
+# Fetches the queue from GitHub and caches the computed snapshot.
+class QueueService
+  BUCKET_LABELS = {review: "Review requested", mention: "Mentions me", label: nil, mine: "My PRs"}.freeze
+
+  def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 5, per_page: 50)
+    @gh = GitHubClient.new(token)
+    @scope = scope
+    @label = label
+    @warn_days = warn_days
+    @hot_days = hot_days
+    @stale_days = stale_days
+    @ttl = ttl
+    @concurrency = concurrency
+    @per_page = per_page
+    @lock = Mutex.new
+    @snapshot = nil
+  end
+
+  attr_reader :scope, :label
+
+  def buckets
+    [
+      {key: :review, label: "Review requested", q: "#{@scope} is:open is:pr review-requested:@me"},
+      {key: :mention, label: "Mentions me", q: "#{@scope} is:open is:pr mentions:@me"},
+      {key: :label, label: @label, q: %(#{@scope} is:open is:pr label:"#{@label}")},
+      {key: :mine, label: "My PRs", q: "#{@scope} is:open is:pr author:@me"}
+    ]
+  end
+
+  def snapshot(force: false)
+    @lock.synchronize do
+      fresh = @snapshot && (Time.now - @snapshot[:fetched_at] < @ttl)
+      return @snapshot if fresh && !force
+
+      begin
+        @snapshot = build
+      rescue StandardError => e
+        @snapshot = (@snapshot || {rows: [], login: nil, fetched_at: Time.now}).merge(
+          error: e.message, fetched_at: Time.now, rate: @gh.rate_remaining
+        )
+      end
+      @snapshot
+    end
+  end
+
+  private
+
+  def build
+    login = @gh.get("/user").fetch("login")
+
+    entries = {}
+    threaded(buckets) do |b|
+      res = @gh.get("/search/issues?per_page=#{@per_page}&sort=updated&q=#{URI.encode_www_form_component(b[:q])}")
+      [b[:key], res["items"] || []]
+    end.each do |key, items|
+      next unless items
+      items.each do |item|
+        e = entries[item["html_url"]] ||= {item: item, buckets: []}
+        e[:buckets] << key
+      end
+    end
+
+    prs = threaded(entries.values) { |entry| detail(entry, login) }.compact
+    rows = prs.map { |pr| row(pr, login) }.sort_by { |r| r[:sort_key] }
+
+    {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
+     counts: counts(rows)}
+  end
+
+  def counts(rows)
+    out = {all: {open: rows.count { |r| !r[:settled] }, total: rows.size}}
+    buckets.each do |b|
+      in_b = rows.select { |r| r[:buckets].include?(b[:key]) }
+      out[b[:key]] = {open: in_b.count { |r| !r[:settled] }, total: in_b.size}
+    end
+    out
+  end
+
+  def threaded(items)
+    queue = items.each_with_index.to_a
+    results = Array.new(items.size)
+    qlock = Mutex.new
+    workers = [@concurrency, items.size].min
+    return [] if workers.zero?
+    workers.times.map do
+      Thread.new do
+        loop do
+          job = qlock.synchronize { queue.shift }
+          break unless job
+          item, i = job
+          begin
+            results[i] = yield(item)
+          rescue StandardError
+            results[i] = nil
+          end
+        end
+      end
+    end.each(&:join)
+    results
+  end
+
+  def detail(entry, login)
+    item = entry[:item]
+    owner, repo = item["repository_url"].match(%r{repos/([^/]+)/([^/]+)\z}).captures
+    n = item["number"]
+    base = "/repos/#{owner}/#{repo}"
+
+    pull, reviews, comments, rev_comments = threaded(
+      ["#{base}/pulls/#{n}",
+       "#{base}/pulls/#{n}/reviews?per_page=100",
+       "#{base}/issues/#{n}/comments?per_page=100",
+       "#{base}/pulls/#{n}/comments?per_page=100"]
+    ) { |p| @gh.get(p) }
+    return nil unless pull
+
+    sha = pull.dig("head", "sha")
+    commit_at = Time.parse(pull["created_at"])
+    ci = :none
+    if sha
+      checks, commit = threaded(["#{base}/commits/#{sha}/check-runs?per_page=100", "#{base}/commits/#{sha}"]) { |p| @gh.try(p) }
+      if commit
+        c = commit["commit"]
+        commit_at = Time.parse((c["committer"] || c["author"])["date"])
+      end
+      runs = checks && checks["check_runs"]
+      if runs && !runs.empty?
+        ci = if runs.any? { |r| %w[failure timed_out cancelled action_required].include?(r["conclusion"]) }
+          :fail
+        elsif runs.any? { |r| r["status"] != "completed" }
+          :pending
+        elsif runs.all? { |r| %w[success neutral skipped].include?(r["conclusion"]) }
+          :pass
+        else
+          :pending
+        end
+      end
+    end
+
+    events = []
+    (comments || []).each { |c| events << {at: Time.parse(c["created_at"]), who: c.dig("user", "login"), kind: "comment"} }
+    (rev_comments || []).each { |c| events << {at: Time.parse(c["created_at"]), who: c.dig("user", "login"), kind: "review comment"} }
+    (reviews || []).reject { |r| r["state"] == "PENDING" || r["submitted_at"].nil? }.each do |r|
+      kind = case r["state"]
+      when "APPROVED" then "approved"
+      when "CHANGES_REQUESTED" then "changes requested"
+      else "review"
+      end
+      events << {at: Time.parse(r["submitted_at"]), who: r.dig("user", "login"), kind: kind}
+    end
+    events << {at: commit_at, who: pull.dig("user", "login"), kind: "push"}
+    events.sort_by! { |e| e[:at] }
+
+    last = events.last
+    my_last = events.select { |e| e[:who] == login }.last
+    last_other = events.reverse.find { |e| e[:who] != login }
+
+    {
+      url: item["html_url"], title: item["title"], number: n, repo: repo, owner: owner,
+      author: pull.dig("user", "login") || "?", draft: !!pull["draft"], ci: ci,
+      labels: (item["labels"] || []).map { |l| l["name"] },
+      buckets: entry[:buckets],
+      mine: pull.dig("user", "login") == login,
+      last: last, my_last: my_last, last_other: last_other,
+      i_acted: !!(my_last && last && my_last[:at] >= last[:at]),
+      changed: pull["changed_files"], churn: (pull["additions"].to_i + pull["deletions"].to_i)
+    }
+  end
+
+  def row(pr, login)
+    settled = pr[:i_acted]
+    wait_from = settled ? pr.dig(:my_last, :at) : (pr.dig(:last_other, :at) || pr.dig(:last, :at))
+    days = wait_from ? (Time.now - wait_from) / 86_400.0 : 0
+    bar, text = age_colors(days, settled)
+
+    state, state_bg, state_color =
+      if settled && pr[:mine]
+        ["Waiting on them", "oklch(0.95 0.01 250)", "oklch(0.45 0.1 250)"]
+      elsif settled
+        ["Reviewed", "oklch(0.955 0.004 70)", "oklch(0.55 0.01 60)"]
+      elsif pr[:mine]
+        ["Your turn", "oklch(0.95 0.05 85)", "oklch(0.45 0.11 65)"]
+      else
+        ["To review", "oklch(0.94 0.06 25)", "oklch(0.45 0.14 25)"]
+      end
+
+    chips = []
+    chips << chip(pr[:draft] ? "draft" : nil, :grey)
+    pr[:labels].select { |l| l.downcase == @label.downcase }.each { |l| chips << chip(l, :blue) }
+    chips << chip("@#{login}", :violet) if pr[:buckets].include?(:mention)
+    chips << chip(pr[:changed] ? "#{pr[:changed]} files ±#{pr[:churn]}" : nil, :faint)
+    chips.compact!
+
+    {
+      buckets: pr[:buckets], settled: settled,
+      sort_key: (settled ? 10**12 : 0) - (wait_from ? wait_from.to_i : 0),
+      url: pr[:url], title: pr[:title], ref: "#{pr[:repo]} ##{pr[:number]}", author: pr[:author],
+      state: state, state_bg: state_bg, state_color: state_color, chips: chips,
+      row_bg: settled ? "oklch(0.995 0.002 70)" : "oklch(1 0 0)",
+      age_color: bar, age_text_color: text, age: ago(wait_from),
+      last_activity: "#{ago(pr.dig(:last, :at))} ago",
+      last_actor: pr[:last] ? "#{pr[:last][:who] == login ? "you" : pr[:last][:who]} · #{pr[:last][:kind]}" : "—",
+      my_action: pr[:my_last] ? "#{ago(pr[:my_last][:at])} ago" : "never",
+      my_action_kind: pr[:my_last] ? pr[:my_last][:kind] : "no activity from you",
+      ci: pr[:ci] == :none ? "—" : pr[:ci].to_s,
+      ci_color: {fail: "oklch(0.58 0.17 25)", pass: "oklch(0.68 0.14 150)",
+                 pending: "oklch(0.78 0.13 85)", none: "oklch(0.88 0.005 70)"}[pr[:ci]]
+    }
+  end
+
+  def chip(text, tone)
+    return nil unless text
+    palette = {
+      grey: ["oklch(0.96 0.003 70)", "oklch(0.9 0.006 70)", "oklch(0.6 0.01 60)"],
+      blue: ["oklch(0.96 0.03 250)", "oklch(0.88 0.05 250)", "oklch(0.45 0.1 250)"],
+      violet: ["oklch(0.97 0.02 300)", "oklch(0.9 0.04 300)", "oklch(0.47 0.1 300)"],
+      faint: ["oklch(0.98 0.002 70)", "oklch(0.92 0.006 70)", "oklch(0.62 0.01 60)"]
+    }[tone]
+    {text: text, bg: palette[0], border: palette[1], color: palette[2]}
+  end
+
+  def age_colors(days, settled)
+    return ["oklch(0.9 0.005 70)", "oklch(0.66 0.01 60)"] if settled
+    return ["oklch(0.55 0.17 25)", "oklch(0.48 0.16 25)"] if days >= @stale_days
+    return ["oklch(0.66 0.16 45)", "oklch(0.52 0.14 45)"] if days >= @hot_days
+    return ["oklch(0.78 0.14 85)", "oklch(0.55 0.11 75)"] if days >= @warn_days
+    ["oklch(0.72 0.13 150)", "oklch(0.48 0.1 150)"]
+  end
+
+  def ago(time)
+    return "—" unless time
+    mins = ((Time.now - time) / 60).floor
+    return "#{[mins, 1].max}m" if mins < 60
+    hours = mins / 60
+    return "#{hours}h" if hours < 24
+    days = hours / 24
+    return "#{days}d" if days < 30
+    "#{days / 30}mo"
+  end
+end
