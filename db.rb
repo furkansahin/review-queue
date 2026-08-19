@@ -16,10 +16,43 @@ module DB
 
   module_function
 
+  # libpq does NOT fall back to the operating system trust store. With
+  # sslmode=verify-full and no sslrootcert it reads only ~/.postgresql/root.crt,
+  # which does not exist in the container -- so a perfectly ordinary Let's
+  # Encrypt certificate fails with "certificate verify failed", even though the
+  # same URL works from a laptop whose libpq has that file.
+  #
+  # sslrootcert=system (PostgreSQL 16+) points it at the OS trust store, which
+  # already contains the public roots.
+  #
+  # RQ_DB_CA_CERT stays as an override for a database issued by a private CA:
+  # set it to the PEM and that is used instead. A URL that already names an
+  # sslrootcert is left exactly as given.
   def url
     raw = ENV["DATABASE_URL"].to_s
     raise Error, "DATABASE_URL is not set" if raw.empty?
-    raw
+    return raw if raw.include?("sslrootcert=")
+    return raw unless raw[/[?&]sslmode=(verify-full|verify-ca)/]
+
+    ca = ENV["RQ_DB_CA_CERT"].to_s.strip
+    with_params(raw, sslrootcert: ca.empty? ? "system" : ca_path(ca))
+  end
+
+  def ca_path(pem)
+    require "tmpdir"
+    path = File.join(Dir.tmpdir, "rq-db-ca.pem")
+    body = pem.end_with?("\n") ? pem : pem + "\n"
+    File.write(path, body) unless File.exist?(path) && File.read(path) == body
+    File.chmod(0o600, path)
+    path
+  end
+
+  def with_params(raw, **params)
+    uri = URI.parse(raw)
+    query = URI.decode_www_form(uri.query.to_s).reject { |k, _| params.key?(k.to_sym) }
+    params.each { |k, v| query << [k.to_s, v.to_s] }
+    uri.query = URI.encode_www_form(query)
+    uri.to_s
   end
 
   def new_connection
