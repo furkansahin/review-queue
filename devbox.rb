@@ -76,11 +76,20 @@ module DevBox
   REPO_RE = %r{\A[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\z}
   BOX_RE = /\A[a-z0-9][a-z0-9-]{0,48}\z/
 
+  # The message names the value it rejected. Without that, "bad repo" sends you
+  # hunting through the code instead of telling you the form sent the bare
+  # repository name, or nothing at all.
   def validate!(repo:, pr_number:, box:)
-    raise Error, "bad repo" unless repo.to_s.match?(REPO_RE)
-    raise Error, "bad pull request number" unless pr_number.to_s.match?(/\A[0-9]{1,7}\z/)
-    raise Error, "bad box name" unless box.to_s.match?(BOX_RE)
+    raise Error, "bad repo #{shown(repo)} (expected owner/name)" unless repo.to_s.match?(REPO_RE)
+    raise Error, "bad pull request number #{shown(pr_number)}" unless pr_number.to_s.match?(/\A[0-9]{1,7}\z/)
+    raise Error, "bad box name #{shown(box)}" unless box.to_s.match?(BOX_RE)
     true
+  end
+
+  def shown(value)
+    v = value.to_s
+    return "(empty)" if v.empty?
+    v.length > 40 ? "#{v[0, 40].inspect}…" : v.inspect
   end
 
   # Runs one command and returns {ok:, output:, exit_code:}. Never raises for a
