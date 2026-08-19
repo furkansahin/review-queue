@@ -284,6 +284,28 @@ class QueueService
     my_last = events.select { |e| e[:who] == login }.last
     last_other = events.reverse.find { |e| e[:who] != login }
 
+    # For a pull request you own, "who spoke last" is the wrong question. The
+    # right one is whether anybody still owes you a review. GitHub keeps that
+    # as current state: it removes a reviewer from requested_reviewers when
+    # they submit, and puts them back when you re-request.
+    awaiting_review = !((pull["requested_reviewers"] || []).empty? &&
+                        (pull["requested_teams"] || []).empty?)
+
+    # One approval is enough to hand the ball back to the author: they can
+    # merge. Count only each reviewer's LATEST review, and only if it is not
+    # older than the head commit -- an approval of code that has since been
+    # replaced does not mean the pull request is ready.
+    latest_by_reviewer = {}
+    (reviews || []).each do |r|
+      next if r["submitted_at"].nil?
+      who = r.dig("user", "login")
+      at = Time.parse(r["submitted_at"])
+      next if r["state"] == "PENDING"
+      cur = latest_by_reviewer[who]
+      latest_by_reviewer[who] = {state: r["state"], at: at} if cur.nil? || at >= cur[:at]
+    end
+    approved = latest_by_reviewer.any? { |_, r| r[:state] == "APPROVED" && r[:at] >= commit_at }
+
     {
       url: item["html_url"], title: item["title"], number: n, repo: repo, owner: owner,
       author: pull.dig("user", "login") || "?", draft: !!pull["draft"], ci: ci,
@@ -292,12 +314,23 @@ class QueueService
       mine: pull.dig("user", "login") == login,
       last: last, my_last: my_last, last_other: last_other,
       i_acted: !!(my_last && last && my_last[:at] >= last[:at]),
+      awaiting_review: awaiting_review, approved: approved,
       changed: pull["changed_files"], churn: (pull["additions"].to_i + pull["deletions"].to_i)
     }
   end
 
   def row(pr, login)
-    settled = pr[:i_acted]
+    # settled means "nothing here for me". It drives the state word, the sort
+    # order, Hide settled, and the progress bar, so it must carry the whole
+    # decision and not only the label.
+    settled =
+      if pr[:mine]
+        # Waiting on them only while somebody is actually on the hook and has
+        # not already approved.
+        pr[:awaiting_review] && !pr[:approved]
+      else
+        pr[:i_acted]
+      end
     wait_from = settled ? pr.dig(:my_last, :at) : (pr.dig(:last_other, :at) || pr.dig(:last, :at))
     days = wait_from ? (Time.now - wait_from) / 86_400.0 : 0
     bar, text = age_colors(days, settled)
@@ -332,7 +365,9 @@ class QueueService
       # age_colors ramps red. Settled rows ("Reviewed" / "Waiting on them") are
       # grey regardless of age, so they sink below everything. A row with no
       # timeline events reads as fresh, so it sorts last within its group.
-      sort_key: [settled ? 1 : 0, wait_from ? wait_from.to_i : Float::INFINITY],
+      # 0 act on it, 1 draft (listed, but not today), 2 settled.
+      sort_key: [settled ? 2 : (pr[:draft] ? 1 : 0), wait_from ? wait_from.to_i : Float::INFINITY],
+      draft: pr[:draft],
       url: pr[:url], title: pr[:title], ref: "#{pr[:repo]} ##{pr[:number]}", author: pr[:author],
       state: state, state_bg: state_bg, state_color: state_color, chips: chips,
       row_bg: settled ? "var(--row-settled)" : "var(--row)",

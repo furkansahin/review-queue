@@ -10,12 +10,28 @@ so each person sees their own. Rendered server-side — no JS.
 
 One merged timeline per PR (issue comments, review comments, submitted reviews, head-commit push):
 
+For a pull request **someone else owns**, the last event decides:
+
 | Situation | State |
 | --- | --- |
 | My event is the newest | **Reviewed** |
-| My event is newest, PR is mine | **Waiting on them** |
 | Someone else posted or pushed after me | **To review** |
-| …and the PR is mine | **Your turn** |
+
+For a pull request **you own**, who spoke last is the wrong question. What matters is
+whether anybody still owes you a review, and GitHub keeps that as current state: a
+reviewer leaves `requested_reviewers` when they submit, and returns when you re-request.
+
+| Situation | State |
+| --- | --- |
+| A review is requested and nobody has approved | **Waiting on them** |
+| Nobody is requested | **Your turn** |
+| Somebody approved | **Your turn** — one approval is enough to merge |
+
+An approval older than the head commit does not count, because it reviewed code that has
+since been replaced.
+
+Drafts are listed but are not work for today. They sort below the active rows and count in
+neither `to go` nor `done`, and one is never chosen as `Next up`.
 
 The bar and the `Waiting` column measure time since the last event that wasn't mine, so a
 re-push resets the clock: green below `RQ_WARN_DAYS`, amber at `RQ_WARN_DAYS`, orange at
