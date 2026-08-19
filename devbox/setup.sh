@@ -19,11 +19,29 @@ BAY_SRC="${RQ_BAY_SRC:-}"          # a directory holding bay's source, if you ha
 BAY="${RQ_BAY:-$HOME/go/bin/bay}"
 SELF_HOST="${RQ_SELF_HOST:-bayself}"
 
+# Both private repositories can be cloned with the token the box needs anyway,
+# so load it first and the rest of the script can do what used to be manual.
+if [ -f "$HOME/.bay/env" ]; then
+  # shellcheck disable=SC1091
+  set -a; . "$HOME/.bay/env"; set +a
+fi
+
 MISSING=0
 ok()   { printf "  ok    %s\n" "$1"; }
 todo() { printf "  TODO  %s\n" "$1"; MISSING=$((MISSING+1)); }
 doing(){ printf "  ..    %s\n" "$1"; }
 can_change() { ! $CHECK_ONLY; }
+
+if [ -z "${GITHUB_TOKEN:-}" ] || [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  echo "Before running this, create ~/.bay/env with your two tokens:"
+  echo
+  echo "    CLAUDE_CODE_OAUTH_TOKEN=...    # claude setup-token"
+  echo "    GITHUB_TOKEN=...               # PAT with Contents: Read"
+  echo
+  echo "They stay on this box and are never sent to the dashboard. Without them"
+  echo "this script cannot fetch bay or the bay config, both private repos."
+  echo
+fi
 
 echo "== packages =="
 NEED=()
@@ -64,6 +82,26 @@ docker info >/dev/null 2>&1 && ok "docker usable without sudo" \
 echo "== bay =="
 if [ -x "$BAY" ]; then
   ok "bay at $BAY"
+elif [ -n "${GITHUB_TOKEN:-}" ] && can_change; then
+  # `go install github.com/ubicloud/bay@latest`, the command in bay's README,
+  # cannot work on a clean machine: bay is a private repository and go has no
+  # credentials. Clone it with the token instead and build from the vendored
+  # dependencies, which needs no further network access.
+  doing "cloning and building bay (private repo, using GITHUB_TOKEN)"
+  command -v go >/dev/null || {
+    GO_VER=$(curl -fsSL "https://go.dev/VERSION?m=text" | head -1)
+    curl -fsSL "https://go.dev/dl/${GO_VER}.linux-$(dpkg --print-architecture).tar.gz" -o /tmp/go.tgz
+    sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tgz && rm -f /tmp/go.tgz
+  }
+  export PATH=/usr/local/go/bin:$HOME/go/bin:$PATH
+  rm -rf /tmp/bay-src
+  if git clone --quiet --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/ubicloud/bay.git" /tmp/bay-src; then
+    mkdir -p "$(dirname "$BAY")"
+    (cd /tmp/bay-src && GOFLAGS=-mod=vendor go build -o "$BAY" .) && ok "bay built" || todo "bay build failed"
+    rm -rf /tmp/bay-src
+  else
+    todo "could not clone ubicloud/bay -- does this token have access?"
+  fi
 elif [ -n "$BAY_SRC" ] && [ -d "$BAY_SRC" ] && can_change; then
   # NOTE: `go install github.com/ubicloud/bay@latest` (bay's README) does NOT
   # work on a clean machine: bay is a private repo and go has no credentials.
@@ -91,8 +129,21 @@ elif can_change; then
 else
   todo "git clone $REPO_URL $REPO_PATH"
 fi
-[ -f "$BAY_CONFIG/bay.toml" ] && ok "bay config at $BAY_CONFIG" \
-  || todo "bay config missing (private repo): git clone git@github.com:ubicloud/bay-ubicloud.git $BAY_CONFIG"
+if [ -f "$BAY_CONFIG/bay.toml" ]; then
+  ok "bay config at $BAY_CONFIG"
+elif [ -n "${GITHUB_TOKEN:-}" ] && can_change; then
+  doing "cloning the bay config (private repo, using GITHUB_TOKEN)"
+  mkdir -p "$(dirname "$BAY_CONFIG")"
+  if git clone --quiet "https://x-access-token:${GITHUB_TOKEN}@github.com/ubicloud/bay-ubicloud.git" "$BAY_CONFIG"; then
+    # do not leave the token behind in the clone's remote
+    git -C "$BAY_CONFIG" remote set-url origin https://github.com/ubicloud/bay-ubicloud.git
+    ok "bay config cloned"
+  else
+    todo "could not clone bay-ubicloud -- does this token have access?"
+  fi
+else
+  todo "bay config missing (private repo): git clone git@github.com:ubicloud/bay-ubicloud.git $BAY_CONFIG"
+fi
 
 echo "== bay must treat this box as its remote =="
 # bay's syncToHost is a no-op unless [remote] host is set: it assumes a local
@@ -137,8 +188,21 @@ else
 fi
 
 echo "== the dashboard's wrapper =="
-[ -x /usr/local/bin/rq-review ] && ok "/usr/local/bin/rq-review installed" \
-  || todo "sudo install -m 0755 rq-review /usr/local/bin/rq-review"
+WRAPPER_URL="${RQ_WRAPPER_URL:-https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/rq-review}"
+if [ -x /usr/local/bin/rq-review ] && can_change; then
+  # always refresh it: fixes land here and a stale copy is a silent problem
+  doing "refreshing /usr/local/bin/rq-review"
+  curl -fsSL "$WRAPPER_URL" | sudo tee /usr/local/bin/rq-review >/dev/null \
+    && sudo chmod 0755 /usr/local/bin/rq-review && ok "wrapper up to date"
+elif [ -x /usr/local/bin/rq-review ]; then
+  ok "/usr/local/bin/rq-review installed"
+elif can_change; then
+  doing "installing the wrapper"
+  curl -fsSL "$WRAPPER_URL" | sudo tee /usr/local/bin/rq-review >/dev/null \
+    && sudo chmod 0755 /usr/local/bin/rq-review && ok "wrapper installed"
+else
+  todo "install the wrapper: curl -fsSL $WRAPPER_URL | sudo tee /usr/local/bin/rq-review"
+fi
 grep -q "rq-review" "$HOME/.ssh/authorized_keys" 2>/dev/null && ok "forced-command key present" \
   || todo "paste the key line from the dashboard's Dev box page into ~/.ssh/authorized_keys"
 

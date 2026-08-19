@@ -1,69 +1,76 @@
 # Dev box setup
 
-Two things go on each user's dev box. The dashboard shows both, filled in, on
-its settings page.
+## From a fresh Ubuntu 24.04 VM
 
-## 1. The wrapper
+**1. Put your two tokens on the box.** These stay there and never reach the
+dashboard. Everything else needs them, because bay and its config are both
+private repositories.
 
 ```sh
-sudo install -m 0755 rq-review /usr/local/bin/rq-review
+mkdir -p ~/.bay && cat > ~/.bay/env <<'EOF'
+CLAUDE_CODE_OAUTH_TOKEN=...   # from: claude setup-token
+GITHUB_TOKEN=...              # a PAT with Contents: Read
+EOF
+chmod 600 ~/.bay/env
 ```
 
-It is the only thing the dashboard's key may run. It accepts five verbs —
-`ping`, `review`, `status`, `result`, `teardown` — and refuses everything else.
-Every field is matched against a strict pattern before it is used, and nothing
-is ever passed to `eval`.
+**2. Run the setup script.**
 
-Defaults it assumes, all overridable by environment:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `RQ_ALLOWED_REPOS` | `ubicloud/ubicloud` | repositories this box will review |
-| `RQ_REPO_PATH` | `$HOME/ubicloud` | the checkout bay runs from |
-| `RQ_BAY` | `$HOME/go/bin/bay` | the bay binary |
-| `RQ_STATE_DIR` | `$HOME/.rq` | where job state and logs live |
-
-## 2. The key
-
-Paste the line the dashboard gives you into `~/.ssh/authorized_keys`:
-
-```
-command="/usr/local/bin/rq-review",restrict ssh-rsa AAAA... review-queue
+```sh
+curl -fsSL https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/setup.sh -o setup.sh
+bash setup.sh            # or: bash setup.sh --check  to look first
 ```
 
-`command=` forces the wrapper whatever the dashboard sends. `restrict` turns off
-port forwarding, agent forwarding, X11 and a pty. So the key cannot become a
-shell even if the dashboard is fully compromised: it can start reviews on this
-box and nothing else.
+It installs docker, clones and builds bay, clones the bay config and the
+ubicloud checkout, points bay at this box over loopback ssh, and installs the
+wrapper.
 
-## 3. The bay command
+**3. Paste the key line** from the dashboard's Dev box page into
+`~/.ssh/authorized_keys`, then press **Test connection**. It should answer
+`pong <hostname>`.
 
-Add the `[commands] review` entry from `bay-review-command.toml` to
-`bay-ubicloud`'s `bay.toml`. `bay run` only executes commands defined in the
-config, so the dashboard cannot pass a prompt — and does not need to, because
-`bay up <box> --pr <n>` already checked the worktree out at the pull request.
+That is the whole setup: two tokens, one script, one paste.
 
-## How a review runs
+## Why bay has to be built rather than installed
+
+`go install github.com/ubicloud/bay@latest`, the command in bay's own README,
+fails on a clean machine: bay is a private repository and go has no
+credentials. The script clones it with your `GITHUB_TOKEN` and builds from the
+vendored dependencies, which needs no further network access.
+
+## Why bay is pointed at this box over loopback ssh
+
+bay's `syncToHost` is a no-op unless `[remote] host` is set — it assumes a local
+setup keeps its config in the repo. Ours is out of tree, so without a host the
+tooling never reaches the box and setup dies on
 
 ```
-dashboard --ssh--> rq-review review <repo> <pr> <box>
-                     └─ detaches, returns at once
-                        bay up <box> --pr <pr>
-                        bay run <box> review        (claude -p, adversarial)
-dashboard --ssh--> rq-review status <box>     queued -> running -> done|failed
-dashboard --ssh--> rq-review result <box>     the review text
+bash: /workspace/.bay/post-create.sh: No such file or directory
 ```
 
-A review takes minutes, so the wrapper detaches with `setsid` and the dashboard
-polls. Losing the connection does not lose the job.
+Pointing bay at this same machine over `127.0.0.1` puts it back on its supported
+path. `bay doctor` then runs 8 checks instead of 4.
 
-## One thing to fix in bay
+## Making boxes fast
 
-`bay run` calls `dockerExec(interactive: true)`, which omits `-T`, so
-`docker compose exec` demands a tty. Over a plain `ssh host 'cmd'` there is no
-tty and it fails, so the wrapper wraps it in `script -qec` to supply one.
+Out of the box a box takes about 330s. See `base-image/README.md`: one setting
+takes it to 144s, and a prebaked image takes it to **66s**.
 
-A `--no-tty` flag on `bay run` (or `dockerExec(false, …)` for non-interactive
-commands) would remove that workaround. It is a one-line change in `bay`, and
-worth making if the dashboard is not the only thing that ever drives bay
-non-interactively.
+## What the dashboard's key can do
+
+The wrapper is the only thing it may run, pinned by `command=` in
+`authorized_keys` with `restrict`. It accepts seven verbs — `ping`, `review`,
+`status`, `result`, `build`, `list`, `teardown` — validates every field against
+a strict pattern, and never passes anything to `eval`. A stolen key can start
+reviews on this box and nothing else.
+
+## Files here
+
+| File | Role |
+| --- | --- |
+| `setup.sh` | prepares a dev box; `--check` reports without changing anything |
+| `rq-review` | the forced-command wrapper the dashboard talks to |
+| `test_wrapper.sh` | 18 injection cases against the wrapper |
+| `bay-review-command.toml` | the `[commands] review` entry for bay-ubicloud |
+| `install-skills.sh` | carries a developer's own Claude skills into a box |
+| `base-image/` | prebaked image, and the measurements behind it |
