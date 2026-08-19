@@ -1,0 +1,23 @@
+# Add to bay-ubicloud's bay.toml, under [commands].
+#
+# `bay run` only executes commands defined here, so the dashboard cannot pass a
+# prompt. It does not need to: `bay up <box> --pr <n>` already checked the
+# worktree out at the pull request, so the diff against the base branch IS the
+# thing to review, and the command needs no arguments.
+
+[commands]
+review = """
+claude -p 'You are reviewing this pull request adversarially. \
+Diff the working branch against origin/main and read every changed hunk. \
+\
+Look for defects that matter: logic that is wrong on some input, race \
+conditions, unhandled errors, resource leaks, off-by-one and boundary bugs, \
+SQL or shell injection, missing authorization checks, and data that crosses a \
+trust boundary without validation. Check that the tests actually exercise the \
+new behaviour rather than restating it. \
+\
+For each finding give the file and line, what input or state triggers it, and \
+what goes wrong. Rank by severity. Say plainly when you are unsure rather than \
+padding the list. If the change is sound, say so and stop - do not invent \
+findings to fill space.' 2>&1
+"""

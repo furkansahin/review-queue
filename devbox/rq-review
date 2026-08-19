@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# rq-review — the only thing review-queue's key may run on this dev box.
+#
+# Install:
+#   sudo install -m 0755 rq-review /usr/local/bin/rq-review
+#   # then add the key line the dashboard shows to ~/.ssh/authorized_keys:
+#   #   command="/usr/local/bin/rq-review",restrict ssh-rsa AAAA... review-queue
+#
+# The forced command means the dashboard cannot choose what runs here. Whatever
+# it sends arrives whole in $SSH_ORIGINAL_COMMAND, and this script decides.
+# Nothing below is ever passed to eval, and every field is checked against a
+# strict pattern before it is used.
+set -euo pipefail
+
+# --- settings ---------------------------------------------------------------
+# Repositories this box will review. Anything else is refused.
+ALLOWED_REPOS="${RQ_ALLOWED_REPOS:-ubicloud/ubicloud}"
+# The checkout bay runs from. bay finds its config by this folder's name.
+REPO_PATH="${RQ_REPO_PATH:-$HOME/ubicloud}"
+BAY="${RQ_BAY:-$HOME/go/bin/bay}"
+STATE_DIR="${RQ_STATE_DIR:-$HOME/.rq}"
+
+die() { echo "rq-review: $*" >&2; exit 1; }
+
+# --- parse, without a shell ---------------------------------------------------
+read -r -a ARGV <<< "${SSH_ORIGINAL_COMMAND:-}"
+verb="${ARGV[0]:-}"
+
+valid_box()  { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,48}$ ]]; }
+valid_pr()   { [[ "$1" =~ ^[0-9]{1,7}$ ]]; }
+valid_repo() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1
+  local r
+  for r in $ALLOWED_REPOS; do [ "$r" = "$1" ] && return 0; done
+  return 1
+}
+
+case "$verb" in
+  ping)
+    # Proves the key, this script, bay and the checkout are all in place.
+    [ -x "$BAY" ]      || die "bay not found at $BAY"
+    [ -d "$REPO_PATH" ] || die "checkout not found at $REPO_PATH"
+    echo "pong $(hostname) bay=$("$BAY" --help >/dev/null 2>&1 && echo ok || echo unknown)"
+    ;;
+
+  review)
+    repo="${ARGV[1]:-}"; pr="${ARGV[2]:-}"; box="${ARGV[3]:-}"
+    valid_repo "$repo" || die "repo not allowed: ${repo:-<empty>}"
+    valid_pr   "$pr"   || die "bad pull request number"
+    valid_box  "$box"  || die "bad box name"
+
+    dir="$STATE_DIR/$box"
+    mkdir -p "$dir"
+    if [ -f "$dir/state" ] && [ "$(cat "$dir/state")" = "running" ] \
+       && [ -f "$dir/pid" ] && kill -0 "$(cat "$dir/pid")" 2>/dev/null; then
+      echo "already running"; exit 0
+    fi
+
+    echo running > "$dir/state"
+    : > "$dir/log"
+
+    # A review takes minutes, so it must outlive this ssh connection. The
+    # dashboard polls with `status` and collects with `result`.
+    #
+    # `bay run` execs without -T, so docker demands a tty; script(1) supplies
+    # one. Drop the script wrapper if bay gains a non-interactive flag.
+    setsid nohup bash -c '
+      set -o pipefail
+      bay="$1"; repo="$2"; pr="$3"; box="$4"; dir="$5"; repo_path="$6"
+      cd "$repo_path" || { echo "cannot cd to $repo_path"; echo failed > "$dir/state"; exit 1; }
+      {
+        echo "== bay up $box --pr $pr ($repo)"
+        "$bay" up "$box" --pr "$pr" || exit 1
+        echo "== review"
+        script -qec "\"$bay\" run \"$box\" review" /dev/null
+      } >> "$dir/log" 2>&1
+      if [ $? -eq 0 ]; then echo done > "$dir/state"; else echo failed > "$dir/state"; fi
+    ' _ "$BAY" "$repo" "$pr" "$box" "$dir" "$REPO_PATH" >/dev/null 2>&1 &
+
+    echo "$!" > "$dir/pid"
+    echo "started $box"
+    ;;
+
+  status)
+    box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
+    dir="$STATE_DIR/$box"
+    [ -f "$dir/state" ] && cat "$dir/state" || echo unknown
+    ;;
+
+  result)
+    box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
+    dir="$STATE_DIR/$box"
+    [ -f "$dir/log" ] && tail -c 200000 "$dir/log" || echo "no output"
+    ;;
+
+  teardown)
+    box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
+    cd "$REPO_PATH" && "$BAY" down "$box" 2>&1 || true
+    rm -rf "${STATE_DIR:?}/$box"
+    echo "torn down $box"
+    ;;
+
+  *)
+    die "refused: only ping, review, status, result and teardown are allowed"
+    ;;
+esac
