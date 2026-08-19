@@ -172,10 +172,13 @@ check("old mixed log: noise is truncated", b.scan("docker build noise").size <= 
 
 # panels must be keyed so their open/closed state can survive a refresh
 get "/sessions"
-b = last_response.body
-check("live panel is keyed", b.include?('data-keep="live-'), true)
-check("review panel is keyed", b.include?('data-keep="review-'), true)
-check("no forced reload on completion", b.include?("location.reload"), false)
+check("review panel is keyed", last_response.body.include?('data-keep="review-'), true)
+check("no forced reload on completion", last_response.body.include?("location.reload"), false)
+# the live panel only exists while a job is running
+DB.exec("UPDATE review_jobs SET state='running' WHERE id=$1", [job_id])
+get "/sessions"
+check("live panel is keyed", last_response.body.include?(%(data-keep="live-#{job_id}")), true)
+DB.exec("UPDATE review_jobs SET state='done' WHERE id=$1", [job_id])
 
 # --- teardown -------------------------------------------------------------
 TEARDOWN = {ok: false, output: "", error: "box \"rq-x\" has uncommitted changes in its worktree"}
