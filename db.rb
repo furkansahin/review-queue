@@ -9,6 +9,41 @@ module DB
 
   POOL_SIZE = Integer(ENV.fetch("RQ_DB_POOL", "5"))
 
+  # USERTrust ECC Certification Authority -- the trust anchor for the managed
+  # Postgres certificate:
+  #   leaf  *.<cluster>.pg.ubicloud.app
+  #   inter ZeroSSL ECC DV SSL CA 2
+  #   cross Sectigo Public Server Authentication Root E46
+  #   root  USERTrust ECC Certification Authority
+  #
+  # A public root, not a secret. It is embedded rather than shipped as a file
+  # because the pg gem carries its own libpq and OpenSSL, whose built-in
+  # OPENSSLDIR need not be the container's /etc/ssl/certs -- so sslrootcert=system
+  # finds no store at all, which is why psql verifies the same URL from a laptop
+  # and the container does not. Verified against the live database with the
+  # system store disabled: this root alone gives "Verify return code: 0 (ok)".
+  #
+  # RQ_DB_CA_CERT overrides it if the issuer ever changes.
+  DEFAULT_CA_PEM = <<~PEM
+    -----BEGIN CERTIFICATE-----
+    MIICjzCCAhWgAwIBAgIQXIuZxVqUxdJxVt7NiYDMJjAKBggqhkjOPQQDAzCBiDEL
+    MAkGA1UEBhMCVVMxEzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0plcnNl
+    eSBDaXR5MR4wHAYDVQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNVBAMT
+    JVVTRVJUcnVzdCBFQ0MgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMTAwMjAx
+    MDAwMDAwWhcNMzgwMTE4MjM1OTU5WjCBiDELMAkGA1UEBhMCVVMxEzARBgNVBAgT
+    Ck5ldyBKZXJzZXkxFDASBgNVBAcTC0plcnNleSBDaXR5MR4wHAYDVQQKExVUaGUg
+    VVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNVBAMTJVVTRVJUcnVzdCBFQ0MgQ2VydGlm
+    aWNhdGlvbiBBdXRob3JpdHkwdjAQBgcqhkjOPQIBBgUrgQQAIgNiAAQarFRaqflo
+    I+d61SRvU8Za2EurxtW20eZzca7dnNYMYf3boIkDuAUU7FfO7l0/4iGzzvfUinng
+    o4N+LZfQYcTxmdwlkWOrfzCjtHDix6EznPO/LlxTsV+zfTJ/ijTjeXmjQjBAMB0G
+    A1UdDgQWBBQ64QmG1M8ZwpZ2dEl23OA1xmNjmjAOBgNVHQ8BAf8EBAMCAQYwDwYD
+    VR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAwNoADBlAjA2Z6EWCNzklwBBHU6+4WMB
+    zzuqQhFkoJ2UOQIReVx7Hfpkue4WQrO/isIJxOzksU0CMQDpKmFHjFJKS04YcPbW
+    RNZu9YO6bVi9JNlWSOrvxKJGgYhqOkbRqZtNyWHa0V1Xahg=
+    -----END CERTIFICATE-----
+  PEM
+
+
   @pool = []
   @lock = Mutex.new
   @created = 0
@@ -38,12 +73,7 @@ module DB
     return raw if raw.match?(/(?:\A|[?&\s])sslrootcert=/)
 
     ca = ENV["RQ_DB_CA_CERT"].to_s.strip
-    bundled = File.expand_path("db-ca.pem", __dir__)
-    root =
-      if !ca.empty? then ca_path(ca)
-      elsif File.exist?(bundled) then bundled
-      else "system"
-      end
+    root = ca_path(ca.empty? ? DEFAULT_CA_PEM : ca)
 
     if raw.match?(%r{\Apostgres(?:ql)?://})
       uri = URI.parse(raw)
