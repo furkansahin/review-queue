@@ -51,8 +51,15 @@ ENV PATH=/home/dev/.local/bin:/home/dev/.local/share/mise/shims:$PATH
 # ruby.compile = true, which is what made each box spend minutes compiling
 # Ruby. Here it is a one-time cost, and precompiled is enough for a dev box.
 ENV MISE_RUBY_COMPILE=0
-RUN mise use -g ruby@${RUBY} node@${NODE} go@${GO} victoria-metrics@${VICTORIA} \
-    && mise install \
+# The precompiled ruby tarball is large and mise's default http timeout is 20s,
+# which this download exceeded on a small VM. Raise it, and install ruby in its
+# own layer so a retry does not redo node/go/victoria-metrics.
+ENV MISE_HTTP_TIMEOUT=600
+RUN mise use -g node@${NODE} go@${GO} victoria-metrics@${VICTORIA} && mise install
+RUN for i in 1 2 3; do mise use -g ruby@${RUBY} && mise install ruby@${RUBY} && break; \
+      echo "ruby install attempt $i failed, retrying"; sleep 5; done \
+    && mise which ruby \
+    && mise exec -- ruby -v \
     && mise reshim
 
 # Warm the caches. What can and cannot be baked is decided by the bind mount:

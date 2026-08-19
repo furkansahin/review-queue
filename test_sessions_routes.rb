@@ -170,6 +170,34 @@ check("old mixed log: build noise is behind its own toggle", b.include?("not the
 check("old mixed log: the finding is present", b.include?("the actual finding"), true)
 check("old mixed log: noise is truncated", b.scan("docker build noise").size <= 200, true)
 
+# --- teardown -------------------------------------------------------------
+TEARDOWN = {ok: false, output: "", error: "box \"rq-x\" has uncommitted changes in its worktree"}
+DevBox.singleton_class.prepend(Module.new do
+  def run(box, command, timeout: 30)
+    return {ok: true, output: "rq-ubicloud-6172\tdeepak/x\tUp 2 minutes\n"} if command == "list"
+    return TEARDOWN if command.start_with?("teardown")
+    {ok: true, output: "started"}
+  end
+end)
+get "/sessions"
+tok = csrf_for(last_response.body, "/sessions/teardown")
+post "/sessions/teardown", {"box" => "rq-ubicloud-6172", "_csrf" => tok}
+get "/sessions"
+check("a failed teardown is reported, not silent",
+      last_response.body.include?("could not tear down rq-ubicloud-6172"), true)
+check("and it quotes the reason", last_response.body.include?("uncommitted changes"), true)
+get "/sessions"
+check("the error clears after one view", last_response.body.include?("could not tear down"), false)
+
+# a box name that is not ours must be refused before it is sent anywhere
+post "/sessions/teardown", {"box" => "../etc/passwd", "_csrf" => tok}
+get "/sessions"
+check("a bad box name is refused", last_response.body.include?("bad box name"), true)
+
+# boxes with no job row still get a teardown control
+get "/sessions"
+check("boxes section offers teardown", last_response.body.scan(">Tear down<").size >= 1, true)
+
 # another user must not see it
 WHO[:login] = "mohi-kalantari"
 other = Rack::Test::Session.new(Rack::MockSession.new(app))

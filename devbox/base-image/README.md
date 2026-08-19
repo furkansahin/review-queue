@@ -9,6 +9,8 @@ On a 2-vcpu Ubicloud VM, `bay up` took:
 | first box, cold machine | 335s |
 | second box, warm machine | 329s |
 | box from a pull request | 319s |
+| with `MISE_RUBY_COMPILE=0` | 144s |
+| **on the prebaked base image** | **66s** |
 
 A warm machine saved nothing, because the work happens **inside each fresh
 container**, not on the host.
@@ -45,6 +47,7 @@ one line. Either drop `ruby.compile = true` from the repo's `mise.toml`, or set
 `MISE_RUBY_COMPILE=0` in `box.env` to keep it local to dev boxes.
 
 **2. Bake the toolchain and gems into a base image** — the `Dockerfile` here.
+Measured on the same VM: **66s**, against 329s originally.
 
 ```sh
 docker build -t ubicloud-bay-base:latest devbox/base-image

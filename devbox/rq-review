@@ -123,9 +123,18 @@ case "$verb" in
 
   teardown)
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
-    cd "$REPO_PATH" && "$BAY" down "$box" 2>&1 || true
-    rm -rf "${STATE_DIR:?}/$box"
-    echo "torn down $box"
+    cd "$REPO_PATH" || die "checkout not found at $REPO_PATH"
+    # --force on purpose. post-create.sh writes .env.rb and builds CSS into the
+    # worktree, so a review box is ALWAYS dirty and plain `bay down` always
+    # refuses. There is nothing worth keeping in a review checkout.
+    if out=$("$BAY" down "$box" --force 2>&1); then
+      rm -rf "${STATE_DIR:?}/$box"
+      echo "torn down $box"
+    else
+      # Do not report success for a box that is still there.
+      echo "$out" >&2
+      exit 1
+    fi
     ;;
 
   *)

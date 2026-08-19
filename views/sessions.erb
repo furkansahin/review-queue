@@ -64,6 +64,12 @@
 </div>
 
 <div class="wrap">
+  <% if error %>
+    <div class="mono" style="padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px;
+         background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg);">
+      <%= error %>
+    </div>
+  <% end %>
   <% unless dev_box %>
     <div class="card">
       <strong>No dev box registered.</strong>
@@ -167,6 +173,12 @@
         <% unless jobs.any? { |j| j["box_name"] == name } %>
           <span class="mono" style="font-size: 11px; color: var(--age-warn-fg);">not from this dashboard</span>
         <% end %>
+        <div style="flex: 1;"></div>
+        <form method="post" action="/sessions/teardown" style="margin: 0;">
+          <%== csrf_teardown %>
+          <input type="hidden" name="box" value="<%= name %>" />
+          <button class="mini" type="submit" title="bay down --force: free this box's disk">Tear down</button>
+        </form>
       </div>
     </div>
   <% end %>

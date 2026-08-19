@@ -215,12 +215,29 @@ class ReviewQueue < Roda
     r.on "sessions" do
       next r.redirect "/" unless REVIEWS_ENABLED
 
+      # Tears down by box name, so a box the dashboard did not start can be
+      # removed too. The name is validated before it is sent.
       r.post "teardown" do
         check_csrf!
-        id = r.params["id"].to_s
-        job = DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2", [current_login, id])
-        if job && (box = Jobs.dev_box(job))
-          DevBox.run(box, "teardown #{job["box_name"]}")
+        name = r.params["box"].to_s
+        if name.empty?
+          row = DB.row("SELECT box_name FROM review_jobs WHERE login = $1 AND id = $2",
+                       [current_login, r.params["id"].to_s])
+          name = row ? row["box_name"].to_s : ""
+        end
+        box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
+
+        if name.empty? || box.nil?
+          session["sessions_error"] = "no such box, or no dev box registered"
+        elsif !name.match?(DevBox::BOX_RE)
+          session["sessions_error"] = "bad box name"
+        else
+          res = DevBox.run(box, "teardown #{name}")
+          # Never report success for a box that is still there.
+          unless res[:ok]
+            detail = (res[:error] || res[:output]).to_s.strip
+            session["sessions_error"] = "could not tear down #{name}: #{detail[0, 400]}"
+          end
         end
         r.redirect "/sessions"
       end
@@ -262,6 +279,7 @@ class ReviewQueue < Roda
           []
         end
         view("sessions", locals: {jobs: jobs, boxes: boxes, dev_box: box, login: current_login,
+                                  error: session.delete("sessions_error"),
                                   csrf_teardown: csrf_tag("/sessions/teardown"),
                                   csrf_cancel: csrf_tag("/sessions/cancel")},
           layout: false)
