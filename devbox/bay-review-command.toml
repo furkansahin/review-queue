@@ -5,6 +5,18 @@
 # worktree out at the pull request, so the diff against the base branch IS the
 # thing to review, and the command needs no arguments.
 
+# Also add install-skills.sh to `sync` and `setup` in [box], so each developer's
+# own Claude skills reach their boxes:
+#
+#   [box]
+#   sync  = [..., "install-skills.sh"]
+#   setup = ["bash /workspace/.bay/post-create.sh",
+#            "bash /workspace/.bay/install-skills.sh"]
+#
+# The repo is named per person in ~/.bay/env, not here, so bay.toml stays shared:
+#
+#   CLAUDE_SKILLS_REPO=furkansahin/skills
+
 [commands]
 review = """
 claude -p 'You are reviewing this pull request adversarially. \
