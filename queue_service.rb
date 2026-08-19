@@ -358,8 +358,12 @@ class QueueService
     chips.compact!
 
     {
-      key: "#{pr[:repo]}##{pr[:number]}",
-      repo: pr[:repo], number: pr[:number],
+      # repo is the bare name ("ubicloud"), which is what the row shows.
+      # repo_full is "owner/name", which is what GitHub, the job records and
+      # the dev box all need. The key uses the full name so a row and its job
+      # identify the same pull request.
+      key: "#{pr[:owner]}/#{pr[:repo]}##{pr[:number]}",
+      repo: pr[:repo], repo_full: "#{pr[:owner]}/#{pr[:repo]}", number: pr[:number],
       last_at: pr.dig(:last, :at),
       buckets: pr[:buckets] + (quick ? [:quick] : []), settled: settled,
       # Reddest first: oldest wait_from means most days waiting, which is what

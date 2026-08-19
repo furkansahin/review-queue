@@ -18,7 +18,7 @@ GitHubOAuth.class_eval { define_method(:exchange) { |_| "gho_x" } }
 GitHubClient.class_eval { define_method(:get) { |_| {"login" => WHO[:login]} } }
 
 def mkrow(repo, n)
-  {key: "#{repo}##{n}", repo: repo, number: n, last_at: Time.now - 86_400, settled: false,
+  {key: "#{repo}##{n}", repo: repo.split("/").last, repo_full: repo, number: n, last_at: Time.now - 86_400, settled: false,
    buckets: [:review], quick: false, draft: false, url: "https://github.com/#{repo}/pull/#{n}",
    title: "PR #{n}", ref: "#{repo} ##{n}", author: "someone", state: "To review",
    state_bg: "var(--state-todo-bg)", state_color: "var(--state-todo-fg)", chips: [],
@@ -70,6 +70,10 @@ DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES
 
 get "/"
 check("Review button is offered", last_response.body.include?(">Review<"), true)
+# the form must post owner/name, not the bare repo name: a bare name fails
+# DevBox validation with "bad repo"
+check("form posts the full owner/name",
+      last_response.body.include?('name="repo" value="ubicloud/ubicloud"'), true)
 check("Sessions link is in the bar", last_response.body.include?('href="/sessions"'), true)
 
 tok = csrf_for(last_response.body, "/review")

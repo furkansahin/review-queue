@@ -57,6 +57,8 @@ check("rejects a newline in the box name",
       raises(DevBox::Error) { DevBox.review_command(repo: "o/r", pr_number: 1, box: "b\nreview x") }, "bad box name")
 check("rejects a path traversal repo",
       raises(DevBox::Error) { DevBox.review_command(repo: "../../etc", pr_number: 1, box: "b") }, "bad repo")
+check("rejects a bare repo name (the 'bad repo' bug)",
+      raises(DevBox::Error) { DevBox.review_command(repo: "ubicloud", pr_number: 6172, box: "rq-x-1") }, "bad repo")
 check("accepts a normal repo", DevBox.review_command(repo: "o.r-1/re_po", pr_number: 9, box: "rq-x-9"),
       "review o.r-1/re_po 9 rq-x-9")
 

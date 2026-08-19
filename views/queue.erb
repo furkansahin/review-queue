@@ -378,7 +378,7 @@
             <% if has_dev_box %>
               <form method="post" action="/review?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
                 <%== csrf_review %>
-                <input type="hidden" name="repo" value="<%= r[:repo] %>" />
+                <input type="hidden" name="repo" value="<%= r[:repo_full] %>" />
                 <input type="hidden" name="pr" value="<%= r[:number] %>" />
                 <button class="mini" type="submit" title="start an adversarial review on your dev box">Review</button>
               </form>
