@@ -30,11 +30,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       postgresql-client psmisc \
     && rm -rf /var/lib/apt/lists/*
 
-# bay runs the box as "dev"; the toolchain must belong to that user or mise
-# reinstalls it.
-RUN useradd -m -s /bin/bash dev
-USER dev
+# Do NOT create the dev user here. bay's own Dockerfile runs
+#   groupadd --gid 1000 dev && useradd --uid 1000 --gid 1000 -m ...
+# unconditionally, and it fails with exit 9 if the user already exists.
+#
+# So build the home directory and own it by the numeric ids bay will use. The
+# later useradd then adopts it, and the toolchain is already the dev user's.
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN mkdir -p /home/dev/.local/share/mise /home/dev/.local/bin /home/dev/.claude \
+    && chown -R ${USER_UID}:${USER_GID} /home/dev
+USER ${USER_UID}:${USER_GID}
 WORKDIR /home/dev
+ENV HOME=/home/dev
 
 RUN curl -fsSL https://mise.run | sh
 ENV PATH=/home/dev/.local/bin:/home/dev/.local/share/mise/shims:$PATH

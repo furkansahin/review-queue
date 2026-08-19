@@ -129,10 +129,24 @@
       </div>
       <div class="sub">finished <%= j["finished_at"] %><%= j["error"] ? " · #{j["error"]}" : "" %></div>
       <% if j["output"] && !j["output"].empty? %>
-        <details>
-          <summary>review output (<%= j["output"].length %> characters)</summary>
-          <pre><%= j["output"] %></pre>
+        <%
+          # An older wrapper wrote bay's build log and claude's review into one
+          # stream. Split on the marker it used, so an old job still reads well
+          # instead of burying the review under thousands of build lines.
+          full = j["output"].to_s
+          idx = full.rindex("== review")
+          noise, review = idx ? [full[0...idx], full[(idx + 9)..].to_s.lstrip] : [nil, full]
+        %>
+        <details open>
+          <summary>claude's review (<%= review.length %> characters)</summary>
+          <pre><%= review %></pre>
         </details>
+        <% if noise && !noise.strip.empty? %>
+          <details>
+            <summary style="color: var(--muted-2);">build log from bay (<%= noise.lines.count %> lines) — not the review</summary>
+            <pre><%= noise.lines.last(200).join %></pre>
+          </details>
+        <% end %>
       <% end %>
     </div>
   <% end %>

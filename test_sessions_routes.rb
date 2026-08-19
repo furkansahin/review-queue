@@ -160,6 +160,16 @@ DB.exec("UPDATE review_jobs SET state='done', output=$1, finished_at=now()", ["F
 get "/sessions"
 check("finished job shows its output", last_response.body.include?("FINDING: something"), true)
 
+# a job from the old single-stream wrapper must not bury the review
+mixed = (["docker build noise"] * 500).join("\n") + "\n== review\n## Review summary\nthe actual finding"
+DB.exec("UPDATE review_jobs SET output=$1 WHERE state='done'", [mixed])
+get "/sessions"
+b = last_response.body
+check("old mixed log: review is split out", b.include?("claude&#39;s review") || b.include?("claude's review"), true)
+check("old mixed log: build noise is behind its own toggle", b.include?("not the review"), true)
+check("old mixed log: the finding is present", b.include?("the actual finding"), true)
+check("old mixed log: noise is truncated", b.scan("docker build noise").size <= 200, true)
+
 # another user must not see it
 WHO[:login] = "mohi-kalantari"
 other = Rack::Test::Session.new(Rack::MockSession.new(app))
