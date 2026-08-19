@@ -17,7 +17,19 @@ set -euo pipefail
 ALLOWED_REPOS="${RQ_ALLOWED_REPOS:-ubicloud/ubicloud}"
 # The checkout bay runs from. bay finds its config by this folder's name.
 REPO_PATH="${RQ_REPO_PATH:-$HOME/ubicloud}"
-BAY="${RQ_BAY:-$HOME/go/bin/bay}"
+# Look where bay actually lands, not one hard-coded path: go install puts it in
+# ~/go/bin, a package or a manual copy usually lands in /usr/local/bin, and a
+# custom build can be anywhere on PATH.
+resolve_bay() {
+  if [ -n "${RQ_BAY:-}" ] && [ -x "${RQ_BAY}" ]; then echo "$RQ_BAY"; return 0; fi
+  local c
+  for c in "$HOME/go/bin/bay" /usr/local/bin/bay /usr/bin/bay "$HOME/.local/bin/bay"; do
+    [ -x "$c" ] && { echo "$c"; return 0; }
+  done
+  c=$(command -v bay 2>/dev/null) && [ -n "$c" ] && { echo "$c"; return 0; }
+  return 1
+}
+BAY="$(resolve_bay || true)"
 STATE_DIR="${RQ_STATE_DIR:-$HOME/.rq}"
 
 die() { echo "rq-review: $*" >&2; exit 1; }
@@ -37,10 +49,16 @@ valid_repo() {
 
 case "$verb" in
   ping)
-    # Proves the key, this script, bay and the checkout are all in place.
-    [ -x "$BAY" ]      || die "bay not found at $BAY"
-    [ -d "$REPO_PATH" ] || die "checkout not found at $REPO_PATH"
-    echo "pong $(hostname) bay=$("$BAY" --help >/dev/null 2>&1 && echo ok || echo unknown)"
+    # Proves the key, this script, bay and the checkout are all in place. Say
+    # what is missing and where it was looked for, so a failure is actionable.
+    if [ -z "$BAY" ]; then
+      die "bay not found. Looked in: \$RQ_BAY, ~/go/bin/bay, /usr/local/bin/bay, /usr/bin/bay, ~/.local/bin/bay, \$PATH.
+          Run devbox/setup.sh to build it, or set RQ_BAY to its path.
+          Note bay is a private repo: your GITHUB_TOKEN needs Contents: Read on ubicloud/bay."
+    fi
+    [ -d "$REPO_PATH" ] || die "checkout not found at $REPO_PATH (set RQ_REPO_PATH if it is elsewhere)"
+    [ -f "$HOME/.bay/ubicloud/bay.toml" ] || die "bay config not found at ~/.bay/ubicloud (private repo: ubicloud/bay-ubicloud)"
+    echo "pong $(hostname) bay=$BAY"
     ;;
 
   review)

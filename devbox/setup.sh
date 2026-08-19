@@ -43,6 +43,26 @@ if [ -z "${GITHUB_TOKEN:-}" ] || [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   echo
 fi
 
+# A fine-grained PAT is scoped to SELECTED repositories, so a token that works
+# for the queue can still fail to clone bay. Check all three up front and name
+# the one that is missing, rather than failing later inside a git clone.
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  echo "== token reach =="
+  for r in ubicloud/ubicloud ubicloud/bay ubicloud/bay-ubicloud; do
+    code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 20 \
+      -H "Authorization: Bearer $GITHUB_TOKEN" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/$r" 2>/dev/null)
+    case "$code" in
+      200) ok "$r readable" ;;
+      404) todo "$r NOT readable by this token (404). A fine-grained PAT lists
+          repositories explicitly -- add this one with Contents: Read." ;;
+      401) todo "the token was rejected (401). Has it expired?" ;;
+      *)   todo "$r returned HTTP $code" ;;
+    esac
+  done
+fi
+
 echo "== packages =="
 NEED=()
 for c in git rsync script curl; do command -v "$c" >/dev/null || NEED+=("$c"); done

@@ -9,7 +9,7 @@ private repositories.
 ```sh
 mkdir -p ~/.bay && cat > ~/.bay/env <<'EOF'
 CLAUDE_CODE_OAUTH_TOKEN=...   # from: claude setup-token
-GITHUB_TOKEN=...              # a PAT with Contents: Read
+GITHUB_TOKEN=...              # see the scope note below
 EOF
 chmod 600 ~/.bay/env
 ```
@@ -30,6 +30,24 @@ wrapper.
 `pong <hostname>`.
 
 That is the whole setup: two tokens, one script, one paste.
+
+## The GITHUB_TOKEN needs three repositories
+
+A fine-grained PAT lists repositories **explicitly**, so one that works for the
+queue can still fail to fetch bay. Give it **Contents: Read** on all three:
+
+| Repository | Needed for |
+| --- | --- |
+| `ubicloud/ubicloud` | the checkout, and `gh pr checkout` for `--pr` |
+| `ubicloud/bay` | building the bay binary |
+| `ubicloud/bay-ubicloud` | the bay config |
+
+`setup.sh` checks all three before it does anything and names the one that is
+missing. A missing `ubicloud/bay` is what produces:
+
+```
+rq-review: bay not found. Looked in: ...
+```
 
 ## Why bay has to be built rather than installed
 
