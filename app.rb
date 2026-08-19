@@ -4,6 +4,17 @@ require_relative "queue_service"
 require_relative "auth"
 require_relative "snooze"
 
+# The review feature needs Postgres and a dev box. Without DATABASE_URL the
+# dashboard still runs and simply does not offer it, so this branch can deploy
+# before the database exists.
+REVIEWS_ENABLED = !ENV["DATABASE_URL"].to_s.empty?
+if REVIEWS_ENABLED
+  require_relative "db"
+  require_relative "jobs"
+  require_relative "devbox"
+  DB.setup!
+end
+
 def env_required(key)
   ENV[key] || abort("missing required env var #{key}")
 end
@@ -119,6 +130,52 @@ class ReviewQueue < Roda
       r.redirect "/?#{r.query_string}"
     end
 
+    r.on "sessions" do
+      next r.redirect "/" unless REVIEWS_ENABLED
+
+      r.post "teardown" do
+        check_csrf!
+        id = r.params["id"].to_s
+        job = DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2", [current_login, id])
+        if job && (box = Jobs.dev_box(job))
+          DevBox.run(box, "teardown #{job["box_name"]}")
+        end
+        r.redirect "/sessions"
+      end
+
+      r.post "cancel" do
+        check_csrf!
+        Jobs.cancel(login: current_login, id: r.params["id"].to_s)
+        r.redirect "/sessions"
+      end
+
+      r.get true do
+        jobs = Jobs.for_user(current_login)
+        box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
+        # Boxes outlive their reviews, so ask the dev box what actually exists
+        # rather than trusting our own rows.
+        boxes = if box
+          res = DevBox.run(box, "list")
+          res[:ok] ? res[:output].to_s.lines.map { |l| l.strip.split("\t") }.reject(&:empty?) : []
+        else
+          []
+        end
+        view("sessions", locals: {jobs: jobs, boxes: boxes, dev_box: box, login: current_login,
+                                  csrf_teardown: csrf_tag("/sessions/teardown"),
+                                  csrf_cancel: csrf_tag("/sessions/cancel")},
+          layout: false)
+      end
+    end
+
+    r.post "review" do
+      check_csrf!
+      if REVIEWS_ENABLED
+        Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s,
+                     pr_number: r.params["pr"].to_s.to_i)
+      end
+      r.redirect "/?#{r.query_string}"
+    end
+
     r.post "settings" do
       check_csrf!
       session["label"] = QueueService.clean_label(r.params["label"])
@@ -172,6 +229,9 @@ class ReviewQueue < Roda
                              csrf_snooze: csrf_tag("/snooze"),
                              csrf_settings: csrf_tag("/settings"),
                              suggested_label: SUGGESTED_LABEL,
+                             reviews_enabled: REVIEWS_ENABLED,
+                             csrf_review: csrf_tag("/review"),
+                             jobs_by_key: (REVIEWS_ENABLED ? Jobs.by_key(current_login) : {}),
                              csrf_unsnooze: csrf_tag("/unsnooze"),
                              snooze: snooze},
         layout: false)

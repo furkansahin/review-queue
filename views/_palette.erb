@@ -1,0 +1,126 @@
+
+  /* Light is the base palette; the dark block below only redefines the tokens.
+     Row colours (state pills, age bars, CI dots, chips) are emitted as
+     var(--...) by queue_service.rb, so both themes resolve from here. */
+  :root {
+    color-scheme: light;
+    --bg: oklch(0.985 0.004 70);
+    --fg: oklch(0.26 0.01 60);
+    --surface: oklch(1 0 0);
+    --border: oklch(0.9 0.006 70);
+    --border-soft: oklch(0.94 0.004 70);
+    --border-head: oklch(0.92 0.006 70);
+    --muted: oklch(0.58 0.01 60);
+    --muted-2: oklch(0.62 0.01 60);
+    --muted-3: oklch(0.65 0.01 60);
+    --cell: oklch(0.45 0.01 60);
+    --link: oklch(0.45 0.11 250);
+    --link-hover: oklch(0.38 0.13 250);
+    --accent: oklch(0.45 0.11 250);
+    --tab-on-fg: oklch(0.28 0.02 250);
+    --tab-hover-fg: oklch(0.35 0.01 60);
+    --badge-bg: oklch(0.96 0.004 70);
+    --badge-fg: oklch(0.6 0.01 60);
+    --badge-on-bg: oklch(0.95 0.03 250);
+    --badge-on-fg: oklch(0.45 0.1 250);
+    --btn-bg: oklch(1 0 0);
+    --btn-border: oklch(0.88 0.006 70);
+    --btn-fg: oklch(0.3 0.01 60);
+    --btn-hover-bg: oklch(0.96 0.004 70);
+    --row-hover: oklch(0.965 0.004 70);
+    --tag-bg: oklch(0.96 0.004 70);
+    --tag-border: oklch(0.91 0.006 70);
+    --tag-fg: oklch(0.55 0.01 60);
+    --err-bg: oklch(0.97 0.02 25);
+    --err-border: oklch(0.82 0.09 25);
+    --err-fg: oklch(0.42 0.12 25);
+    --hero-bg: oklch(0.985 0.012 250);
+    --hero-border: oklch(0.88 0.04 250);
+    --track: oklch(0.93 0.005 70);
+    --track-fill: oklch(0.72 0.13 150);
+    --win-fg: oklch(0.5 0.13 150);
+    --quick-fg: oklch(0.48 0.12 150);
+
+    --row: oklch(1 0 0);
+    --row-settled: oklch(0.995 0.002 70);
+    --state-them-bg: oklch(0.95 0.01 250);   --state-them-fg: oklch(0.45 0.1 250);
+    --state-done-bg: oklch(0.955 0.004 70);  --state-done-fg: oklch(0.55 0.01 60);
+    --state-yours-bg: oklch(0.95 0.05 85);   --state-yours-fg: oklch(0.45 0.11 65);
+    --state-todo-bg: oklch(0.94 0.06 25);    --state-todo-fg: oklch(0.45 0.14 25);
+    --age-idle-bar: oklch(0.9 0.005 70);     --age-idle-fg: oklch(0.66 0.01 60);
+    --age-stale-bar: oklch(0.55 0.17 25);    --age-stale-fg: oklch(0.48 0.16 25);
+    --age-hot-bar: oklch(0.66 0.16 45);      --age-hot-fg: oklch(0.52 0.14 45);
+    --age-warn-bar: oklch(0.78 0.14 85);     --age-warn-fg: oklch(0.55 0.11 75);
+    --age-fresh-bar: oklch(0.72 0.13 150);   --age-fresh-fg: oklch(0.48 0.1 150);
+    --ci-fail: oklch(0.58 0.17 25);
+    --ci-pass: oklch(0.68 0.14 150);
+    --ci-pending: oklch(0.78 0.13 85);
+    --ci-none: oklch(0.88 0.005 70);
+    --chip-grey-bg: oklch(0.96 0.003 70);    --chip-grey-br: oklch(0.9 0.006 70);    --chip-grey-fg: oklch(0.6 0.01 60);
+    --chip-blue-bg: oklch(0.96 0.03 250);    --chip-blue-br: oklch(0.88 0.05 250);   --chip-blue-fg: oklch(0.45 0.1 250);
+    --chip-violet-bg: oklch(0.97 0.02 300);  --chip-violet-br: oklch(0.9 0.04 300);  --chip-violet-fg: oklch(0.47 0.1 300);
+    --chip-faint-bg: oklch(0.98 0.002 70);   --chip-faint-br: oklch(0.92 0.006 70);  --chip-faint-fg: oklch(0.62 0.01 60);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: oklch(0.19 0.006 70);
+      --fg: oklch(0.91 0.006 70);
+      --surface: oklch(0.235 0.006 70);
+      --border: oklch(0.32 0.008 70);
+      --border-soft: oklch(0.28 0.007 70);
+      --border-head: oklch(0.31 0.008 70);
+      --muted: oklch(0.66 0.008 70);
+      --muted-2: oklch(0.6 0.008 70);
+      --muted-3: oklch(0.63 0.008 70);
+      --cell: oklch(0.78 0.008 70);
+      --link: oklch(0.76 0.1 250);
+      --link-hover: oklch(0.84 0.11 250);
+      --accent: oklch(0.7 0.12 250);
+      --tab-on-fg: oklch(0.85 0.07 250);
+      --tab-hover-fg: oklch(0.86 0.008 70);
+      --badge-bg: oklch(0.3 0.006 70);
+      --badge-fg: oklch(0.7 0.008 70);
+      --badge-on-bg: oklch(0.33 0.06 250);
+      --badge-on-fg: oklch(0.83 0.09 250);
+      --btn-bg: oklch(0.28 0.007 70);
+      --btn-border: oklch(0.38 0.009 70);
+      --btn-fg: oklch(0.88 0.006 70);
+      --btn-hover-bg: oklch(0.33 0.008 70);
+      --row-hover: oklch(0.28 0.008 70);
+      --tag-bg: oklch(0.28 0.006 70);
+      --tag-border: oklch(0.35 0.008 70);
+      --tag-fg: oklch(0.72 0.008 70);
+      --err-bg: oklch(0.27 0.05 25);
+      --err-border: oklch(0.44 0.1 25);
+      --err-fg: oklch(0.83 0.11 25);
+      --hero-bg: oklch(0.255 0.025 250);
+      --hero-border: oklch(0.4 0.06 250);
+      --track: oklch(0.3 0.006 70);
+      --track-fill: oklch(0.68 0.14 150);
+      --win-fg: oklch(0.79 0.13 150);
+      --quick-fg: oklch(0.77 0.12 150);
+
+      --row: oklch(0.235 0.006 70);
+      --row-settled: oklch(0.215 0.005 70);
+      --state-them-bg: oklch(0.31 0.05 250);   --state-them-fg: oklch(0.82 0.09 250);
+      --state-done-bg: oklch(0.29 0.005 70);   --state-done-fg: oklch(0.72 0.008 70);
+      --state-yours-bg: oklch(0.33 0.06 85);   --state-yours-fg: oklch(0.87 0.1 85);
+      --state-todo-bg: oklch(0.32 0.07 25);    --state-todo-fg: oklch(0.85 0.1 25);
+      --age-idle-bar: oklch(0.38 0.006 70);    --age-idle-fg: oklch(0.62 0.008 70);
+      --age-stale-bar: oklch(0.62 0.18 25);    --age-stale-fg: oklch(0.75 0.15 25);
+      --age-hot-bar: oklch(0.7 0.16 45);       --age-hot-fg: oklch(0.8 0.13 45);
+      --age-warn-bar: oklch(0.8 0.14 85);      --age-warn-fg: oklch(0.85 0.12 85);
+      --age-fresh-bar: oklch(0.72 0.14 150);   --age-fresh-fg: oklch(0.8 0.12 150);
+      --ci-fail: oklch(0.64 0.18 25);
+      --ci-pass: oklch(0.72 0.15 150);
+      --ci-pending: oklch(0.81 0.13 85);
+      --ci-none: oklch(0.42 0.006 70);
+      --chip-grey-bg: oklch(0.29 0.005 70);    --chip-grey-br: oklch(0.37 0.008 70);   --chip-grey-fg: oklch(0.72 0.008 70);
+      --chip-blue-bg: oklch(0.3 0.045 250);    --chip-blue-br: oklch(0.41 0.06 250);   --chip-blue-fg: oklch(0.8 0.09 250);
+      --chip-violet-bg: oklch(0.31 0.045 300); --chip-violet-br: oklch(0.41 0.06 300); --chip-violet-fg: oklch(0.81 0.08 300);
+      --chip-faint-bg: oklch(0.25 0.004 70);   --chip-faint-br: oklch(0.33 0.006 70);  --chip-faint-fg: oklch(0.64 0.008 70);
+    }
+  }
+

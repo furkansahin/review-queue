@@ -2,7 +2,7 @@
   tabs = service.tabs
   counts = snap[:counts] || {}
   qs = ->(t, h) { "/?tab=#{t}#{h ? "&hide=1" : ""}" }
-  cols = "4px 132px 1fr 92px 132px 150px 84px 76px 92px"
+  cols = "4px 132px 1fr 92px 132px 150px 84px 76px 168px"
   snoozing = tab == :snoozed
 
   # A draft is listed but is not work for today, so it counts in neither
@@ -251,6 +251,9 @@
     <%== csrf %>
     <button class="btn" type="submit">Refresh</button>
   </form>
+  <% if reviews_enabled %>
+    <a class="btn" href="/sessions" style="text-decoration: none;">Sessions</a>
+  <% end %>
   <form method="post" action="/logout" style="margin: 0;">
     <%== csrf_logout %>
     <button class="btn" type="submit">Sign out</button>
@@ -352,7 +355,24 @@
         <span class="mono" style="font-size: 11px;"><%= r[:ci] %></span>
       </div>
       <div class="mono" style="text-align: right; font-weight: 500; font-size: 13px; color: <%= r[:age_text_color] %>;"><%= r[:age] %></div>
-      <div style="text-align: right;">
+      <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
+        <% if reviews_enabled && !r[:settled] %>
+          <% job = jobs_by_key[r[:key]] %>
+          <% if job && %w[queued running].include?(job["state"]) %>
+            <a class="mini" href="/sessions" title="a review is running on your dev box"
+               style="text-decoration: none;"><%= job["state"] %></a>
+          <% elsif job && job["state"] == "done" %>
+            <a class="mini" href="/sessions" title="the review is ready"
+               style="text-decoration: none; color: var(--quick-fg);">review ✓</a>
+          <% else %>
+            <form method="post" action="/review?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+              <%== csrf_review %>
+              <input type="hidden" name="repo" value="<%= r[:repo] %>" />
+              <input type="hidden" name="pr" value="<%= r[:number] %>" />
+              <button class="mini" type="submit" title="start an adversarial review on your dev box">Review</button>
+            </form>
+          <% end %>
+        <% end %>
         <% if snoozing %>
           <form method="post" action="/unsnooze?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
             <%== csrf_unsnooze %>

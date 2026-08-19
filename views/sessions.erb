@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="refresh" content="20" />
+<title>Sessions · Review queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+<%= File.read(File.expand_path("_palette.erb", __dir__)) %>
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
+         border-bottom: 1px solid var(--border); }
+  .btn { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 6px 14px; border: 1px solid var(--btn-border);
+         background: var(--btn-bg); border-radius: 6px; cursor: pointer; color: var(--btn-fg); }
+  .btn:hover { background: var(--btn-hover-bg); }
+  .mini { font: 500 11px 'IBM Plex Mono', monospace; padding: 4px 9px; border-radius: 5px;
+          border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--muted); cursor: pointer; }
+  .mini:hover { color: var(--fg); background: var(--btn-hover-bg); }
+  .wrap { padding: 20px 24px 80px; }
+  h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2);
+       font-family: 'IBM Plex Mono', monospace; font-weight: 600; margin: 26px 0 10px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 14px 16px; margin-bottom: 10px; }
+  .pill { font: 500 11px 'IBM Plex Mono', monospace; padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
+  .row1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .sub { font-size: 11px; color: var(--muted-3); font-family: 'IBM Plex Mono', monospace; margin-top: 6px; }
+  details > summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 10px;
+                      font-family: 'IBM Plex Mono', monospace; }
+  pre { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 8px;
+        padding: 12px 14px; overflow-x: auto; font-size: 12px; line-height: 1.5;
+        font-family: 'IBM Plex Mono', monospace; white-space: pre-wrap; word-break: break-word; }
+  .empty { padding: 48px 0; text-align: center; color: var(--muted-2); font-size: 13px; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.45 } }
+  .live { animation: pulse 1.6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .live { animation: none } }
+</style>
+</head>
+<body>
+<%
+  colours = {
+    "queued"  => ["var(--state-them-bg)",  "var(--state-them-fg)"],
+    "running" => ["var(--state-yours-bg)", "var(--state-yours-fg)"],
+    "done"    => ["var(--chip-blue-bg)",   "var(--chip-blue-fg)"],
+    "failed"  => ["var(--state-todo-bg)",  "var(--state-todo-fg)"]
+  }
+  live, past = jobs.partition { |j| %w[queued running].include?(j["state"]) }
+  claimed = jobs.map { |j| j["box_name"] }.to_set rescue claimed = jobs.map { |j| j["box_name"] }
+%>
+<div class="bar">
+  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Sessions</div>
+  <a class="mono" style="font-size: 12px;" href="/">← back to the queue</a>
+  <div style="flex: 1;"></div>
+  <div class="mono" style="font-size: 11px; color: var(--muted-2);">
+    @<%= login %><%= dev_box ? " · dev box #{dev_box["host"]}" : " · no dev box registered" %>
+  </div>
+</div>
+
+<div class="wrap">
+  <% unless dev_box %>
+    <div class="card">
+      <strong>No dev box registered.</strong>
+      <div class="sub">A review runs on your own dev box. Register one before starting a session.</div>
+    </div>
+  <% end %>
+
+  <h2>Active<%= live.empty? ? "" : " (#{live.size})" %></h2>
+  <% if live.empty? %>
+    <div class="empty">Nothing running. Press <span class="mono">Review</span> on a pull request.</div>
+  <% end %>
+  <% live.each do |j| %>
+    <% bg, fg = colours.fetch(j["state"], ["var(--chip-grey-bg)", "var(--chip-grey-fg)"]) %>
+    <div class="card">
+      <div class="row1">
+        <span class="pill <%= "live" if j["state"] == "running" %>" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
+        <a href="https://github.com/<%= j["repo"] %>/pull/<%= j["pr_number"] %>" target="_blank" rel="noreferrer"
+           style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
+        <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
+        <div style="flex: 1;"></div>
+        <form method="post" action="/sessions/cancel" style="margin: 0;">
+          <%== csrf_cancel %>
+          <input type="hidden" name="id" value="<%= j["id"] %>" />
+          <button class="mini" type="submit">Cancel</button>
+        </form>
+      </div>
+      <div class="sub">
+        started <%= j["started_at"] || j["created_at"] %>
+      </div>
+    </div>
+  <% end %>
+
+  <h2>Previous<%= past.empty? ? "" : " (#{past.size})" %></h2>
+  <% if past.empty? %>
+    <div class="empty">No finished reviews yet.</div>
+  <% end %>
+  <% past.each do |j| %>
+    <% bg, fg = colours.fetch(j["state"], ["var(--chip-grey-bg)", "var(--chip-grey-fg)"]) %>
+    <div class="card">
+      <div class="row1">
+        <span class="pill" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
+        <a href="https://github.com/<%= j["repo"] %>/pull/<%= j["pr_number"] %>" target="_blank" rel="noreferrer"
+           style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
+        <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
+        <div style="flex: 1;"></div>
+        <form method="post" action="/sessions/teardown" style="margin: 0;">
+          <%== csrf_teardown %>
+          <input type="hidden" name="id" value="<%= j["id"] %>" />
+          <button class="mini" type="submit" title="bay down: free the box's disk">Tear down box</button>
+        </form>
+      </div>
+      <div class="sub">finished <%= j["finished_at"] %><%= j["error"] ? " · #{j["error"]}" : "" %></div>
+      <% if j["output"] && !j["output"].empty? %>
+        <details>
+          <summary>review output (<%= j["output"].length %> characters)</summary>
+          <pre><%= j["output"] %></pre>
+        </details>
+      <% end %>
+    </div>
+  <% end %>
+
+  <h2>Boxes on your dev box<%= boxes.empty? ? "" : " (#{boxes.size})" %></h2>
+  <div class="sub" style="margin-bottom: 10px;">
+    What bay actually has. A box outlives its review and keeps its disk until you tear it down.
+  </div>
+  <% if boxes.empty? %>
+    <div class="empty">No boxes.</div>
+  <% end %>
+  <% boxes.each do |name, branch, status| %>
+    <div class="card">
+      <div class="row1">
+        <span class="mono" style="font-weight: 500;"><%= name %></span>
+        <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= branch %></span>
+        <span class="mono" style="font-size: 11px; color: <%= status.to_s.start_with?("Up") ? "var(--age-fresh-fg)" : "var(--muted-2)" %>;"><%= status %></span>
+        <% unless jobs.any? { |j| j["box_name"] == name } %>
+          <span class="mono" style="font-size: 11px; color: var(--age-warn-fg);">not from this dashboard</span>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</div>
+</body>
+</html>

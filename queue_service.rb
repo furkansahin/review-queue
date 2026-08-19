@@ -359,6 +359,7 @@ class QueueService
 
     {
       key: "#{pr[:repo]}##{pr[:number]}",
+      repo: pr[:repo], number: pr[:number],
       last_at: pr.dig(:last, :at),
       buckets: pr[:buckets] + (quick ? [:quick] : []), settled: settled,
       # Reddest first: oldest wait_from means most days waiting, which is what
