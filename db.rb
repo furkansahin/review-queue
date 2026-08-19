@@ -70,19 +70,25 @@ module DB
   def url
     raw = ENV["DATABASE_URL"].to_s.strip
     raise Error, "DATABASE_URL is not set" if raw.empty?
-    return raw if raw.match?(/(?:\A|[?&\s])sslrootcert=/)
+
+    # A real path is the operator's own choice, so leave it alone. "system" is
+    # NOT such a choice here: Ubicloud's connection string ships it, and it is
+    # exactly the value that cannot work, because the pg gem carries its own
+    # libpq/OpenSSL whose OPENSSLDIR is not the container's /etc/ssl/certs.
+    existing = raw[/(?:\A|[?&\s])sslrootcert=([^&\s]+)/, 1]
+    return raw if existing && existing != "system"
 
     ca = ENV["RQ_DB_CA_CERT"].to_s.strip
     root = ca_path(ca.empty? ? DEFAULT_CA_PEM : ca)
 
     if raw.match?(%r{\Apostgres(?:ql)?://})
       uri = URI.parse(raw)
-      query = URI.decode_www_form(uri.query.to_s)
+      query = URI.decode_www_form(uri.query.to_s).reject { |k, _| k == "sslrootcert" }
       query << ["sslrootcert", root]
       uri.query = URI.encode_www_form(query)
       uri.to_s
     else
-      "#{raw} sslrootcert=#{root}"   # keyword/value form
+      raw.gsub(/(?:\A|\s)sslrootcert=\S+/, "").strip + " sslrootcert=#{root}"
     end
   end
 
