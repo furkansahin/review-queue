@@ -10,6 +10,7 @@ ENV["RQ_SESSION_SECRET"]         = "a" * 64
 ENV["RQ_INSECURE_COOKIES"]       = "1"
 
 require "rack/test"
+require "json"
 require_relative "app"
 require_relative "devbox"
 
@@ -121,12 +122,32 @@ check("shows real boxes from the dev box", last_response.body.include?("rq-ubicl
 # progress on a running job must show, and must not change its state
 job_id = DB.row("SELECT id FROM review_jobs ORDER BY id DESC LIMIT 1")["id"]
 DB.exec("UPDATE review_jobs SET state='running' WHERE id=$1", [job_id])
-Jobs.progress(job_id, "== bay up rq-ubicloud-6172 --pr 6172\nbuilding container...")
-check("progress is stored", DB.row("SELECT output FROM review_jobs WHERE id=$1", [job_id])["output"].include?("building container"), true)
+Jobs.progress(job_id, "## Review summary\nfinding one", "reviewing")
+check("progress is stored", DB.row("SELECT output FROM review_jobs WHERE id=$1", [job_id])["output"].include?("finding one"), true)
+check("phase is stored", DB.row("SELECT phase FROM review_jobs WHERE id=$1", [job_id])["phase"], "reviewing")
 check("progress does not change state", DB.row("SELECT state FROM review_jobs WHERE id=$1", [job_id])["state"], "running")
 get "/sessions"
-check("live output is shown while running", last_response.body.include?("live output"), true)
-check("the partial text is shown", last_response.body.include?("building container"), true)
+check("claude output panel is shown while running", last_response.body.include?("claude output"), true)
+check("the partial text is shown", last_response.body.include?("finding one"), true)
+
+# the tail endpoint returns only what is new
+t = JSON.parse(get("/sessions/tail?id=#{job_id}&offset=0").body)
+check("tail returns the whole text at offset 0", t["chunk"].include?("finding one"), true)
+check("tail reports the phase", t["phase"], "reviewing")
+check("tail says not done", t["done"], false)
+t2 = JSON.parse(get("/sessions/tail?id=#{job_id}&offset=#{t["length"]}").body)
+check("tail returns nothing new at the end", t2["chunk"], "")
+Jobs.progress(job_id, "## Review summary\nfinding one\nfinding two", "reviewing")
+t3 = JSON.parse(get("/sessions/tail?id=#{job_id}&offset=#{t["length"]}").body)
+check("tail returns only the appended part", t3["chunk"].strip, "finding two")
+# another user must not be able to read my job through it
+WHO[:login] = "mohi-kalantari"
+oo = Rack::Test::Session.new(Rack::MockSession.new(app))
+oo.get "/auth/start"; s3 = oo.last_response.location[/state=([^&]+)/, 1]
+oo.get "/auth/callback?code=c&state=#{s3}"
+oo.get "/sessions/tail?id=#{job_id}&offset=0"
+check("tail is scoped to the owner", oo.last_response.body.include?("finding one"), false)
+WHO[:login] = "furkansahin"
 # and it must refuse to touch a job that already finished
 DB.exec("UPDATE review_jobs SET state='done' WHERE id=$1", [job_id])
 Jobs.progress(job_id, "LATE WRITE")

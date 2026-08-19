@@ -56,24 +56,32 @@ case "$verb" in
       echo "already running"; exit 0
     fi
 
-    echo running > "$dir/state"
+    # Two logs on purpose. build.log is bay's container noise; log holds ONLY
+    # what claude wrote, because that is the thing worth watching.
+    echo building > "$dir/state"
     : > "$dir/log"
+    : > "$dir/build.log"
 
     # A review takes minutes, so it must outlive this ssh connection. The
     # dashboard polls with `status` and collects with `result`.
     setsid nohup bash -c '
       set -o pipefail
       bay="$1"; repo="$2"; pr="$3"; box="$4"; dir="$5"; repo_path="$6"
-      cd "$repo_path" || { echo "cannot cd to $repo_path"; echo failed > "$dir/state"; exit 1; }
-      {
-        echo "== bay up $box --pr $pr ($repo)"
-        "$bay" up "$box" --pr "$pr" || exit 1
-        echo "== review"
-        # No tty needed: verified with docker compose v5.5.0, bay run exits 0
-        # over a plain ssh exec with stdin closed.
-        "$bay" run "$box" review </dev/null
-      } >> "$dir/log" 2>&1
-      if [ $? -eq 0 ]; then echo done > "$dir/state"; else echo failed > "$dir/state"; fi
+      cd "$repo_path" || { echo "cannot cd to $repo_path" >> "$dir/build.log"; echo failed > "$dir/state"; exit 1; }
+
+      if ! "$bay" up "$box" --pr "$pr" >> "$dir/build.log" 2>&1; then
+        echo failed > "$dir/state"
+        exit 1
+      fi
+
+      echo reviewing > "$dir/state"
+      # No tty needed: verified with docker compose v5.5.0, bay run exits 0
+      # over a plain ssh exec with stdin closed.
+      if "$bay" run "$box" review </dev/null >> "$dir/log" 2>&1; then
+        echo done > "$dir/state"
+      else
+        echo failed > "$dir/state"
+      fi
     ' _ "$BAY" "$repo" "$pr" "$box" "$dir" "$REPO_PATH" >/dev/null 2>&1 &
 
     echo "$!" > "$dir/pid"
@@ -87,9 +95,16 @@ case "$verb" in
     ;;
 
   result)
+    # Claude's output only. Use `build` for bay's side of it.
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     dir="$STATE_DIR/$box"
-    [ -f "$dir/log" ] && tail -c 200000 "$dir/log" || echo "no output"
+    [ -f "$dir/log" ] && tail -c 200000 "$dir/log" || true
+    ;;
+
+  build)
+    box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
+    dir="$STATE_DIR/$box"
+    [ -f "$dir/build.log" ] && tail -c 40000 "$dir/build.log" || true
     ;;
 
   list)
@@ -114,6 +129,6 @@ case "$verb" in
     ;;
 
   *)
-    die "refused: only ping, review, status, result and teardown are allowed"
+    die "refused: only ping, review, status, result, build, list and teardown are allowed"
     ;;
 esac

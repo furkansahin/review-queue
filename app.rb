@@ -1,4 +1,5 @@
 require "roda"
+require "json"
 require "securerandom"
 require_relative "queue_service"
 require_relative "auth"
@@ -228,6 +229,25 @@ class ReviewQueue < Roda
         check_csrf!
         Jobs.cancel(login: current_login, id: r.params["id"].to_s)
         r.redirect "/sessions"
+      end
+
+      # Byte-offset tail. Returns only what is new, so a browser can follow a
+      # running review with short requests instead of holding a thread open for
+      # the five minutes a box takes.
+      r.get "tail" do
+        response["Content-Type"] = "application/json"
+        response["Cache-Control"] = "no-store"
+        job = DB.row("SELECT id, state, phase, output FROM review_jobs WHERE login = $1 AND id = $2",
+                     [current_login, r.params["id"].to_s])
+        next '{"error":"not found"}' unless job
+
+        text = job["output"].to_s
+        offset = r.params["offset"].to_s.to_i.clamp(0, text.bytesize)
+        # A shrinking log means it was replaced; send it from the start again.
+        offset = 0 if offset > text.bytesize
+        JSON.generate(state: job["state"], phase: job["phase"], length: text.bytesize,
+                      chunk: text.byteslice(offset, text.bytesize - offset).to_s,
+                      done: !%w[queued running].include?(job["state"]))
       end
 
       r.get true do

@@ -64,15 +64,22 @@ def poll_running
     case state
     when "done", "failed"
       result = DevBox.run(box, "result #{job["box_name"]}")
+      # A failed build leaves no review text, so fall back to bay's log for the
+      # error message only -- it is never shown as review output.
+      detail = nil
+      if state == "failed"
+        b = DevBox.run(box, "build #{job["box_name"]}")
+        detail = b[:output].to_s.lines.last(12).join.strip
+      end
       Jobs.finish(job["id"], state == "done" ? "done" : "failed",
         output: result[:output],
-        error: state == "failed" ? "the review command failed on the dev box" : nil)
+        error: state == "failed" ? "the run failed on the dev box\n#{detail}" : nil)
       log("#{job["box_name"]} finished: #{state}")
-    when "running"
-      # Store what the box has printed so far, so the sessions page can show
-      # progress instead of a spinner for the five minutes a box takes to build.
+    when "building", "reviewing", "running"
+      # result is claude's output only; bay's build noise stays in build.log and
+      # is never streamed to the page.
       partial = DevBox.run(box, "result #{job["box_name"]}")
-      Jobs.progress(job["id"], partial[:output]) if partial[:ok]
+      Jobs.progress(job["id"], partial[:output], state) if partial[:ok]
     else
       Jobs.finish(job["id"], "failed", output: nil, error: "gave up after #{Jobs::STALE_AFTER}s") if Jobs.stale?(job)
     end
@@ -92,6 +99,12 @@ if $PROGRAM_NAME == __FILE__
     rescue StandardError => e
       log("tick failed: #{e.class}: #{e.message}")
     end
-    sleep TICK
+    # Claude writes in bursts; poll it closely, and idle back while a box builds.
+    reviewing = begin
+      DB.row("SELECT 1 FROM review_jobs WHERE state = 'running' AND phase = 'reviewing' LIMIT 1")
+    rescue StandardError
+      nil
+    end
+    sleep(reviewing ? [TICK, 3].min : TICK)
   end
 end

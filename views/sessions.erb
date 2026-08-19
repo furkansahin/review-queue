@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta http-equiv="refresh" content="20" />
+<noscript><meta http-equiv="refresh" content="20" /></noscript>
 <title>Sessions · Review queue</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
@@ -33,6 +33,7 @@
   .sub { font-size: 11px; color: var(--muted-3); font-family: 'IBM Plex Mono', monospace; margin-top: 6px; }
   details > summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 10px;
                       font-family: 'IBM Plex Mono', monospace; }
+  pre.tail { max-height: 340px; overflow-y: auto; }
   pre { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 8px;
         padding: 12px 14px; overflow-x: auto; font-size: 12px; line-height: 1.5;
         font-family: 'IBM Plex Mono', monospace; white-space: pre-wrap; word-break: break-word; }
@@ -92,12 +93,18 @@
       <div class="sub">
         started <%= j["started_at"] || j["created_at"] %>
       </div>
-      <% if j["output"] && !j["output"].to_s.empty? %>
-        <details open>
-          <summary>live output — refreshes every 20s</summary>
-          <pre><%= j["output"].to_s.split("\n").last(40).join("\n") %></pre>
-        </details>
+      <% if j["phase"] == "building" && j["output"].to_s.empty? %>
+        <div class="sub" style="margin-top: 10px;">
+          Preparing the box — worktree, containers, mise, bundle. About 5 minutes on a cold
+          machine. Claude's output appears here as soon as it starts.
+        </div>
       <% end %>
+      <details open>
+        <summary>claude output
+          <span class="mono" id="s-<%= j["id"] %>" style="color: var(--muted-2);"><%= j["phase"] || "starting" %></span>
+        </summary>
+        <pre class="tail" id="t-<%= j["id"] %>" data-job="<%= j["id"] %>"><%= j["output"] %></pre>
+      </details>
     </div>
   <% end %>
 
@@ -150,5 +157,47 @@
     </div>
   <% end %>
 </div>
+<script>
+// Follows running reviews by asking for bytes after what we already have.
+// Short requests, so no Puma thread is held open for the length of a review.
+// Without scripting the <noscript> refresh above still updates the page.
+(function () {
+  var POLL = 2000;
+  document.querySelectorAll("pre.tail").forEach(function (pre) {
+    var id = pre.dataset.job;
+    var status = document.getElementById("s-" + id);
+    var offset = new Blob([pre.textContent]).size;   // bytes, to match the server
+    var stopped = false;
+
+    function atBottom() {
+      return pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    }
+
+    function tick() {
+      if (stopped) return;
+      fetch("/sessions/tail?id=" + encodeURIComponent(id) + "&offset=" + offset,
+            { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (d) {
+          if (d.error) { throw d.error; }
+          if (d.chunk) {
+            var stick = atBottom();
+            pre.textContent += d.chunk;
+            offset = d.length;
+            if (stick) { pre.scrollTop = pre.scrollHeight; }
+          }
+          if (status) { status.textContent = d.done ? d.state : (d.phase || "live"); }
+          if (d.done) { stopped = true; setTimeout(function () { location.reload(); }, 1500); return; }
+          setTimeout(tick, POLL);
+        })
+        .catch(function () {
+          if (status) { status.textContent = "reconnecting…"; }
+          setTimeout(tick, POLL * 3);
+        });
+    }
+    tick();
+  });
+})();
+</script>
 </body>
 </html>

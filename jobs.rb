@@ -74,8 +74,11 @@ module Jobs
 
   # Progress for a job that is still running. Only touches output, so it can
   # never move a job out of running by accident.
-  def progress(id, output)
-    DB.exec("UPDATE review_jobs SET output = $1 WHERE id = $2 AND state = 'running'", [output, id])
+  def progress(id, output, phase = nil)
+    DB.exec(<<~SQL, [output, phase, id])
+      UPDATE review_jobs SET output = $1, phase = COALESCE($2, phase)
+      WHERE id = $3 AND state = 'running'
+    SQL
   end
 
   def finish(id, state, output: nil, error: nil)

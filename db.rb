@@ -211,6 +211,7 @@ module DB
       box_name    text        NOT NULL,
       state       text        NOT NULL DEFAULT 'queued',
       output      text,
+      phase       text,
       error       text,
       created_at  timestamptz NOT NULL DEFAULT now(),
       started_at  timestamptz,
