@@ -105,7 +105,7 @@
           machine. Claude's output appears here as soon as it starts.
         </div>
       <% end %>
-      <details open>
+      <details data-keep="live-<%= j["id"] %>" open>
         <summary>claude output
           <span class="mono" id="s-<%= j["id"] %>" style="color: var(--muted-2);"><%= j["phase"] || "starting" %></span>
         </summary>
@@ -143,12 +143,12 @@
           idx = full.rindex("== review")
           noise, review = idx ? [full[0...idx], full[(idx + 9)..].to_s.lstrip] : [nil, full]
         %>
-        <details open>
+        <details data-keep="review-<%= j["id"] %>" open>
           <summary>claude's review (<%= review.length %> characters)</summary>
           <pre><%= review %></pre>
         </details>
         <% if noise && !noise.strip.empty? %>
-          <details>
+          <details data-keep="noise-<%= j["id"] %>">
             <summary style="color: var(--muted-2);">build log from bay (<%= noise.lines.count %> lines) — not the review</summary>
             <pre><%= noise.lines.last(200).join %></pre>
           </details>
@@ -187,6 +187,23 @@
 // Follows running reviews by asking for bytes after what we already have.
 // Short requests, so no Puma thread is held open for the length of a review.
 // Without scripting the <noscript> refresh above still updates the page.
+// Remember which panels are open, so a refresh does not force them all back
+// open. Keyed per job, so it survives the row moving between sections.
+(function () {
+  var KEY = "rq-panels";
+  var saved;
+  try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { saved = {}; }
+
+  document.querySelectorAll("details[data-keep]").forEach(function (d) {
+    var k = d.dataset.keep;
+    if (Object.prototype.hasOwnProperty.call(saved, k)) { d.open = !!saved[k]; }
+    d.addEventListener("toggle", function () {
+      saved[k] = d.open;
+      try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* full or blocked */ }
+    });
+  });
+})();
+
 (function () {
   var POLL = 2000;
   document.querySelectorAll("pre.tail").forEach(function (pre) {
@@ -213,7 +230,10 @@
             if (stick) { pre.scrollTop = pre.scrollHeight; }
           }
           if (status) { status.textContent = d.done ? d.state : (d.phase || "live"); }
-          if (d.done) { stopped = true; setTimeout(function () { location.reload(); }, 1500); return; }
+          // Do not reload: it throws away scroll position and which panels are
+          // open. The row is finished; the page can move it to Previous on the
+          // next visit.
+          if (d.done) { stopped = true; return; }
           setTimeout(tick, POLL);
         })
         .catch(function () {

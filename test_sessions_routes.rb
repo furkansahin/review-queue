@@ -170,6 +170,13 @@ check("old mixed log: build noise is behind its own toggle", b.include?("not the
 check("old mixed log: the finding is present", b.include?("the actual finding"), true)
 check("old mixed log: noise is truncated", b.scan("docker build noise").size <= 200, true)
 
+# panels must be keyed so their open/closed state can survive a refresh
+get "/sessions"
+b = last_response.body
+check("live panel is keyed", b.include?('data-keep="live-'), true)
+check("review panel is keyed", b.include?('data-keep="review-'), true)
+check("no forced reload on completion", b.include?("location.reload"), false)
+
 # --- teardown -------------------------------------------------------------
 TEARDOWN = {ok: false, output: "", error: "box \"rq-x\" has uncommitted changes in its worktree"}
 DevBox.singleton_class.prepend(Module.new do
