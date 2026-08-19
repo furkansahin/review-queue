@@ -38,7 +38,12 @@ module DB
     return raw if raw.match?(/(?:\A|[?&\s])sslrootcert=/)
 
     ca = ENV["RQ_DB_CA_CERT"].to_s.strip
-    root = ca.empty? ? "system" : ca_path(ca)
+    bundled = File.expand_path("db-ca.pem", __dir__)
+    root =
+      if !ca.empty? then ca_path(ca)
+      elsif File.exist?(bundled) then bundled
+      else "system"
+      end
 
     if raw.match?(%r{\Apostgres(?:ql)?://})
       uri = URI.parse(raw)
