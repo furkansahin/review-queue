@@ -47,16 +47,24 @@ RUN mise use -g ruby@${RUBY} node@${NODE} go@${GO} victoria-metrics@${VICTORIA} 
     && mise install \
     && mise reshim
 
-# Warm the gem cache from the current lockfile. The worktree is bind-mounted at
-# runtime, so this only pre-populates GEM_HOME; bundler then resolves in seconds
-# instead of installing 203 gems.
-ARG GEMFILE_URL=https://raw.githubusercontent.com/ubicloud/ubicloud/main/Gemfile
-ARG LOCK_URL=https://raw.githubusercontent.com/ubicloud/ubicloud/main/Gemfile.lock
+# Warm the caches. What can and cannot be baked is decided by the bind mount:
+# bay mounts the worktree at /workspace at runtime, so anything written inside
+# the repository is masked. Only paths OUTSIDE it survive.
+#
+#   gems       -> GEM_HOME under mise's ruby   -> survives, baked below
+#   ~/.npm     -> npm's download cache         -> survives, baked below
+#   node_modules, vendor/bundle, built CSS     -> inside the repo, masked
+#
+# So `bundle install` and `npm ci` still run in the box, but resolve from local
+# caches instead of fetching 203 gems and the npm tree over the network.
+ARG RAW=https://raw.githubusercontent.com/ubicloud/ubicloud/main
 RUN mkdir -p /tmp/warm && cd /tmp/warm \
-    && curl -fsSL "$GEMFILE_URL" -o Gemfile \
-    && curl -fsSL "$LOCK_URL" -o Gemfile.lock \
-    && mise exec -- bundle config set --local without 'development' \
-    && mise exec -- bundle install --jobs 4 || true \
+    && curl -fsSL "$RAW/Gemfile" -o Gemfile \
+    && curl -fsSL "$RAW/Gemfile.lock" -o Gemfile.lock \
+    && mise exec -- bundle install --jobs 4 \
+    && curl -fsSL "$RAW/package.json" -o package.json \
+    && curl -fsSL "$RAW/package-lock.json" -o package-lock.json \
+    && mise exec -- npm ci --prefer-offline --no-audit --no-fund \
     && rm -rf /tmp/warm
 
 USER root

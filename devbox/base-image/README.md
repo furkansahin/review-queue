@@ -25,6 +25,19 @@ ruby.compile = true
 so every container compiles Ruby 4.0.5 from source. Then `bundle install` fetches
 203 gems and `npm ci` runs, all per box.
 
+## The existing workaround does not work
+
+`post-create.sh` already tries to avoid the compile:
+
+```bash
+mise settings ruby.compile=false 2>/dev/null || true
+```
+
+but the box still compiled Ruby (`./configure`, `make -j 2`). The repository's
+own `mise.toml` sets `ruby.compile = true` under `[settings]`, and that wins over
+`mise settings`. The environment variable wins over both, which is why
+`MISE_RUBY_COMPILE=0` in `box.env` was what actually changed the number.
+
 ## Two fixes, in order of value
 
 **1. Stop compiling Ruby.** Measured on the same machine: **329s -> 144s**, from
@@ -45,6 +58,21 @@ baseImage = "ubicloud-bay-base:latest"
 
 bay's own Dockerfile is `ARG BASE_IMAGE`, so it layers its sshd/tmux setup on
 top and finds the toolchain already present.
+
+## What can and cannot be baked
+
+bay mounts the worktree at `/workspace` at runtime, so anything written inside
+the repository is masked by the bind mount:
+
+| | Lives in | Bakeable |
+| --- | --- | --- |
+| gems | `GEM_HOME` under mise's ruby | yes |
+| npm download cache | `~/.npm` | yes |
+| `node_modules/` | inside the repo | no, masked |
+| built CSS (`npm run prod`) | inside the repo | no, masked |
+
+So `bundle install` and `npm ci` still run in the box, but resolve from the
+baked caches rather than fetching everything again.
 
 ## What no image can remove
 
