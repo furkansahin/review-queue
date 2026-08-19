@@ -285,6 +285,15 @@
   </div>
 <% end %>
 
+<% if review_error %>
+  <div class="mono" style="margin: 14px 24px 0; padding: 10px 16px; border: 1px solid var(--err-border);
+       background: var(--err-bg); border-radius: 8px; font-size: 12px; color: var(--err-fg);">
+    Could not start the review: <%= review_error %><%
+      %><%= review_error.to_s.include?("dev box") ? " — " : "" %><%
+      %><% if review_error.to_s.include?("dev box") %><a href="/devbox">register one</a><% end %>
+  </div>
+<% end %>
+
 <% if snap[:error] %>
   <div class="mono" style="margin: 24px; padding: 12px 16px; border: 1px solid var(--err-border);
        background: var(--err-bg); border-radius: 8px; font-size: 12px; color: var(--err-fg);">
@@ -366,12 +375,17 @@
             <a class="mini" href="/sessions" title="the review is ready"
                style="text-decoration: none; color: var(--quick-fg);">review ✓</a>
           <% else %>
-            <form method="post" action="/review?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
-              <%== csrf_review %>
-              <input type="hidden" name="repo" value="<%= r[:repo] %>" />
-              <input type="hidden" name="pr" value="<%= r[:number] %>" />
-              <button class="mini" type="submit" title="start an adversarial review on your dev box">Review</button>
-            </form>
+            <% if has_dev_box %>
+              <form method="post" action="/review?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+                <%== csrf_review %>
+                <input type="hidden" name="repo" value="<%= r[:repo] %>" />
+                <input type="hidden" name="pr" value="<%= r[:number] %>" />
+                <button class="mini" type="submit" title="start an adversarial review on your dev box">Review</button>
+              </form>
+            <% else %>
+              <a class="mini" href="/devbox" style="text-decoration: none;"
+                 title="register a dev box before starting reviews">Set up</a>
+            <% end %>
           <% end %>
         <% end %>
         <% if snoozing %>

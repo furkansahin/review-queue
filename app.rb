@@ -251,8 +251,11 @@ class ReviewQueue < Roda
     r.post "review" do
       check_csrf!
       if REVIEWS_ENABLED
-        Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s,
-                     pr_number: r.params["pr"].to_s.to_i)
+        res = Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s,
+                           pr_number: r.params["pr"].to_s.to_i)
+        # Never swallow this: pressing Review and seeing nothing happen is
+        # worse than seeing an error.
+        session["review_error"] = res[:error] unless res[:ok]
       end
       r.redirect "/?#{r.query_string}"
     end
@@ -311,6 +314,9 @@ class ReviewQueue < Roda
                              csrf_settings: csrf_tag("/settings"),
                              suggested_label: SUGGESTED_LABEL,
                              reviews_enabled: REVIEWS_ENABLED,
+                             review_error: session.delete("review_error"),
+                             has_dev_box: (REVIEWS_ENABLED &&
+                               !DB.row("SELECT 1 FROM dev_boxes WHERE login = $1", [current_login]).nil?),
                              csrf_review: csrf_tag("/review"),
                              jobs_by_key: (REVIEWS_ENABLED ? Jobs.by_key(current_login) : {}),
                              csrf_unsnooze: csrf_tag("/unsnooze"),

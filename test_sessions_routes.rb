@@ -59,6 +59,15 @@ DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES
 get "/auth/start"; st = last_response.location[/state=([^&]+)/, 1]
 get "/auth/callback?code=c&state=#{st}"
 
+# with no dev box the button must not silently do nothing
+DB.exec("DELETE FROM dev_boxes WHERE login = $1", ["furkansahin"])
+get "/"
+check("no dev box -> offers Set up, not Review", last_response.body.include?(">Set up</a>"), true)
+tok0 = csrf_for(last_response.body, "/review") rescue tok0 = nil
+check("no dev box -> no review form at all", tok0.nil?, true)
+DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+        ["furkansahin", "203.0.113.10", Crypto.encrypt(priv), pub])
+
 get "/"
 check("Review button is offered", last_response.body.include?(">Review<"), true)
 check("Sessions link is in the bar", last_response.body.include?('href="/sessions"'), true)
@@ -77,6 +86,27 @@ check("double press makes only one job", DB.row("SELECT count(*)::int n FROM rev
 
 post "/review", {"repo" => "ubicloud/ubicloud", "pr" => "6172"}
 check("review without CSRF is blocked", last_response.status, 403)
+
+# a rejected enqueue must tell the user why
+DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
+DB.exec("DELETE FROM dev_boxes WHERE login = $1", ["furkansahin"])
+get "/"
+DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+        ["furkansahin", "203.0.113.10", Crypto.encrypt(priv), pub])
+get "/"; t2 = csrf_for(last_response.body, "/review")
+DB.exec("DELETE FROM dev_boxes WHERE login = $1", ["furkansahin"])
+post "/review", {"repo" => "ubicloud/ubicloud", "pr" => "6172", "_csrf" => t2}
+get "/"
+check("failed review shows an explanation", last_response.body.include?("Could not start the review"), true)
+check("and points at the dev box page", last_response.body.include?("register one"), true)
+get "/"
+check("the banner is shown once, then cleared", last_response.body.include?("Could not start the review"), false)
+
+# put the state back for the sessions assertions below
+DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+        ["furkansahin", "203.0.113.10", Crypto.encrypt(priv), pub])
+get "/"; post "/review", {"repo" => "ubicloud/ubicloud", "pr" => "6172",
+                          "_csrf" => csrf_for(last_response.body, "/review")}
 
 get "/sessions"
 check("sessions page renders", last_response.status, 200)
