@@ -61,6 +61,18 @@ module DevBox
     ["review", repo, pr_number.to_s, box].join(" ")
   end
 
+  # A host is a name or an address; no spaces, no shell characters, no scheme.
+  HOST_RE = /\A[A-Za-z0-9][A-Za-z0-9._:-]{0,252}\z/
+  USER_RE = /\A[a-z_][a-z0-9_-]{0,31}\z/
+
+  def check_target!(host:, ssh_user:, port:)
+    raise Error, "enter a host name or IP address" unless host.to_s.strip.match?(HOST_RE)
+    raise Error, "invalid ssh user" unless ssh_user.to_s.strip.match?(USER_RE)
+    p = port.to_s.strip
+    raise Error, "port must be between 1 and 65535" unless p.match?(/\A[0-9]{1,5}\z/) && (1..65_535).cover?(p.to_i)
+    {host: host.to_s.strip, ssh_user: ssh_user.to_s.strip, port: p.to_i}
+  end
+
   REPO_RE = %r{\A[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\z}
   BOX_RE = /\A[a-z0-9][a-z0-9-]{0,48}\z/
 

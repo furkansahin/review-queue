@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dev box · Review queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+<%= File.read(File.expand_path("_palette.erb", __dir__)) %>
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
+         border-bottom: 1px solid var(--border); }
+  .btn { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 6px 14px; border: 1px solid var(--btn-border);
+         background: var(--btn-bg); border-radius: 6px; cursor: pointer; color: var(--btn-fg); }
+  .btn:hover { background: var(--btn-hover-bg); }
+  .go { font: 600 13px 'IBM Plex Sans', sans-serif; padding: 8px 16px; border-radius: 7px; border: 0;
+        background: var(--accent); color: var(--surface); cursor: pointer; }
+  .go:hover { filter: brightness(1.08); }
+  .danger { color: var(--err-fg); border-color: var(--err-border); }
+  .wrap { max-width: 860px; padding: 22px 24px 80px; }
+  h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2);
+       font-family: 'IBM Plex Mono', monospace; font-weight: 600; margin: 26px 0 10px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 16px 18px; margin-bottom: 12px; }
+  label { display: block; font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+          color: var(--muted-2); margin-bottom: 5px; }
+  input[type=text], input[type=number] {
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; padding: 7px 10px; border-radius: 6px;
+    border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); width: 100%; }
+  .fields { display: flex; gap: 12px; flex-wrap: wrap; }
+  .f-host { flex: 3 1 260px; } .f-user { flex: 1 1 120px; } .f-port { flex: 0 1 90px; }
+  pre { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 8px;
+        padding: 12px 14px; overflow-x: auto; font-size: 12px; line-height: 1.5;
+        font-family: 'IBM Plex Mono', monospace; white-space: pre-wrap; word-break: break-all;
+        user-select: all; }
+  .step { display: flex; gap: 12px; margin-bottom: 18px; }
+  .num { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--badge-bg);
+         color: var(--badge-fg); font: 600 11px 'IBM Plex Mono', monospace;
+         display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.55; }
+  .ok  { color: var(--age-fresh-fg); } .bad { color: var(--err-fg); }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px;
+            font-family: 'IBM Plex Mono', monospace; }
+  .banner.err { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg); }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Dev box</div>
+  <a class="mono" style="font-size: 12px;" href="/">← back to the queue</a>
+  <a class="mono" style="font-size: 12px;" href="/sessions">sessions</a>
+  <div style="flex: 1;"></div>
+  <div class="mono" style="font-size: 11px; color: var(--muted-2);">@<%= login %></div>
+</div>
+
+<div class="wrap">
+  <% if error %><div class="banner err"><%= error %></div><% end %>
+
+  <div class="note" style="margin-bottom: 18px;">
+    A review runs on your own machine, not on this server. The dashboard connects to it and
+    asks bay to start a session. It generates the key itself and you install only the public
+    half, so your personal SSH key never reaches this server, and removing the box below is a
+    real revocation.
+  </div>
+
+  <h2>Where it is</h2>
+  <div class="card">
+    <form method="post" action="/devbox/save">
+      <%== csrf_save %>
+      <div class="fields">
+        <div class="f-host">
+          <label for="host">host or IP</label>
+          <input type="text" id="host" name="host" value="<%= box ? box["host"] : "" %>"
+                 placeholder="10.0.0.5" required />
+        </div>
+        <div class="f-user">
+          <label for="ssh_user">ssh user</label>
+          <input type="text" id="ssh_user" name="ssh_user" value="<%= box ? box["ssh_user"] : "ubi" %>" />
+        </div>
+        <div class="f-port">
+          <label for="port">port</label>
+          <input type="number" id="port" name="port" value="<%= box ? box["port"] : 22 %>" min="1" max="65535" />
+        </div>
+      </div>
+      <div style="margin-top: 14px; display: flex; gap: 8px; align-items: center;">
+        <button class="go" type="submit"><%= box ? "Save" : "Register this dev box" %></button>
+        <% if box %>
+          <span class="note">Changing the address keeps your key, so there is nothing to reinstall.</span>
+        <% end %>
+      </div>
+    </form>
+  </div>
+
+  <% if box %>
+    <h2>Install these two things on <span class="mono"><%= box["host"] %></span></h2>
+
+    <div class="card">
+      <div class="step">
+        <div class="num">1</div>
+        <div style="min-width: 0; flex: 1;">
+          <div class="note" style="margin-bottom: 8px;">
+            The wrapper. It is the only thing this dashboard's key may run.
+          </div>
+          <pre>curl -fsSL <%= wrapper_url %> \
+  | sudo tee /usr/local/bin/rq-review >/dev/null \
+  && sudo chmod 0755 /usr/local/bin/rq-review</pre>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">2</div>
+        <div style="min-width: 0; flex: 1;">
+          <div class="note" style="margin-bottom: 8px;">
+            The key, with a forced command. <span class="mono">command=</span> pins it to the
+            wrapper and <span class="mono">restrict</span> removes port forwarding, agent
+            forwarding and a pty — so this key cannot become a shell even if this dashboard is
+            compromised.
+          </div>
+          <pre>echo '<%= authorized_line %>' >> ~/.ssh/authorized_keys</pre>
+        </div>
+      </div>
+
+      <div class="note">
+        Your box also needs docker, bay, a checkout and <span class="mono">~/.bay/env</span>
+        with your tokens. <span class="mono">devbox/setup.sh</span> in the repo checks all of it
+        and installs what it can.
+      </div>
+    </div>
+
+    <h2>Connection</h2>
+    <div class="card">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <form method="post" action="/devbox/test" style="margin: 0;">
+          <%== csrf_test %>
+          <button class="btn" type="submit">Test connection</button>
+        </form>
+        <% if box["last_error"] && !box["last_error"].to_s.empty? %>
+          <span class="mono bad" style="font-size: 12px;">failed</span>
+        <% elsif box["last_ok_at"] %>
+          <span class="mono ok" style="font-size: 12px;">ok · last verified <%= box["last_ok_at"] %></span>
+        <% else %>
+          <span class="mono" style="font-size: 12px; color: var(--muted-2);">not tested yet</span>
+        <% end %>
+      </div>
+      <% if box["last_error"] && !box["last_error"].to_s.empty? %>
+        <pre style="margin-top: 12px;"><%= box["last_error"] %></pre>
+      <% end %>
+    </div>
+
+    <h2>Key</h2>
+    <div class="card">
+      <div class="note" style="margin-bottom: 10px;">
+        Rotating generates a new keypair and invalidates the old one. You then reinstall the
+        line above. Removing the dev box deletes the private key from this server entirely.
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <form method="post" action="/devbox/rotate" style="margin: 0;">
+          <%== csrf_rotate %>
+          <button class="btn" type="submit">Rotate key</button>
+        </form>
+        <form method="post" action="/devbox/delete" style="margin: 0;">
+          <%== csrf_delete %>
+          <button class="btn danger" type="submit">Remove dev box</button>
+        </form>
+      </div>
+    </div>
+  <% end %>
+</div>
+</body>
+</html>

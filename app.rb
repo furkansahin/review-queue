@@ -38,6 +38,11 @@ SNOOZE_SECONDS = ENV.fetch("RQ_SNOOZE_DAYS", "7").to_i * 86_400
 # a shared default is what made every user inherit one person's topic feed.
 SUGGESTED_LABEL = ENV.fetch("RQ_LABEL", "")
 
+# Where a user fetches the wrapper from. Points at this repo so the script the
+# dashboard talks to is the script in version control.
+WRAPPER_URL = ENV.fetch("RQ_WRAPPER_URL",
+  "https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/rq-review")
+
 # Fails closed: with no allowlist nobody gets in, rather than everybody.
 ALLOWED_LOGINS = env_required("RQ_ALLOWED_LOGINS")
   .split(",").map { |s| s.strip.downcase }.reject(&:empty?).freeze
@@ -128,6 +133,81 @@ class ReviewQueue < Roda
       check_csrf!
       service.snapshot(force: true)
       r.redirect "/?#{r.query_string}"
+    end
+
+    r.on "devbox" do
+      next r.redirect "/" unless REVIEWS_ENABLED
+
+      current = -> { DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login]) }
+
+      r.post "save" do
+        check_csrf!
+        error = nil
+        begin
+          t = DevBox.check_target!(host: r.params["host"], ssh_user: r.params["ssh_user"],
+                                   port: r.params["port"].to_s.empty? ? 22 : r.params["port"])
+          if (row = current.call)
+            # Keep the existing keypair: changing the address must not force the
+            # user to reinstall the key.
+            DB.exec("UPDATE dev_boxes SET host=$1, ssh_user=$2, port=$3 WHERE id=$4",
+                    [t[:host], t[:ssh_user], t[:port], row["id"]])
+          else
+            priv, pub = DevBox.generate_keypair(comment: "review-queue:#{current_login}")
+            DB.exec(<<~SQL, [current_login, t[:host], t[:ssh_user], t[:port], Crypto.encrypt(priv), pub])
+              INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key)
+              VALUES ($1, $2, $3, $4, $5, $6)
+            SQL
+          end
+        rescue DevBox::Error => e
+          error = e.message
+        end
+        session["devbox_error"] = error
+        r.redirect "/devbox"
+      end
+
+      r.post "test" do
+        check_csrf!
+        if (row = current.call)
+          res = DevBox.check(row)
+          if res[:ok]
+            DB.exec("UPDATE dev_boxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
+          else
+            detail = (res[:error] || res[:output].to_s)[0, 500]
+            DB.exec("UPDATE dev_boxes SET last_error = $1 WHERE id = $2", [detail, row["id"]])
+          end
+        end
+        r.redirect "/devbox"
+      end
+
+      # A new keypair revokes the old one, which is the point.
+      r.post "rotate" do
+        check_csrf!
+        if (row = current.call)
+          priv, pub = DevBox.generate_keypair(comment: "review-queue:#{current_login}")
+          DB.exec("UPDATE dev_boxes SET private_key_enc=$1, public_key=$2, last_ok_at=NULL, last_error=NULL WHERE id=$3",
+                  [Crypto.encrypt(priv), pub, row["id"]])
+        end
+        r.redirect "/devbox"
+      end
+
+      r.post "delete" do
+        check_csrf!
+        DB.exec("DELETE FROM dev_boxes WHERE login = $1", [current_login])
+        r.redirect "/devbox"
+      end
+
+      r.get true do
+        box = current.call
+        view("devbox", locals: {box: box, login: current_login,
+                                error: session.delete("devbox_error"),
+                                wrapper_url: WRAPPER_URL,
+                                authorized_line: box && DevBox.authorized_keys_line(box["public_key"]),
+                                csrf_save: csrf_tag("/devbox/save"),
+                                csrf_test: csrf_tag("/devbox/test"),
+                                csrf_rotate: csrf_tag("/devbox/rotate"),
+                                csrf_delete: csrf_tag("/devbox/delete")},
+          layout: false)
+      end
     end
 
     r.on "sessions" do
