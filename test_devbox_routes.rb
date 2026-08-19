@@ -45,9 +45,9 @@ check("offers registration", last_response.body.include?("Register this dev box"
 check("no key shown before registering", last_response.body.include?("authorized_keys"), false)
 
 tok = csrf_for(last_response.body, "/devbox/save")
-post "/devbox/save", {"host" => "46.4.181.56", "ssh_user" => "ubi", "port" => "22", "_csrf" => tok}
+post "/devbox/save", {"host" => "203.0.113.10", "ssh_user" => "ubi", "port" => "22", "_csrf" => tok}
 row = DB.row("SELECT * FROM dev_boxes WHERE login = $1", ["furkansahin"])
-check("box saved", row["host"], "46.4.181.56")
+check("box saved", row["host"], "203.0.113.10")
 check("a keypair was generated", row["public_key"].start_with?("ssh-rsa "), true)
 check("private key is encrypted at rest", row["private_key_enc"].include?("BEGIN"), false)
 check("private key decrypts to a PEM", Crypto.decrypt(row["private_key_enc"]).start_with?("-----BEGIN"), true)
