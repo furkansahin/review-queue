@@ -31,6 +31,7 @@ resolve_bay() {
 }
 BAY="$(resolve_bay || true)"
 STATE_DIR="${RQ_STATE_DIR:-$HOME/.rq}"
+BAY_CONFIG="${RQ_BAY_CONFIG:-$HOME/.bay/ubicloud}"
 
 die() { echo "rq-review: $*" >&2; exit 1; }
 
@@ -57,7 +58,7 @@ case "$verb" in
           Note bay is a private repo: your GITHUB_TOKEN needs Contents: Read on ubicloud/bay."
     fi
     [ -d "$REPO_PATH" ] || die "checkout not found at $REPO_PATH (set RQ_REPO_PATH if it is elsewhere)"
-    [ -f "$HOME/.bay/ubicloud/bay.toml" ] || die "bay config not found at ~/.bay/ubicloud (private repo: ubicloud/bay-ubicloud)"
+    [ -f "$BAY_CONFIG/bay.toml" ] || die "bay config not found at $BAY_CONFIG (private repo: ubicloud/bay-ubicloud)"
     echo "pong $(hostname) bay=$BAY"
     ;;
 

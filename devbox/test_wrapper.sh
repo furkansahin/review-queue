@@ -2,6 +2,7 @@
 SP="$1"; W="$2"
 export RQ_BAY="$SP/fakebay/bay" RQ_REPO_PATH="$SP/fakerepo" RQ_STATE_DIR="$SP/rqstate"
 export RQ_ALLOWED_REPOS="ubicloud/ubicloud"
+export RQ_BAY_CONFIG="$SP/fakecfg"
 fail=0
 try() { # name, command, expect: allow|refuse
   local name="$1" cmd="$2" expect="$3"
