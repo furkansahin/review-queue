@@ -118,6 +118,22 @@ check("active section lists the job", last_response.body.include?("ubicloud/ubic
 check("links to the pull request", last_response.body.include?("https://github.com/ubicloud/ubicloud/pull/6172"), true)
 check("shows real boxes from the dev box", last_response.body.include?("rq-ubicloud-6172"), true)
 
+# progress on a running job must show, and must not change its state
+job_id = DB.row("SELECT id FROM review_jobs ORDER BY id DESC LIMIT 1")["id"]
+DB.exec("UPDATE review_jobs SET state='running' WHERE id=$1", [job_id])
+Jobs.progress(job_id, "== bay up rq-ubicloud-6172 --pr 6172\nbuilding container...")
+check("progress is stored", DB.row("SELECT output FROM review_jobs WHERE id=$1", [job_id])["output"].include?("building container"), true)
+check("progress does not change state", DB.row("SELECT state FROM review_jobs WHERE id=$1", [job_id])["state"], "running")
+get "/sessions"
+check("live output is shown while running", last_response.body.include?("live output"), true)
+check("the partial text is shown", last_response.body.include?("building container"), true)
+# and it must refuse to touch a job that already finished
+DB.exec("UPDATE review_jobs SET state='done' WHERE id=$1", [job_id])
+Jobs.progress(job_id, "LATE WRITE")
+check("progress cannot overwrite a finished job",
+      DB.row("SELECT output FROM review_jobs WHERE id=$1", [job_id])["output"].include?("LATE WRITE"), false)
+DB.exec("UPDATE review_jobs SET state='running' WHERE id=$1", [job_id])
+
 # finish it and check it moves to Previous with its output
 DB.exec("UPDATE review_jobs SET state='done', output=$1, finished_at=now()", ["FINDING: something"])
 get "/sessions"

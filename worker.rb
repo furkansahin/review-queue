@@ -68,6 +68,11 @@ def poll_running
         output: result[:output],
         error: state == "failed" ? "the review command failed on the dev box" : nil)
       log("#{job["box_name"]} finished: #{state}")
+    when "running"
+      # Store what the box has printed so far, so the sessions page can show
+      # progress instead of a spinner for the five minutes a box takes to build.
+      partial = DevBox.run(box, "result #{job["box_name"]}")
+      Jobs.progress(job["id"], partial[:output]) if partial[:ok]
     else
       Jobs.finish(job["id"], "failed", output: nil, error: "gave up after #{Jobs::STALE_AFTER}s") if Jobs.stale?(job)
     end

@@ -72,6 +72,12 @@ module Jobs
 
   def dev_box(job) = DB.row("SELECT * FROM dev_boxes WHERE id = $1", [job["dev_box_id"]])
 
+  # Progress for a job that is still running. Only touches output, so it can
+  # never move a job out of running by accident.
+  def progress(id, output)
+    DB.exec("UPDATE review_jobs SET output = $1 WHERE id = $2 AND state = 'running'", [output, id])
+  end
+
   def finish(id, state, output: nil, error: nil)
     DB.exec(<<~SQL, [state, output, error, id])
       UPDATE review_jobs SET state = $1, output = $2, error = $3, finished_at = now() WHERE id = $4

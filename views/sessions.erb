@@ -92,6 +92,12 @@
       <div class="sub">
         started <%= j["started_at"] || j["created_at"] %>
       </div>
+      <% if j["output"] && !j["output"].to_s.empty? %>
+        <details open>
+          <summary>live output — refreshes every 20s</summary>
+          <pre><%= j["output"].to_s.split("\n").last(40).join("\n") %></pre>
+        </details>
+      <% end %>
     </div>
   <% end %>
 
