@@ -12,6 +12,7 @@ if REVIEWS_ENABLED
   require_relative "db"
   require_relative "jobs"
   require_relative "devbox"
+  warn "[review-queue] #{DB.describe}"
   DB.setup!
 end
 

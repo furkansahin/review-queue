@@ -16,26 +16,50 @@ module DB
 
   module_function
 
-  # libpq does NOT fall back to the operating system trust store. With
-  # sslmode=verify-full and no sslrootcert it reads only ~/.postgresql/root.crt,
-  # which does not exist in the container -- so a perfectly ordinary Let's
-  # Encrypt certificate fails with "certificate verify failed", even though the
-  # same URL works from a laptop whose libpq has that file.
+  # libpq does NOT fall back to the operating system trust store. With a
+  # verifying sslmode and no sslrootcert it reads only ~/.postgresql/root.crt,
+  # which exists on a laptop and does not exist in the container -- so an
+  # ordinary Let's Encrypt certificate verifies with psql locally and fails
+  # here with "certificate verify failed".
   #
-  # sslrootcert=system (PostgreSQL 16+) points it at the OS trust store, which
-  # already contains the public roots.
+  # sslrootcert=system (PostgreSQL 16+; the bundled libpq is 18) points it at
+  # the OS roots. It is added unconditionally when absent: with a non-verifying
+  # sslmode libpq simply ignores it, so there is nothing to guard against, and
+  # guarding on the sslmode text missed libpq's keyword/value form.
   #
-  # RQ_DB_CA_CERT stays as an override for a database issued by a private CA:
-  # set it to the PEM and that is used instead. A URL that already names an
-  # sslrootcert is left exactly as given.
+  # DATABASE_URL may be either form:
+  #   postgres://user:pw@host:5432/db?sslmode=verify-full
+  #   host=... port=5432 dbname=... sslmode=verify-full
+  #
+  # RQ_DB_CA_CERT overrides with a PEM, for a database issued by a private CA.
   def url
-    raw = ENV["DATABASE_URL"].to_s
+    raw = ENV["DATABASE_URL"].to_s.strip
     raise Error, "DATABASE_URL is not set" if raw.empty?
-    return raw if raw.include?("sslrootcert=")
-    return raw unless raw[/[?&]sslmode=(verify-full|verify-ca)/]
+    return raw if raw.match?(/(?:\A|[?&\s])sslrootcert=/)
 
     ca = ENV["RQ_DB_CA_CERT"].to_s.strip
-    with_params(raw, sslrootcert: ca.empty? ? "system" : ca_path(ca))
+    root = ca.empty? ? "system" : ca_path(ca)
+
+    if raw.match?(%r{\Apostgres(?:ql)?://})
+      uri = URI.parse(raw)
+      query = URI.decode_www_form(uri.query.to_s)
+      query << ["sslrootcert", root]
+      uri.query = URI.encode_www_form(query)
+      uri.to_s
+    else
+      "#{raw} sslrootcert=#{root}"   # keyword/value form
+    end
+  end
+
+  # What we actually decided, with no credentials in it. Printed once at boot so
+  # a TLS failure says which knobs were in play.
+  def describe
+    raw = ENV["DATABASE_URL"].to_s
+    form = raw.match?(%r{\Apostgres(?:ql)?://}) ? "uri" : "keyword/value"
+    host = raw[%r{//[^/@]*@([^/:?\s]+)}, 1] || raw[/(?:\A|\s)host=(\S+)/, 1] || "?"
+    mode = url[/(?:\A|[?&\s])sslmode=([^&\s]+)/, 1] || "(unset, libpq default)"
+    root = url[/(?:\A|[?&\s])sslrootcert=([^&\s]+)/, 1] || "(none)"
+    "database: form=#{form} host=#{host} sslmode=#{mode} sslrootcert=#{root}"
   end
 
   def ca_path(pem)
@@ -45,14 +69,6 @@ module DB
     File.write(path, body) unless File.exist?(path) && File.read(path) == body
     File.chmod(0o600, path)
     path
-  end
-
-  def with_params(raw, **params)
-    uri = URI.parse(raw)
-    query = URI.decode_www_form(uri.query.to_s).reject { |k, _| params.key?(k.to_sym) }
-    params.each { |k, v| query << [k.to_s, v.to_s] }
-    uri.query = URI.encode_www_form(query)
-    uri.to_s
   end
 
   def new_connection
