@@ -74,6 +74,24 @@ path. `bay doctor` then runs 8 checks instead of 4.
 Out of the box a box takes about 330s. See `base-image/README.md`: one setting
 takes it to 144s, and a prebaked image takes it to **66s**.
 
+```sh
+bash setup.sh --build-base-image
+```
+
+## Do not copy bay.local.toml between machines
+
+It is per-machine and gitignored for a reason. Copying one carries settings that
+do not apply, and a `baseImage` naming an image the new box has never built
+fails at `bay up` with:
+
+```
+pull access denied, repository does not exist or may require authorization
+```
+
+because bay asks Docker to pull a local-only tag from Docker Hub. `setup.sh`
+now checks for exactly this and offers to build the image or tells you to drop
+the line.
+
 ## What the dashboard's key can do
 
 The wrapper is the only thing it may run, pinned by `command=` in

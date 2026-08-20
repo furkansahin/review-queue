@@ -2,15 +2,22 @@
 # Prepare a dev box to accept reviews from the review-queue dashboard.
 # Run ON the dev box, as the user the dashboard will connect as (e.g. ubi).
 #
-#   ./setup.sh            install and configure what it can
-#   ./setup.sh --check    report only, change nothing
+#   ./setup.sh                     install and configure what it can
+#   ./setup.sh --check             report only, change nothing
+#   ./setup.sh --build-base-image  also build the prebaked box image (66s boxes)
 #
 # Verified end to end on a fresh Ubuntu 24.04 Ubicloud VM (2 vcpu, 7G).
 # A cold box took 335s to reach "ready"; see README.md for the numbers.
 set -uo pipefail
 
 CHECK_ONLY=false
-[ "${1:-}" = "--check" ] && CHECK_ONLY=true
+BUILD_BASE=false
+for a in "$@"; do
+  case "$a" in
+    --check) CHECK_ONLY=true ;;
+    --build-base-image) BUILD_BASE=true ;;
+  esac
+done
 
 REPO_URL="${RQ_REPO_URL:-https://github.com/ubicloud/ubicloud.git}"
 REPO_PATH="${RQ_REPO_PATH:-$HOME/ubicloud}"
@@ -209,6 +216,35 @@ if [ -f "$BAY_CONFIG/bay.toml" ]; then
   else
     todo "set [remote] host = \"$SELF_HOST\" in $BAY_CONFIG/bay.local.toml"
   fi
+fi
+
+# bay.local.toml is per-machine and gitignored. Copying one between boxes
+# carries a baseImage that does not exist here, and bay then tries to pull it
+# from Docker Hub and fails with "pull access denied".
+echo "== base image =="
+BASE_IMAGE=$(grep -E '^\s*baseImage\s*=' "$BAY_CONFIG/bay.local.toml" "$BAY_CONFIG/bay.toml" 2>/dev/null \
+  | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/')
+if [ -z "$BASE_IMAGE" ]; then
+  warn "no baseImage set: boxes take about 330s each.
+          Build one for about 66s:  bash $0 --build-base-image"
+elif docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+  ok "base image $BASE_IMAGE present"
+elif can_change && [ "${BUILD_BASE:-false}" = true ]; then
+  doing "building $BASE_IMAGE (a few minutes, once)"
+  tmp=$(mktemp -d)
+  if curl -fsSL "${RQ_BASE_DOCKERFILE:-https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/base-image/Dockerfile}" -o "$tmp/Dockerfile" \
+     && docker build -t "$BASE_IMAGE" "$tmp"; then
+    ok "base image built"
+  else
+    todo "base image build failed; remove the baseImage line from
+          $BAY_CONFIG/bay.local.toml to fall back to debian:trixie-slim"
+  fi
+  rm -rf "$tmp"
+else
+  todo "bay.local.toml asks for baseImage \"$BASE_IMAGE\", which is not on this box.
+          bay will try to pull it and fail. Either build it:
+            bash $0 --build-base-image
+          or remove that line to fall back to debian:trixie-slim."
 fi
 
 echo "== tokens (never baked into an image: these are per person) =="
