@@ -27,7 +27,9 @@ if [ -f "$HOME/.bay/env" ]; then
 fi
 
 MISSING=0
+WARNED=0
 ok()   { printf "  ok    %s\n" "$1"; }
+warn() { printf "  note  %s\n" "$1"; WARNED=$((WARNED+1)); }
 todo() { printf "  TODO  %s\n" "$1"; MISSING=$((MISSING+1)); }
 doing(){ printf "  ..    %s\n" "$1"; }
 can_change() { ! $CHECK_ONLY; }
@@ -53,12 +55,25 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
       -H "Authorization: Bearer $GITHUB_TOKEN" \
       -H "Accept: application/vnd.github+json" \
       "https://api.github.com/repos/$r" 2>/dev/null)
+    # Only ubicloud/ubicloud is needed to RUN a review: bay up --pr uses
+    # gh pr checkout. The other two are needed to install or update bay and its
+    # config, so a box that already has both works without them.
+    needed_now=false
+    [ "$r" = "ubicloud/ubicloud" ] && needed_now=true
+    [ "$r" = "ubicloud/bay" ] && [ ! -x "$BAY" ] && needed_now=true
+    [ "$r" = "ubicloud/bay-ubicloud" ] && [ ! -f "$BAY_CONFIG/bay.toml" ] && needed_now=true
+
     case "$code" in
       200) ok "$r readable" ;;
-      404) todo "$r NOT readable by this token (404). A fine-grained PAT lists
-          repositories explicitly -- add this one with Contents: Read." ;;
+      404) if $needed_now; then
+             todo "$r NOT readable by this token (404). A fine-grained PAT lists
+          repositories explicitly -- add this one with Contents: Read."
+           else
+             warn "$r not readable (404) -- fine for now, but setup.sh cannot
+          update it here; it would have to be copied in again by hand."
+           fi ;;
       401) todo "the token was rejected (401). Has it expired?" ;;
-      *)   todo "$r returned HTTP $code" ;;
+      *)   if $needed_now; then todo "$r returned HTTP $code"; else warn "$r returned HTTP $code"; fi ;;
     esac
   done
 fi
@@ -235,6 +250,8 @@ avail=$(df -Pk "$HOME" | awk 'NR==2 {print int($4/1048576)}')
 echo
 if [ "$MISSING" -eq 0 ]; then
   echo "Ready. Try:  cd $REPO_PATH && bay doctor"
+  [ "$WARNED" -gt 0 ] && echo "($WARNED note(s) above: nothing blocking.)"
+  exit 0
 else
   echo "$MISSING thing(s) still to do."
   exit 1
