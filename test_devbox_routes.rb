@@ -60,7 +60,13 @@ check("private key is encrypted at rest", row["private_key_enc"].include?("BEGIN
 check("private key decrypts to a PEM", Crypto.decrypt(row["private_key_enc"]).start_with?("-----BEGIN"), true)
 
 get "/devbox"
-check("shows the forced-command line", last_response.body.include?('command=&quot;/usr/local/bin/rq-review&quot;,restrict'), true)
+# bay needs git and docker over this connection, so the key logs in. restrict
+# is what survives the move: no forwarding, no pty, none of which bay uses.
+check("the key line is restricted", last_response.body.include?("restrict ssh-rsa"), true)
+check("but not pinned to the old wrapper",
+      last_response.body.include?('command=&quot;/usr/local/bin/rq-review&quot;'), false)
+check("and it says what to remove",
+      last_response.body.include?("it pins the key to"), true)
 check("shows the public key", last_response.body.include?(row["public_key"][0, 40]), true)
 check("never shows the private key", last_response.body.include?("BEGIN RSA"), false)
 check("shows the wrapper install command", last_response.body.include?("/usr/local/bin/rq-review"), true)

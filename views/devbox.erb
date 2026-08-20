@@ -142,40 +142,76 @@
   </div>
 
   <% if box %>
-    <h2>Install these two things on <span class="mono"><%= box["host"] %></span></h2>
+    <% if bay_transport %>
+      <h2>Set up <span class="mono"><%= box["host"] %></span></h2>
 
-    <div class="card">
-      <div class="step">
-        <div class="num">1</div>
-        <div style="min-width: 0; flex: 1;">
-          <div class="note" style="margin-bottom: 8px;">
-            The wrapper. It is the only thing this dashboard's key may run.
+      <div class="card">
+        <div class="step">
+          <div class="num">1</div>
+          <div style="min-width: 0; flex: 1;">
+            <div class="note" style="margin-bottom: 8px;">
+              The key. The dashboard runs bay here and drives your machine's Docker over this
+              connection, so the key logs in rather than running one fixed program.
+              <span class="mono">restrict</span> still refuses port forwarding, agent
+              forwarding, X11 and a pty — bay needs none of them.
+            </div>
+            <pre>echo '<%= authorized_line %>' >> ~/.ssh/authorized_keys</pre>
+            <div class="note" style="margin-top: 8px;">
+              Replacing an older line? Remove the one starting
+              <span class="mono">command="/usr/local/bin/rq-review"</span> — it pins the key to
+              a wrapper that is no longer used.
+            </div>
           </div>
-          <pre>curl -fsSL <%= wrapper_url %> \
+        </div>
+
+        <div class="step">
+          <div class="num">2</div>
+          <div style="min-width: 0; flex: 1;">
+            <div class="note" style="margin-bottom: 8px;">
+              Your machine needs Docker and a checkout of the repository. It no longer needs
+              bay, the wrapper, or <span class="mono">~/.bay/env</span>: the dashboard holds
+              those now.
+            </div>
+            <pre>docker --version && ls ~/<%= box["repo_path"] || "ubicloud" %></pre>
+          </div>
+        </div>
+      </div>
+    <% else %>
+      <h2>Install these two things on <span class="mono"><%= box["host"] %></span></h2>
+
+      <div class="card">
+        <div class="step">
+          <div class="num">1</div>
+          <div style="min-width: 0; flex: 1;">
+            <div class="note" style="margin-bottom: 8px;">
+              The wrapper. It is the only thing this dashboard's key may run.
+            </div>
+            <pre>curl -fsSL <%= wrapper_url %> \
   | sudo tee /usr/local/bin/rq-review >/dev/null \
   && sudo chmod 0755 /usr/local/bin/rq-review</pre>
-        </div>
-      </div>
-
-      <div class="step">
-        <div class="num">2</div>
-        <div style="min-width: 0; flex: 1;">
-          <div class="note" style="margin-bottom: 8px;">
-            The key, with a forced command. <span class="mono">command=</span> pins it to the
-            wrapper and <span class="mono">restrict</span> removes port forwarding, agent
-            forwarding and a pty — so this key cannot become a shell even if this dashboard is
-            compromised.
           </div>
-          <pre>echo '<%= authorized_line %>' >> ~/.ssh/authorized_keys</pre>
+        </div>
+
+        <div class="step">
+          <div class="num">2</div>
+          <div style="min-width: 0; flex: 1;">
+            <div class="note" style="margin-bottom: 8px;">
+              The key, with a forced command. <span class="mono">command=</span> pins it to the
+              wrapper and <span class="mono">restrict</span> removes port forwarding, agent
+              forwarding and a pty — so this key cannot become a shell even if this dashboard is
+              compromised.
+            </div>
+            <pre>echo '<%= authorized_line %>' >> ~/.ssh/authorized_keys</pre>
+          </div>
+        </div>
+
+        <div class="note">
+          Your box also needs docker, bay, a checkout and <span class="mono">~/.bay/env</span>
+          with your tokens. <span class="mono">devbox/setup.sh</span> in the repo checks all of it
+          and installs what it can.
         </div>
       </div>
-
-      <div class="note">
-        Your box also needs docker, bay, a checkout and <span class="mono">~/.bay/env</span>
-        with your tokens. <span class="mono">devbox/setup.sh</span> in the repo checks all of it
-        and installs what it can.
-      </div>
-    </div>
+    <% end %>
 
     <h2>Connection</h2>
     <div class="card">

@@ -84,6 +84,14 @@ many = DevBox.run_many(bad, [["status a", nil], ["result a", nil]], timeout: 3)
 check("an unreadable key also answers once per command", many.size, 2)
 check("and says the key is the problem", many.first[:error].to_s.include?("cannot read the stored key"), true)
 
+# --- the key line -----------------------------------------------------------
+forced = DevBox.authorized_keys_line("ssh-rsa AAAA", forced: true)
+open_line = DevBox.authorized_keys_line("ssh-rsa AAAA", forced: false)
+check("the wrapper transport pins the key", forced.start_with?('command="/usr/local/bin/rq-review",restrict '), true)
+check("bay cannot be pinned, so it is not", open_line.include?("command="), false)
+check("but it keeps restrict", open_line.start_with?("restrict "), true)
+check("and it is still the same key", open_line.end_with?("ssh-rsa AAAA"), true)
+
 # --- the skills repository ---------------------------------------------------
 # It is typed by a person, stored, written into a TOML file on the box, and
 # handed to git clone inside a container. Only one shape survives that trip.

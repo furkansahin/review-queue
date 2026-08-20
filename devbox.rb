@@ -41,8 +41,16 @@ module DevBox
   def openssh_public(key, comment) = "ssh-rsa #{[key.to_blob].pack("m0")} #{comment}"
 
   # The exact line the user pastes into ~/.ssh/authorized_keys on their box.
-  def authorized_keys_line(public_key, wrapper: "/usr/local/bin/rq-review")
-    %(command="#{wrapper}",restrict #{public_key})
+  # The line a user pastes into ~/.ssh/authorized_keys on their machine.
+  #
+  # With the wrapper transport this pinned the key to one program, which was
+  # the strongest control in that design. bay needs git and docker over the
+  # same connection, so a forced command cannot survive the move -- but
+  # `restrict` can, and does: it still refuses port forwarding, agent
+  # forwarding, X11 and a pty, none of which bay uses.
+  def authorized_keys_line(public_key, wrapper: "/usr/local/bin/rq-review", forced: true)
+    return %(command="#{wrapper}",restrict #{public_key}) if forced
+    %(restrict #{public_key})
   end
 
   # A box name derived from the pull request, so a repeat review reuses it.
