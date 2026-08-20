@@ -45,9 +45,17 @@ findings to fill space.' 2>&1
 # own conversation, so the question has the whole review in context instead of
 # starting cold. The prompt comes from the file the dashboard wrote.
 #
+# Do not cd. bay starts a command in the box's own worktree, which is where the
+# review ran and where the wrapper writes the question. An earlier version did
+# `cd /workspace` first. /workspace is the repository root, not the worktree, so
+# the command failed twice: the question file was not there, and --continue
+# found no conversation to continue, because the review's conversation belongs
+# to the worktree. The path stays relative for the same reason -- one worktree
+# per box, so two boxes cannot read each other's question.
+#
 # The -- is necessary. The shell quotes the text correctly, but the text is
 # still an argument to claude. Without --, claude reads a question that starts
 # with a dash as an option.
 ask = """
-cd /workspace && claude -p --continue --model opus --effort max -- "$(cat /workspace/.rq/followup.txt)" 2>&1
+claude -p --continue --model opus --effort max -- "$(cat .rq/followup.txt)" 2>&1
 """

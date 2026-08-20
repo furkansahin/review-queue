@@ -153,6 +153,23 @@ check("the exit status is read", res[:exit_code], 0)
 check("it does not wait out the deadline", elapsed < 1.0, true)
 check("and it stops in a few turns", $fake_session.turns < 10, true)
 
+# --- the wrapper and the bay command must agree on one path ----------------
+# The wrapper writes the question into the box worktree, and bay starts a
+# command in that same worktree. So the ask command must read a relative path.
+# An absolute /workspace path is the repository root, not the worktree: the
+# question is not there, and neither is the review conversation that
+# --continue resumes. That failure cost a follow-up its answer twice over.
+toml = File.read(File.join(__dir__, "devbox", "bay-review-command.toml"))
+ask_cmd = toml[/^ask = """\n(.*?)\n"""/m, 1].to_s
+wrapper = File.read(File.join(__dir__, "devbox", "rq-review"))
+
+check("ask reads the question", ask_cmd.include?(".rq/followup.txt"), true)
+check("by a path relative to the worktree", ask_cmd.include?("/workspace"), false)
+check("and never cds away from it", ask_cmd.match?(/\bcd\s/), false)
+check("the text is passed after --", ask_cmd.include?(" -- "), true)
+check("the wrapper writes to that same path", wrapper.include?("$wt/.rq/followup.txt"), true)
+check("and the worktree is the box worktree", wrapper.include?('wt="$REPO_PATH/.worktrees/$box"'), true)
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
