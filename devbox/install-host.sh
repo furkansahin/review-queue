@@ -23,14 +23,14 @@ MISSING=0
 
 echo "== tooling on this host =="
 for b in docker git; do
-  command -v "$b" >/dev/null && ok "$b" || todo "install $b"
+  if command -v "$b" >/dev/null; then ok "$b"; else todo "install $b"; fi
 done
-COMPOSE=$(find /usr/libexec/docker/cli-plugins /usr/lib/docker/cli-plugins -name docker-compose 2>/dev/null | head -1)
-[ -n "$COMPOSE" ] && ok "docker compose plugin at $COMPOSE" || todo "install the docker compose plugin"
+COMPOSE=$(find /usr/libexec/docker/cli-plugins /usr/lib/docker/cli-plugins -name docker-compose 2>/dev/null | head -1 || true)
+if [ -n "$COMPOSE" ]; then ok "docker compose plugin at $COMPOSE"; else todo "install the docker compose plugin"; fi
 
 echo "== the mount =="
 if $CHECK; then
-  [ -d "$HOST_ROOT" ] && ok "$HOST_ROOT exists" || todo "create $HOST_ROOT (run without --check)"
+  if [ -d "$HOST_ROOT" ]; then ok "$HOST_ROOT exists"; else todo "create $HOST_ROOT (run without --check)"; fi
 else
   sudo mkdir -p "$HOST_ROOT/bin" "$HOST_ROOT/users"
   # The app runs as a non-root user inside the container, and it writes per-user
@@ -41,10 +41,12 @@ fi
 
 echo "== bay + docker, into the mount =="
 if $CHECK; then
-  [ -x "$HOST_ROOT/bin/bay" ] && ok "bay installed" || todo "install bay (run without --check)"
+  if [ -x "$HOST_ROOT/bin/bay" ]; then ok "bay installed"; else todo "install bay (run without --check)"; fi
 elif [ -n "${RQ_BAY_SRC:-}" ] && [ -d "$RQ_BAY_SRC" ]; then
   (cd "$RQ_BAY_SRC" && GOFLAGS=-mod=vendor go build -o /tmp/bay .) \
     && sudo cp /tmp/bay "$HOST_ROOT/bin/bay" && rm -f /tmp/bay && ok "bay built from $RQ_BAY_SRC"
+elif [ -x "$HOST_ROOT/bin/bay" ] && [ "${RQ_REBUILD_BAY:-false}" != true ]; then
+  ok "bay already installed (RQ_REBUILD_BAY=true to rebuild)"
 elif [ -n "${GITHUB_TOKEN:-}" ]; then
   # bay is private, so `go install` cannot fetch it. Clone with the token and
   # build from the vendored dependencies, which needs no further network.
@@ -67,7 +69,7 @@ fi
 if ! $CHECK; then
   sudo cp "$(command -v docker)" "$HOST_ROOT/bin/docker"
   sudo mkdir -p "$HOST_ROOT/bin/cli-plugins"
-  [ -n "$COMPOSE" ] && sudo cp "$COMPOSE" "$HOST_ROOT/bin/cli-plugins/docker-compose"
+  [ -n "$COMPOSE" ] && sudo cp "$COMPOSE" "$HOST_ROOT/bin/cli-plugins/docker-compose" || true
   sudo chmod 0755 "$HOST_ROOT"/bin/bay "$HOST_ROOT"/bin/docker "$HOST_ROOT"/bin/cli-plugins/* 2>/dev/null || true
   ok "docker CLI + compose staged"
 fi
@@ -75,7 +77,9 @@ fi
 echo "== the repo's bay config =="
 CFG_URL="${RQ_BAY_CONFIG_REPO:-git@github.com:ubicloud/bay-ubicloud.git}"
 if $CHECK; then
-  [ -f "$HOST_ROOT/config/bay.toml" ] && ok "config folder present" || todo "clone $CFG_URL into $HOST_ROOT/config"
+  if [ -f "$HOST_ROOT/config/bay.toml" ]; then ok "config folder present"; else todo "clone $CFG_URL into $HOST_ROOT/config"; fi
+elif [ "$CFG_URL" = "skip" ] && [ -f "$HOST_ROOT/config/bay.toml" ]; then
+  ok "config folder already in place (skipping the clone)"
 elif [ -d "$HOST_ROOT/config/.git" ]; then
   sudo git -C "$HOST_ROOT/config" pull --quiet --ff-only && ok "config folder updated"
 else
