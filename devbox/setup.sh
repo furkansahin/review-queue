@@ -10,6 +10,17 @@
 # A cold box took 335s to reach "ready"; see README.md for the numbers.
 set -uo pipefail
 
+# This script changes a machine: it installs packages, clones repositories into
+# $HOME and appends to ~/.ssh/config. It is for a Linux dev box. Running it
+# anywhere else -- a laptop, by accident -- is not something to recover from
+# afterwards, so refuse unless --check.
+if [ "$(uname -s)" != "Linux" ] && [ "${1:-}" != "--check" ]; then
+  echo "setup.sh changes this machine and is meant for a Linux dev box." >&2
+  echo "This is $(uname -s). Use --check to inspect without changing anything," >&2
+  echo "or set RQ_FORCE_HOST=1 if you really mean it." >&2
+  [ "${RQ_FORCE_HOST:-}" = "1" ] || exit 2
+fi
+
 CHECK_ONLY=false
 BUILD_BASE=false
 for a in "$@"; do
@@ -201,7 +212,13 @@ if [ -f "$HOME/.ssh/id_bayself.pub" ]; then
   grep -qF "$(cat "$HOME/.ssh/id_bayself.pub")" "$HOME/.ssh/authorized_keys" 2>/dev/null \
     || { can_change && cat "$HOME/.ssh/id_bayself.pub" >> "$HOME/.ssh/authorized_keys"; }
   if ! grep -q "Host $SELF_HOST" "$HOME/.ssh/config" 2>/dev/null && can_change; then
-    printf 'Host %s\n  HostName 127.0.0.1\n  User %s\n  IdentityFile ~/.ssh/id_bayself\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' \
+    # A config whose last line has no newline would otherwise fuse with the
+    # first line appended here, and ssh then refuses to parse the whole file:
+    #   /home/x/.ssh/config line 28: Invalid SetEnv.
+    if [ -s "$HOME/.ssh/config" ] && [ "$(tail -c1 "$HOME/.ssh/config" | wc -l)" -eq 0 ]; then
+      printf '\n' >> "$HOME/.ssh/config"
+    fi
+    printf '\nHost %s\n  HostName 127.0.0.1\n  User %s\n  IdentityFile ~/.ssh/id_bayself\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' \
       "$SELF_HOST" "$USER" >> "$HOME/.ssh/config"
     chmod 600 "$HOME/.ssh/config"
   fi
