@@ -62,11 +62,35 @@ class ReviewQueue < Roda
     cookie_options: {same_site: :lax, http_only: true, secure: ENV["RQ_INSECURE_COOKIES"] != "1"}
   # Default is :raise, which would surface a stack trace on a stale form.
   plugin :route_csrf, csrf_failure: :empty_403
+  # Defence in depth: an unhandled exception should not reach a user as a bare
+  # 500 with nothing to act on, and should leave something in the log.
+  plugin :error_handler do |e|
+    warn "[review-queue] #{e.class}: #{e.message}"
+    warn e.backtrace.take(8).join("\n") if e.backtrace
+    response.status = 500
+    if request.path.start_with?("/sessions/tail")
+      response["Content-Type"] = "application/json"
+      '{"error":"server error"}'
+    else
+      response["Content-Type"] = "text/html; charset=utf-8"
+      "<p style=\"font:14px system-ui;padding:24px\">Something went wrong: " \
+        "#{Rack::Utils.escape_html(e.class.to_s)}. It is in the server log. " \
+        "<a href=\"/sessions\">Back to sessions</a></p>"
+    end
+  end
   plugin :default_headers,
     "Content-Type" => "text/html; charset=utf-8",
     "X-Frame-Options" => "DENY",
     "X-Content-Type-Options" => "nosniff",
     "Referrer-Policy" => "no-referrer"
+
+  # An id from a form goes into a bigint column. Anything that is not a positive
+  # integer must never reach the database: "" and "abc" both raise
+  # PG::InvalidTextRepresentation, which surfaced as a bare 500.
+  def param_id(value)
+    v = value.to_s.strip
+    v.match?(/\A[0-9]{1,18}\z/) && v.to_i.positive? ? v.to_i : nil
+  end
 
   def current_login = session["login"]
 
@@ -221,8 +245,9 @@ class ReviewQueue < Roda
         check_csrf!
         name = r.params["box"].to_s
         if name.empty?
-          row = DB.row("SELECT box_name FROM review_jobs WHERE login = $1 AND id = $2",
-                       [current_login, r.params["id"].to_s])
+          id = param_id(r.params["id"])
+          row = id && DB.row("SELECT box_name FROM review_jobs WHERE login = $1 AND id = $2",
+                             [current_login, id])
           name = row ? row["box_name"].to_s : ""
         end
         box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
@@ -250,8 +275,9 @@ class ReviewQueue < Roda
       r.post "ask" do
         check_csrf!
         prompt = r.params["prompt"].to_s.strip
-        job = DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2",
-                     [current_login, r.params["id"].to_s])
+        id = param_id(r.params["id"])
+        job = id && DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2",
+                           [current_login, id])
         box = job && Jobs.dev_box(job)
 
         if prompt.empty?
@@ -277,7 +303,9 @@ class ReviewQueue < Roda
 
       r.post "cancel" do
         check_csrf!
-        Jobs.cancel(login: current_login, id: r.params["id"].to_s)
+        if (id = param_id(r.params["id"]))
+          Jobs.cancel(login: current_login, id: id)
+        end
         r.redirect "/sessions"
       end
 
@@ -287,8 +315,9 @@ class ReviewQueue < Roda
       r.get "tail" do
         response["Content-Type"] = "application/json"
         response["Cache-Control"] = "no-store"
-        job = DB.row("SELECT id, state, phase, output FROM review_jobs WHERE login = $1 AND id = $2",
-                     [current_login, r.params["id"].to_s])
+        id = param_id(r.params["id"])
+        job = id && DB.row("SELECT id, state, phase, output FROM review_jobs WHERE login = $1 AND id = $2",
+                           [current_login, id])
         next '{"error":"not found"}' unless job
 
         text = job["output"].to_s

@@ -237,6 +237,25 @@ check("and it quotes the reason", last_response.body.include?("uncommitted chang
 get "/sessions"
 check("the error clears after one view", last_response.body.include?("could not tear down"), false)
 
+# every id-taking route must survive a missing or junk id: these reached the
+# database as a bigint and raised PG::InvalidTextRepresentation, i.e. a 500
+get "/sessions"
+tt = csrf_for(last_response.body, "/sessions/teardown")
+ct = csrf_for(last_response.body, "/sessions/cancel")
+at = csrf_for(last_response.body, "/sessions/ask")
+[["", "empty"], ["abc", "non-numeric"], ["-1", "negative"], ["99999999999999999999", "huge"]].each do |bad, label|
+  post "/sessions/teardown", {"id" => bad, "_csrf" => tt}
+  check("teardown survives an #{label} id", last_response.status < 500, true)
+  post "/sessions/cancel", {"id" => bad, "_csrf" => ct}
+  check("cancel survives an #{label} id", last_response.status < 500, true)
+  post "/sessions/ask", {"id" => bad, "prompt" => "hi", "_csrf" => at}
+  check("ask survives an #{label} id", last_response.status < 500, true)
+  get "/sessions/tail?id=#{bad}&offset=0"
+  check("tail survives an #{label} id", last_response.status < 500, true)
+end
+post "/sessions/teardown", {"_csrf" => tt}
+check("teardown survives no id at all", last_response.status < 500, true)
+
 # a box name that is not ours must be refused before it is sent anywhere
 post "/sessions/teardown", {"box" => "../etc/passwd", "_csrf" => tok}
 get "/sessions"
