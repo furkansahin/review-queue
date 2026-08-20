@@ -83,6 +83,13 @@ check("the key is the decrypted one",
       File.read(Runner.key_path("furkansahin")).start_with?("-----BEGIN"), true)
 sshcfg = File.read(Runner.ssh_config_path("furkansahin"))
 check("ssh points at the user's machine", sshcfg.include?("HostName 10.0.0.5"), true)
+# bay runs ssh itself, with no -F, so the config must resolve from HOME.
+check("the config is where ssh looks by itself",
+      Runner.ssh_config_path("furkansahin"), File.join(ROOT, "users", "furkansahin", ".ssh", "config"))
+check("and HOME points at that user", Runner.send(:env_for, BOXROW)["HOME"],
+      File.join(ROOT, "users", "furkansahin"))
+check("the ssh directory is 0700",
+      format("%o", File.stat(Runner.ssh_dir("furkansahin")).mode & 0o777), "700")
 
 puts "-- the tokens reach bay, and nothing else does --"
 File.delete("#{ROOT}/env.seen") if File.exist?("#{ROOT}/env.seen")

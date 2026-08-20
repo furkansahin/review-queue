@@ -59,7 +59,8 @@ module Runner
   def bay_home(login) = File.join(user_dir(login), "bay")
   def config_dir(login) = File.join(bay_home(login), "ubicloud")
   def state_dir(login, box) = File.join(user_dir(login), "state", box)
-  def key_path(login) = File.join(user_dir(login), "ssh", "key")
+  def ssh_dir(login) = File.join(user_dir(login), ".ssh")
+  def key_path(login) = File.join(ssh_dir(login), "key")
 
   # Builds (or refreshes) everything bay needs for this user. Cheap enough to
   # run before every command, which means a box that was registered while the
@@ -69,7 +70,8 @@ module Runner
     raise Error, unavailable_reason unless enabled?
 
     dir = config_dir(login)
-    FileUtils.mkdir_p([dir, File.join(user_dir(login), "ssh"), File.join(user_dir(login), "state")])
+    FileUtils.mkdir_p([dir, ssh_dir(login), File.join(user_dir(login), "state")])
+    File.chmod(0o700, ssh_dir(login))
 
     # The shared config is symlinked, not copied: it is the repo's tooling and
     # it is identical for everyone. Only bay.local.toml is this user's.
@@ -88,7 +90,7 @@ module Runner
     dir
   end
 
-  def ssh_config_path(login) = File.join(user_dir(login), "ssh", "config")
+  def ssh_config_path(login) = File.join(ssh_dir(login), "config")
 
   # The one file that differs per user: which machine is theirs, and which
   # skills repository their boxes get.
@@ -112,7 +114,7 @@ module Runner
         IdentityFile #{key_path(box_row["login"])}
         IdentitiesOnly yes
         StrictHostKeyChecking accept-new
-        UserKnownHostsFile #{File.join(user_dir(box_row["login"]), "ssh", "known_hosts")}
+        UserKnownHostsFile #{File.join(ssh_dir(box_row["login"]), "known_hosts")}
         BatchMode yes
         ConnectTimeout 15
     SSH
@@ -132,9 +134,10 @@ module Runner
       "BAY_CONFIG" => File.join(config_dir(login), "bay.toml"),
       "DOCKER_HOST" => "ssh://rqremote",
       "DOCKER_CONFIG" => File.join(user_dir(login), "docker"),
-      "GIT_SSH_COMMAND" => ssh,
-      # bay shells out to plain `ssh`, which would not otherwise see the config.
-      "SSH_CONFIG_FILE" => ssh_config_path(login)
+      # bay runs `ssh` itself for DOCKER_HOST and for git, with no -F of its
+      # own, so the host alias has to resolve from $HOME/.ssh/config. Setting
+      # GIT_SSH_COMMAND as well costs nothing and is explicit for git.
+      "GIT_SSH_COMMAND" => ssh
     }
     %w[claude_token_enc github_token_enc].each do |column|
       value = box_row[column].to_s
