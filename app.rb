@@ -242,6 +242,35 @@ class ReviewQueue < Roda
         r.redirect "/sessions"
       end
 
+      # A follow-up question in the box that already ran the review.
+      r.post "ask" do
+        check_csrf!
+        prompt = r.params["prompt"].to_s.strip
+        job = DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2",
+                     [current_login, r.params["id"].to_s])
+        box = job && Jobs.dev_box(job)
+
+        if prompt.empty?
+          session["sessions_error"] = "type a question first"
+        elsif prompt.bytesize > 8192
+          session["sessions_error"] = "that question is too long (8 KB limit)"
+        elsif job.nil? || box.nil?
+          session["sessions_error"] = "no such review, or no dev box registered"
+        elsif !%w[done failed].include?(job["state"])
+          session["sessions_error"] = "wait for the review to finish first"
+        else
+          # The question goes over stdin, so it is never part of a command line.
+          res = DevBox.run(box, "ask #{job["box_name"]}", stdin: prompt)
+          if res[:ok]
+            Jobs.reopen(job["id"], current_login)
+          else
+            detail = (res[:error] || res[:output]).to_s.strip
+            session["sessions_error"] = "could not ask: #{detail[0, 400]}"
+          end
+        end
+        r.redirect "/sessions"
+      end
+
       r.post "cancel" do
         check_csrf!
         Jobs.cancel(login: current_login, id: r.params["id"].to_s)
@@ -281,7 +310,8 @@ class ReviewQueue < Roda
         view("sessions", locals: {jobs: jobs, boxes: boxes, dev_box: box, login: current_login,
                                   error: session.delete("sessions_error"),
                                   csrf_teardown: csrf_tag("/sessions/teardown"),
-                                  csrf_cancel: csrf_tag("/sessions/cancel")},
+                                  csrf_cancel: csrf_tag("/sessions/cancel"),
+                                  csrf_ask: csrf_tag("/sessions/ask")},
           layout: false)
       end
     end

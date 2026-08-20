@@ -87,6 +87,17 @@ module Jobs
     SQL
   end
 
+  # A follow-up puts a finished job back to work in the same box, so the page
+  # streams the answer the way it streamed the review.
+  def reopen(id, login)
+    DB.row(<<~SQL, [login, id])
+      UPDATE review_jobs
+      SET state = 'running', phase = 'reviewing', finished_at = NULL, error = NULL
+      WHERE login = $1 AND id = $2 AND state IN ('done', 'failed')
+      RETURNING *
+    SQL
+  end
+
   def stale?(job, now: Time.now)
     started = job["started_at"]
     return false unless started

@@ -1,12 +1,19 @@
-# Add to bay-ubicloud's bay.toml, under [commands].
+# Add these to bay-ubicloud's bay.toml, under the commands table.
 #
-# `bay run` only executes commands defined here, so the dashboard cannot pass a
-# prompt. It does not need to: `bay up <box> --pr <n>` already checked the
+# Both pin the model and the effort. Unpinned, a review runs on whatever the
+# box's account happens to default to, which moves between releases and differs
+# per developer -- so the same pull request could be reviewed at two depths. An
+# adversarial review runs unattended, so nobody is there to notice a shallow
+# answer.
+#
+# bay run only executes commands defined here, so the dashboard cannot pass a
+# prompt. review does not need one: bay up <box> --pr <n> already checked the
 # worktree out at the pull request, so the diff against the base branch IS the
-# thing to review, and the command needs no arguments.
-
-# Also add install-skills.sh to `sync` and `setup` in [box], so each developer's
-# own Claude skills reach their boxes:
+# subject. ask reads its prompt from a file the dashboard writes into the
+# worktree, so free text never travels on a command line.
+#
+# Also add install-skills.sh to sync and setup in [box], so each developer's own
+# Claude skills reach their boxes:
 #
 #   [box]
 #   sync  = [..., "install-skills.sh"]
@@ -19,7 +26,7 @@
 
 [commands]
 review = """
-claude -p 'You are reviewing this pull request adversarially. \
+claude -p --model opus --effort max 'You are reviewing this pull request adversarially. \
 Diff the working branch against origin/main and read every changed hunk. \
 \
 Look for defects that matter: logic that is wrong on some input, race \
@@ -32,4 +39,11 @@ For each finding give the file and line, what input or state triggers it, and \
 what goes wrong. Rank by severity. Say plainly when you are unsure rather than \
 padding the list. If the change is sound, say so and stop - do not invent \
 findings to fill space.' 2>&1
+"""
+
+# A follow-up in the same box, after the review. --continue resumes the review's
+# own conversation, so the question has the whole review in context instead of
+# starting cold. The prompt comes from the file the dashboard wrote.
+ask = """
+cd /workspace && claude -p --continue --model opus --effort max "$(cat /workspace/.rq/followup.txt)" 2>&1
 """

@@ -37,6 +37,10 @@
   pre { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 8px;
         padding: 12px 14px; overflow-x: auto; font-size: 12px; line-height: 1.5;
         font-family: 'IBM Plex Mono', monospace; white-space: pre-wrap; word-break: break-word; }
+  .ask { display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; }
+  .ask textarea { flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+                  padding: 8px 10px; border-radius: 6px; resize: vertical;
+                  border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); }
   .empty { padding: 48px 0; text-align: center; color: var(--muted-2); font-size: 13px; }
   @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.45 } }
   .live { animation: pulse 1.6s ease-in-out infinite; }
@@ -154,6 +158,14 @@
           </details>
         <% end %>
       <% end %>
+
+      <form method="post" action="/sessions/ask" class="ask">
+        <%== csrf_ask %>
+        <input type="hidden" name="id" value="<%= j["id"] %>" />
+        <textarea name="prompt" rows="2" maxlength="8192"
+                  placeholder="Ask a follow-up in this box — it still has the review in context. e.g. &quot;show me a failing input for finding 1&quot;"></textarea>
+        <button class="mini" type="submit">Send</button>
+      </form>
     </div>
   <% end %>
 

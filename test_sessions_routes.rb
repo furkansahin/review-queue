@@ -34,11 +34,16 @@ QueueService.class_eval do
      error: nil, reviews_7d: {count: 0, complete: true}}
   end
 end
-# the dev box is unreachable in tests; that must degrade, not crash
+# One stub for the dev box. Mutable, so a test can change how a verb behaves.
+STUB = {teardown: {ok: true, output: "torn down"}, asked: nil}
 DevBox.singleton_class.prepend(Module.new do
-  def run(_box, command, timeout: 30)
-    return {ok: true, output: "rq-ubicloud-6172\tdeepak/x\tUp 2 minutes\n"} if command == "list"
-    {ok: true, output: "started"}
+  def run(_box, command, timeout: 30, stdin: nil)
+    case command
+    when "list" then {ok: true, output: "rq-ubicloud-6172\tdeepak/x\tUp 2 minutes\n"}
+    when /\Ateardown / then STUB[:teardown]
+    when /\Aask / then STUB[:asked] = stdin; {ok: true, output: "asked"}
+    else {ok: true, output: "started"}
+    end
   end
 end)
 
@@ -180,15 +185,34 @@ get "/sessions"
 check("live panel is keyed", last_response.body.include?(%(data-keep="live-#{job_id}")), true)
 DB.exec("UPDATE review_jobs SET state='done' WHERE id=$1", [job_id])
 
+# --- follow-up ------------------------------------------------------------
+DB.exec("UPDATE review_jobs SET state='done', finished_at=now() WHERE id=$1", [job_id])
+get "/sessions"
+check("finished job offers a follow-up box", last_response.body.include?('name="prompt"'), true)
+atok = csrf_for(last_response.body, "/sessions/ask")
+post "/sessions/ask", {"id" => job_id, "prompt" => "why is finding 1 exploitable?", "_csrf" => atok}
+check("the question goes over stdin, not the command line", STUB[:asked], "why is finding 1 exploitable?")
+check("the job goes back to running", DB.row("SELECT state FROM review_jobs WHERE id=$1", [job_id])["state"], "running")
+check("and back to the reviewing phase", DB.row("SELECT phase FROM review_jobs WHERE id=$1", [job_id])["phase"], "reviewing")
+
+# a follow-up while it is already running must be refused
+post "/sessions/ask", {"id" => job_id, "prompt" => "again", "_csrf" => atok}
+get "/sessions"
+check("cannot ask while it is still running", last_response.body.include?("wait for the review to finish"), true)
+
+DB.exec("UPDATE review_jobs SET state='done', finished_at=now() WHERE id=$1", [job_id])
+get "/sessions"; atok = csrf_for(last_response.body, "/sessions/ask")
+post "/sessions/ask", {"id" => job_id, "prompt" => "   ", "_csrf" => atok}
+get "/sessions"
+check("an empty question is refused", last_response.body.include?("type a question first"), true)
+post "/sessions/ask", {"id" => job_id, "prompt" => "x" * 9000, "_csrf" => atok}
+get "/sessions"
+check("an oversized question is refused", last_response.body.include?("8 KB limit"), true)
+post "/sessions/ask", {"id" => job_id, "prompt" => "no csrf"}
+check("ask without CSRF is blocked", last_response.status, 403)
+
 # --- teardown -------------------------------------------------------------
-TEARDOWN = {ok: false, output: "", error: "box \"rq-x\" has uncommitted changes in its worktree"}
-DevBox.singleton_class.prepend(Module.new do
-  def run(box, command, timeout: 30)
-    return {ok: true, output: "rq-ubicloud-6172\tdeepak/x\tUp 2 minutes\n"} if command == "list"
-    return TEARDOWN if command.start_with?("teardown")
-    {ok: true, output: "started"}
-  end
-end)
+STUB[:teardown] = {ok: false, output: "", error: "box \"rq-x\" has uncommitted changes in its worktree"}
 get "/sessions"
 tok = csrf_for(last_response.body, "/sessions/teardown")
 post "/sessions/teardown", {"box" => "rq-ubicloud-6172", "_csrf" => tok}

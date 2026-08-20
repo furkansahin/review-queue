@@ -107,6 +107,48 @@ case "$verb" in
     echo "started $box"
     ;;
 
+  ask)
+    # A follow-up question in a box that already ran a review.
+    #
+    # The text arrives on STDIN, never as an argument, so the command line stays
+    # exactly as strict as every other verb and nothing in the question can
+    # affect parsing. It is written to a file and read back by the bay command
+    # with "$(cat ...)", so it is one shell word there too -- never eval'd.
+    box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
+    [ -n "$BAY" ] || die "bay not found"
+    dir="$STATE_DIR/$box"
+    [ -d "$dir" ] || die "no review has run for $box"
+
+    wt="$REPO_PATH/.worktrees/$box"
+    [ -d "$wt" ] || die "no worktree for $box; has the box been torn down?"
+
+    mkdir -p "$wt/.rq"
+    # Bounded: a prompt is a question, not a payload.
+    head -c 8192 > "$wt/.rq/followup.txt"
+    [ -s "$wt/.rq/followup.txt" ] || die "empty follow-up"
+
+    echo reviewing > "$dir/state"
+    {
+      echo
+      echo "--- follow-up ---"
+      cat "$wt/.rq/followup.txt"
+      echo
+    } >> "$dir/log"
+
+    setsid nohup bash -c '
+      bay="$1"; box="$2"; dir="$3"; repo_path="$4"
+      cd "$repo_path" || { echo failed > "$dir/state"; exit 1; }
+      if "$bay" run "$box" ask </dev/null >> "$dir/log" 2>&1; then
+        echo done > "$dir/state"
+      else
+        echo failed > "$dir/state"
+      fi
+    ' _ "$BAY" "$box" "$dir" "$REPO_PATH" >/dev/null 2>&1 &
+
+    echo "$!" > "$dir/pid"
+    echo "asked $box"
+    ;;
+
   status)
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     dir="$STATE_DIR/$box"
@@ -157,6 +199,6 @@ case "$verb" in
     ;;
 
   *)
-    die "refused: only ping, review, status, result, build, list and teardown are allowed"
+    die "refused: only ping, review, ask, status, result, build, list and teardown are allowed"
     ;;
 esac

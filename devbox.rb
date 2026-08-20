@@ -94,7 +94,9 @@ module DevBox
 
   # Runs one command and returns {ok:, output:, exit_code:}. Never raises for a
   # non-zero exit: a failing review is data, not an exception.
-  def run(box_row, command, timeout: 30)
+  # stdin carries free text (a follow-up question) so it never reaches a command
+  # line, where it would have to be quoted and could affect parsing.
+  def run(box_row, command, timeout: 30, stdin: nil)
     key = Crypto.decrypt(box_row["private_key_enc"])
     output = +""
     code = nil
@@ -109,6 +111,10 @@ module DevBox
       ssh.open_channel do |ch|
         ch.exec(command) do |_, success|
           raise Error, "could not start the command on the dev box" unless success
+          if stdin
+            ch.send_data(stdin)
+            ch.eof!
+          end
           ch.on_data { |_, d| output << d }
           ch.on_extended_data { |_, _, d| output << d }
           ch.on_request("exit-status") { |_, data| code = data.read_long }
