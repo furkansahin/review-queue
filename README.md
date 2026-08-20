@@ -91,6 +91,15 @@ browser.
 
 ## Sessions page
 
+A review is capped at 200 KB and the page lists the last 50, so printing every one of them
+built a 10 MB page out of reviews from weeks ago that nobody had opened. The newest fill a
+byte budget (`RQ_INLINE_BYTES`, 256 KB) and are printed with the page; the rest show their
+size and load when their panel is opened. Each one also carries a plain link to
+`/sessions/review`, which is what a browser without scripting follows.
+
+The queue page shows no review text at all, so it no longer reads any: it asks for the state
+word per pull request and nothing else.
+
 `Boxes on your dev box` comes from an ssh round trip to `bay list`, which was the slowest
 thing on the page and was paid on every load. It caches for `RQ_BOX_LIST_TTL` seconds, and a
 teardown clears it, so the list is never stale at the moment you are looking at it.
@@ -99,7 +108,7 @@ teardown clears it, so the list is never stale at the moment you are looking at 
 
 ```
 app.rb             routes, session/OAuth, allowlist, env config
-queue_service.rb   GitHub client, threaded fetch, timeline/state/age logic, TTL cache
+queue_service.rb   GitHub client with pooled connections, threaded fetch, state/age, TTL cache
 views/queue.erb    the table (no JS — tabs and filters are links)
 auth.rb            GitHub OAuth flow + per-user service registry
 snooze.rb          per-browser snooze list, kept in the session cookie

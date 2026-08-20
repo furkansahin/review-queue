@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Review · Review queue</title>
+<style>
+<%= PALETTE %>
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
+         border-bottom: 1px solid var(--border); }
+  .wrap { padding: 20px 24px 80px; }
+  pre { background: var(--surface); border: 1px solid var(--border-soft); border-radius: 8px;
+        padding: 12px 14px; overflow-x: auto; font-size: 12px; line-height: 1.5;
+        font-family: 'IBM Plex Mono', monospace; white-space: pre-wrap; word-break: break-word; }
+  details > summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 16px;
+                      font-family: 'IBM Plex Mono', monospace; }
+  .empty { padding: 48px 0; text-align: center; color: var(--muted-2); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Review</div>
+  <a class="mono" style="font-size: 12px;" href="/sessions">← back to sessions</a>
+</div>
+<div class="wrap">
+  <% if found %>
+    <pre><%= review %></pre>
+    <% if noise && !noise.strip.empty? %>
+      <details>
+        <summary style="color: var(--muted-2);">build log from bay (<%= noise.lines.count %> lines) — not the review</summary>
+        <pre><%= noise.lines.last(200).join %></pre>
+      </details>
+    <% end %>
+  <% else %>
+    <div class="empty">No such review, or it has been forgotten.</div>
+  <% end %>
+</div>
+</body>
+</html>

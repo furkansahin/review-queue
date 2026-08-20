@@ -399,13 +399,33 @@ class ReviewQueue < Roda
                       chunk: chunk, done: !%w[queued running].include?(job["state"]))
       end
 
+      # One stored review, for a panel that was not printed with the page.
+      # Answers JSON to the script and a plain page to a browser without one,
+      # so the same link works either way.
+      r.get "review" do
+        id = param_id(r.params["id"])
+        text = id && Jobs.output(current_login, id)
+        noise, review = Jobs.split_output(text)
+        if r.params["format"] == "json"
+          response["Content-Type"] = "application/json"
+          response["Cache-Control"] = "no-store"
+          next JSON.generate(found: !text.nil?, review: review, noise: noise)
+        end
+        view("review", locals: {id: id, found: !text.nil?, review: review, noise: noise},
+          layout: false)
+      end
+
       r.get true do
         jobs = Jobs.for_user(current_login)
+        # Only the reviews this page is going to print. The rest carry their
+        # size and load from /sessions/review when their panel is opened.
+        outputs = Jobs.outputs(current_login, Jobs.inline_ids(jobs))
         box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
         # Boxes outlive their reviews, so ask the dev box what actually exists
         # rather than trusting our own rows.
         boxes = box ? DevBox.box_list(box) : []
-        view("sessions", locals: {jobs: jobs, boxes: boxes, dev_box: box, login: current_login,
+        view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, dev_box: box,
+                                  login: current_login,
                                   error: session.delete("sessions_error"),
                                   notice: session.delete("sessions_notice"),
                                   csrf_teardown: csrf_tag("/sessions/teardown"),
