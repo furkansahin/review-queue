@@ -132,7 +132,7 @@ class QueueService
   # quick_lines: churn at or below which a PR counts as a "quick win".
   # lines_per_min: rough review-reading rate behind the "~3m" estimate.
   def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 5, per_page: 50,
-    quick_lines: 50, lines_per_min: 20)
+    quick_lines: 50, lines_per_min: 20, merged_limit: 10)
     @gh = GitHubClient.new(token)
     @scope = scope
     @label = self.class.clean_label(label)
@@ -144,6 +144,7 @@ class QueueService
     @per_page = per_page
     @quick_lines = quick_lines
     @lines_per_min = lines_per_min
+    @merged_limit = merged_limit
     @lock = Mutex.new
     @snapshot = nil
   end
@@ -174,8 +175,16 @@ class QueueService
   def tabs
     [{key: :all, label: "All"}] +
       buckets.map { |b| {key: b[:key], label: b[:label]} } +
-      [{key: :quick, label: "Quick wins"}, {key: :snoozed, label: "Snoozed"}]
+      [{key: :quick, label: "Quick wins"}, {key: :snoozed, label: "Snoozed"},
+       {key: :merged, label: "Merged"}]
   end
+
+  # Merged pull requests you wrote. This is a separate list, not a bucket.
+  # A bucket joins `entries`, and everything in `entries` is fetched in full,
+  # counted in All and drawn into the progress bar. These are finished work:
+  # they belong to none of that, and asking for six calls each to decide a
+  # review state they cannot have would slow every rebuild for a look back.
+  def merged_query = "#{@scope} is:pr is:merged author:@me"
 
   def snapshot(force: false)
     # A rebuild takes seconds and holds the lock for all of them. A request that
@@ -242,7 +251,16 @@ class QueueService
         [b[:key], res["items"] || []]
       }
     }
+    # Rides in the same wave as the buckets, so the Merged tab costs one search
+    # and no extra wall clock. try, not get: a look back that fails must not
+    # take the queue down with it.
+    tasks << -> {
+      res = @gh.try("/search/issues?per_page=#{@merged_limit}&sort=updated&q=#{URI.encode_www_form_component(merged_query)}")
+      [:__merged, (res && res["items"]) || []]
+    }
     login, *found = threaded(tasks, &:call)
+    merged_items = found.find { |r| r && r[0] == :__merged }&.at(1) || []
+    found = found.reject { |r| r && r[0] == :__merged }
     raise failure if failure
     raise "GitHub did not say who is signed in" if login.nil?
 
@@ -260,12 +278,13 @@ class QueueService
     # on, so it runs alongside the per-pull-request fetch. It used to be up to
     # three more serial round trips tacked onto the end of every rebuild.
     weekly = Thread.new { reviews_this_week(login) }
+    merged = Thread.new { merged_rows(merged_items, login) }
 
     prs = threaded(entries.values) { |entry| detail(entry, login) }.compact
     rows = prs.map { |pr| row(pr, login) }.sort_by { |r| r[:sort_key] }
 
     {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
-     counts: counts(rows), reviews_7d: weekly.value}
+     counts: counts(rows), reviews_7d: weekly.value, merged: merged.value}
   end
 
   # Pull requests you reviewed in the last 7 days.
@@ -446,6 +465,51 @@ class QueueService
       awaiting_review: awaiting_review, approved: approved,
       changed: pull["changed_files"], churn: (pull["additions"].to_i + pull["deletions"].to_i)
     }
+  end
+
+  # One extra call each, for the size. The search result already carries the
+  # title, the labels and merged_at, so this is the only thing worth fetching,
+  # and @merged_limit bounds how many. try, so one unreadable pull request
+  # costs its own size and not the whole tab.
+  def merged_rows(items, login)
+    threaded(items) { |item|
+      owner, repo = item["repository_url"].to_s.match(%r{repos/([^/]+)/([^/]+)\z})&.captures
+      next nil unless owner
+      n = item["number"]
+      pull = @gh.try("/repos/#{owner}/#{repo}/pulls/#{n}")
+      merged_at = begin
+        Time.parse((pull && pull["merged_at"]) || item.dig("pull_request", "merged_at") || item["closed_at"])
+      rescue StandardError
+        nil
+      end
+      churn = pull ? pull["additions"].to_i + pull["deletions"].to_i : 0
+
+      {key: "#{owner}/#{repo}##{n}", repo: repo, repo_full: "#{owner}/#{repo}", number: n,
+       url: item["html_url"], title: item["title"], ref: "#{repo} ##{n}",
+       author: item.dig("user", "login") || login,
+       state: "Merged", state_bg: "var(--state-merged-bg)", state_color: "var(--state-merged-fg)",
+       row_bg: "var(--row-settled)", age_color: "var(--age-idle-bar)",
+       age_text_color: "var(--age-idle-fg)",
+       merged_at: merged_at, age: ago(merged_at),
+       reviewers: reviewer_names(pull, login),
+       chips: (item["labels"] || []).map { |l| l["name"] }
+                .select { |l| !@label.empty? && l.to_s.downcase == @label.downcase }
+                .map { |l| chip(l, :blue) }.compact,
+       churn: churn, changed: pull ? pull["changed_files"].to_i : 0,
+       read_est: churn.positive? ? "~#{[(churn / @lines_per_min.to_f).ceil, 1].max}m" : "—",
+       size_sub: churn.positive? ? "±#{churn} · #{pull["changed_files"].to_i}f" : "no diff data",
+       settled: true, buckets: [], quick: false,
+       # Newest merge first: this is a look back, so recency is the order.
+       sort_key: [merged_at ? -merged_at.to_i : 0]}
+    }.compact.sort_by { |r| r[:sort_key] }
+  end
+
+  # Who approved it. requested_reviewers is empty once a pull request is
+  # merged, so the merge itself is the only place this is still recorded.
+  def reviewer_names(pull, login)
+    who = (pull && pull["merged_by"] && pull["merged_by"]["login"]).to_s
+    return "—" if who.empty?
+    who == login ? "you" : who
   end
 
   def row(pr, login)

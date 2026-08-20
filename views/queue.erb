@@ -3,7 +3,11 @@
   counts = snap[:counts] || {}
   qs = ->(t, h) { "/?tab=#{t}#{h ? "&hide=1" : ""}" }
   cols = "4px 132px 1fr 92px 132px 150px 84px 76px 168px"
+  # Merged rows carry no CI, no waiting time and no action, so the tab drops
+  # those columns instead of printing four empty cells on every line.
+  mcols = "4px 132px 1fr 92px 132px 150px"
   snoozing = tab == :snoozed
+  merged_tab = tab == :merged
 
   # A draft is listed but is not work for today, so it counts in neither
   # "to go" nor "done", and it never becomes Next up.
@@ -12,7 +16,8 @@
   active = rows.count { |r| !r[:settled] && !r[:draft] }
   total = active + done
   pct = total.zero? ? 100 : (done * 100.0 / total).round
-  hero = snoozing ? nil : rows.find { |r| !r[:settled] && !r[:draft] }
+  # Next up is the queue's question. Merged work has no next.
+  hero = (snoozing || merged_tab) ? nil : rows.find { |r| !r[:settled] && !r[:draft] }
   reviews_7d = snap[:reviews_7d]
 %>
 <!DOCTYPE html>
@@ -74,6 +79,7 @@
     --state-done-bg: oklch(0.955 0.004 70);  --state-done-fg: oklch(0.55 0.01 60);
     --state-yours-bg: oklch(0.95 0.05 85);   --state-yours-fg: oklch(0.45 0.11 65);
     --state-todo-bg: oklch(0.94 0.06 25);    --state-todo-fg: oklch(0.45 0.14 25);
+    --state-merged-bg: oklch(0.94 0.04 300); --state-merged-fg: oklch(0.45 0.15 300);
     --age-idle-bar: oklch(0.9 0.005 70);     --age-idle-fg: oklch(0.66 0.01 60);
     --age-stale-bar: oklch(0.55 0.17 25);    --age-stale-fg: oklch(0.48 0.16 25);
     --age-hot-bar: oklch(0.66 0.16 45);      --age-hot-fg: oklch(0.52 0.14 45);
@@ -135,6 +141,7 @@
       --state-done-bg: oklch(0.29 0.005 70);   --state-done-fg: oklch(0.72 0.008 70);
       --state-yours-bg: oklch(0.33 0.06 85);   --state-yours-fg: oklch(0.87 0.1 85);
       --state-todo-bg: oklch(0.32 0.07 25);    --state-todo-fg: oklch(0.85 0.1 25);
+      --state-merged-bg: oklch(0.32 0.06 300); --state-merged-fg: oklch(0.85 0.09 300);
       --age-idle-bar: oklch(0.38 0.006 70);    --age-idle-fg: oklch(0.62 0.008 70);
       --age-stale-bar: oklch(0.62 0.18 25);    --age-stale-fg: oklch(0.75 0.15 25);
       --age-hot-bar: oklch(0.7 0.16 45);       --age-hot-fg: oklch(0.8 0.13 45);
@@ -193,6 +200,7 @@
            color: var(--badge-fg); padding: 2px 6px; border-radius: 10px; }
   .tab.on .badge { background: var(--badge-on-bg); color: var(--badge-on-fg); }
   .grid { display: grid; grid-template-columns: <%= cols %>; align-items: center; }
+  .grid.merged { grid-template-columns: <%= mcols %>; }
   .head { padding: 9px 24px 9px 20px; font-family: 'IBM Plex Mono', monospace; font-size: 10px;
           letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2);
           border-bottom: 1px solid var(--border-head); }
@@ -233,6 +241,15 @@
   .go { font: 600 13px 'IBM Plex Sans', sans-serif; padding: 8px 16px; border-radius: 7px;
         background: var(--accent); color: var(--surface); white-space: nowrap; }
   .go:hover { text-decoration: none; color: var(--surface); filter: brightness(1.08); }
+  /* The three hero controls stand side by side, so they share one height. They
+     grew from left to right before -- a 21px pill, then a 25px button, then a
+     34px link -- which reads as three sizes by accident, not as emphasis. The
+     call to action still leads, by colour and by weight, not by size. */
+  .hero .pill, .hero .mini, .hero .go {
+    height: 30px; box-sizing: border-box; display: inline-flex; align-items: center; }
+  .hero .pill { padding: 0 10px; }
+  .hero .mini { padding: 0 12px; }
+  .hero .go   { padding: 0 16px; }
 
   .win { padding: 72px 24px; text-align: center; animation: pop 420ms ease-out; }
   .win-mark { font-size: 40px; line-height: 1; animation: bob 2.6s ease-in-out infinite; }
@@ -317,7 +334,7 @@
     <% c = counts[t[:key]] || {open: 0, total: 0} %>
     <a class="tab <%= "on" if tab == t[:key] %>" href="<%= qs.call(t[:key], hide) %>">
       <span><%= t[:label] %></span>
-      <span class="badge"><%= c[:open] %>/<%= c[:total] %></span>
+      <span class="badge"><%= c[:open] ? "#{c[:open]}/#{c[:total]}" : c[:total] %></span>
     </a>
   <% end %>
   <div style="flex: 1;"></div>
@@ -327,7 +344,7 @@
       bar. It rides in the space the tab row already had spare. The counts it
       dropped are on the bar itself, for when the number matters more than the
       shape. %>
-  <% unless total.zero? && drafts.zero? %>
+  <% unless merged_tab || (total.zero? && drafts.zero?) %>
     <div class="progress" title="<%= active %> to go<%= done.positive? ? ", #{done} done" : "" %><%= drafts.positive? ? ", #{drafts} draft" : "" %>">
       <span class="mono" style="font-size: 11px; color: var(--muted-2); white-space: nowrap;"><%= active %> to go</span>
       <div class="track"><div class="fill" style="width: <%= pct %>%;"></div></div>
@@ -380,6 +397,47 @@
 <% end %>
 
 <div style="padding-bottom: 80px;">
+  <%# Merged work is a record, not a queue: no CI, no waiting, no action to
+      take. It gets its own header and its own narrower grid rather than four
+      empty cells per line. %>
+  <% if merged_tab %>
+    <div class="grid merged head">
+      <div></div><div>State</div><div>Pull request</div><div>Size</div><div>Merged</div><div>Merged by</div>
+    </div>
+
+    <% rows.each do |r| %>
+      <div class="grid merged row" style="background: <%= r[:row_bg] %>;">
+        <div style="width: 4px; height: 30px; border-radius: 2px; background: <%= r[:age_color] %>;"></div>
+        <div style="padding-left: 12px;">
+          <span class="pill" style="background: <%= r[:state_bg] %>; color: <%= r[:state_color] %>;"><%= r[:state] %></span>
+        </div>
+        <div style="min-width: 0; padding-right: 24px;">
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <a class="title" href="<%= r[:url] %>" target="_blank" rel="noreferrer"><%= r[:title] %></a>
+            <span class="mono" style="font-size: 11px; color: var(--muted-3); flex: none;"><%= r[:ref] %></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+            <span class="mono" style="font-size: 11px; color: var(--muted);"><%= r[:author] %></span>
+            <% r[:chips].each do |c| %>
+              <span class="chip" style="background: <%= c[:bg] %>; border-color: <%= c[:border] %>; color: <%= c[:color] %>;"><%= c[:text] %></span>
+            <% end %>
+          </div>
+        </div>
+        <div class="cell">
+          <div class="mono" style="font-weight: 500; color: var(--cell);"><%= r[:read_est] %></div>
+          <div class="sub"><%= r[:size_sub] %></div>
+        </div>
+        <div class="cell"><%= r[:age] == "\u2014" ? "\u2014" : "#{r[:age]} ago" %></div>
+        <div class="cell"><%= r[:reviewers] %></div>
+      </div>
+    <% end %>
+
+    <% if rows.empty? %>
+      <div style="padding: 72px 24px; text-align: center; color: var(--muted-2); font-size: 13px;">
+        Nothing of yours is merged under <span class="mono"><%= service.scope %></span> yet.
+      </div>
+    <% end %>
+  <% else %>
   <div class="grid head">
     <div></div><div>State</div><div>Pull request</div><div>Size</div><div>Last activity</div>
     <div>My last action</div><div>CI</div><div style="text-align: right;">Waiting</div><div></div>
@@ -480,6 +538,7 @@
         <% end %>
       </div>
     </div>
+  <% end %>
   <% end %>
 </div>
 

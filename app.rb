@@ -41,7 +41,10 @@ REGISTRY = ServiceRegistry.new(
   # GitHub harder -- past a point that earns a secondary rate limit.
   concurrency: ENV.fetch("RQ_CONCURRENCY", "5").to_i,
   quick_lines: ENV.fetch("RQ_QUICK_LINES", "50").to_i,
-  lines_per_min: ENV.fetch("RQ_LINES_PER_MIN", "20").to_i
+  lines_per_min: ENV.fetch("RQ_LINES_PER_MIN", "20").to_i,
+  # How many of your merged pull requests the Merged tab lists. Each one costs
+  # a single extra call, for its size. The list itself is one search.
+  merged_limit: ENV.fetch("RQ_MERGED_LIMIT", "10").to_i
 )
 
 SNOOZE_SECONDS = ENV.fetch("RQ_SNOOZE_DAYS", "7").to_i * 86_400
@@ -491,8 +494,15 @@ class ReviewQueue < Roda
       awake = snap[:rows].reject { |row| snooze.hidden?(row) }
       asleep = snap[:rows].select { |row| snooze.hidden?(row) }
 
+      # Merged rows are a separate list on the snapshot, not part of the queue,
+      # so snoozing and Hide settled do not apply to them. They are all settled
+      # by definition, and there is nothing left to hide.
+      merged = snap[:merged] || []
+
       if tab == :snoozed
         rows = asleep
+      elsif tab == :merged
+        rows = merged
       else
         rows = awake.select { |row| tab == :all || row[:buckets].include?(tab) }
         rows = rows.reject { |row| row[:settled] } if hide
@@ -502,6 +512,8 @@ class ReviewQueue < Roda
       # the user cannot see.
       counts = service.counts(awake)
       counts[:snoozed] = {open: asleep.count { |row| !row[:settled] }, total: asleep.size}
+      # No open count: nothing merged is open, and "0/10" reads as a warning.
+      counts[:merged] = {open: nil, total: merged.size}
       snap = snap.merge(counts: counts)
 
       view("queue", locals: {snap: snap, rows: rows, tab: tab, hide: hide, service: service,
