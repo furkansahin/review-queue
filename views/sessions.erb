@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
-<%= File.read(File.expand_path("_palette.erb", __dir__)) %>
+<%= PALETTE %>
   body { margin: 0; background: var(--bg); color: var(--fg);
          font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
   a { color: var(--link); text-decoration: none; }

@@ -21,6 +21,11 @@ def env_required(key)
   ENV[key] || abort("missing required env var #{key}")
 end
 
+# The shared colour tokens, inlined into the <style> of every page that is not
+# the queue. Read once at boot: it used to be a File.read inside the template,
+# so every render of every page went to the filesystem for a constant.
+PALETTE = File.read(File.expand_path("views/_palette.erb", __dir__)).freeze
+
 # Global defaults: every signed-in user watches the same scope and label.
 REGISTRY = ServiceRegistry.new(
   idle_ttl: ENV.fetch("RQ_IDLE_TTL", "3600").to_i,
