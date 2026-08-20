@@ -25,20 +25,15 @@
 #   CLAUDE_SKILLS_REPO=furkansahin/skills
 
 [commands]
+# The instructions live in devbox/review-prompt.md, which setup.sh installs on
+# the box and the wrapper copies into the worktree before each review. They grew
+# past what belongs on one TOML line once the review started running things, and
+# a file can be read and edited like prose instead of escaped.
+#
+# The path is relative for the same reason the follow-up's is: bay starts a
+# command in the box worktree, and /workspace is the repository root.
 review = """
-claude -p --model opus --effort max 'You are reviewing this pull request adversarially. \
-Diff the working branch against origin/main and read every changed hunk. \
-\
-Look for defects that matter: logic that is wrong on some input, race \
-conditions, unhandled errors, resource leaks, off-by-one and boundary bugs, \
-SQL or shell injection, missing authorization checks, and data that crosses a \
-trust boundary without validation. Check that the tests actually exercise the \
-new behaviour rather than restating it. \
-\
-For each finding give the file and line, what input or state triggers it, and \
-what goes wrong. Rank by severity. Say plainly when you are unsure rather than \
-padding the list. If the change is sound, say so and stop - do not invent \
-findings to fill space.' 2>&1
+claude -p --model opus --effort max -- "$(cat .rq/review-prompt.md)" 2>&1
 """
 
 # A follow-up in the same box, after the review. --continue resumes the review's

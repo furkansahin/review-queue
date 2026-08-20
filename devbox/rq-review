@@ -32,6 +32,10 @@ resolve_bay() {
 BAY="$(resolve_bay || true)"
 STATE_DIR="${RQ_STATE_DIR:-$HOME/.rq}"
 BAY_CONFIG="${RQ_BAY_CONFIG:-$HOME/.bay/ubicloud}"
+# The review instructions. setup.sh installs this file. It travels into the box
+# worktree at review time, the same way a follow-up question does, because the
+# bay command runs inside the container and can only read what is in there.
+PROMPT="${RQ_REVIEW_PROMPT:-$HOME/.rq/review-prompt.md}"
 
 die() { echo "rq-review: $*" >&2; exit 1; }
 
@@ -95,6 +99,10 @@ case "$verb" in
       echo "already running"; exit 0
     fi
 
+    # Fail here, not inside the container. A missing prompt would otherwise reach
+    # claude as an empty argument, which is how the follow-up used to fail.
+    [ -s "$PROMPT" ] || die "review prompt missing at $PROMPT; run setup.sh"
+
     # Two logs on purpose. build.log is bay's container noise; log holds ONLY
     # what claude wrote, because that is the thing worth watching.
     echo building > "$dir/state"
@@ -105,10 +113,18 @@ case "$verb" in
     # dashboard polls with `status` and collects with `result`.
     setsid nohup bash -c '
       set -o pipefail
-      bay="$1"; repo="$2"; pr="$3"; box="$4"; dir="$5"; repo_path="$6"
+      bay="$1"; repo="$2"; pr="$3"; box="$4"; dir="$5"; repo_path="$6"; prompt="$7"
       cd "$repo_path" || { echo "cannot cd to $repo_path" >> "$dir/build.log"; echo failed > "$dir/state"; exit 1; }
 
       if ! "$bay" up "$box" --pr "$pr" >> "$dir/build.log" 2>&1; then
+        echo failed > "$dir/state"
+        exit 1
+      fi
+
+      # bay up makes the worktree, so the prompt can only be copied in after it.
+      wt="$repo_path/.worktrees/$box"
+      if ! mkdir -p "$wt/.rq" || ! cp "$prompt" "$wt/.rq/review-prompt.md"; then
+        echo "could not place the review prompt in $wt/.rq" >> "$dir/build.log"
         echo failed > "$dir/state"
         exit 1
       fi
@@ -121,7 +137,7 @@ case "$verb" in
       else
         echo failed > "$dir/state"
       fi
-    ' _ "$BAY" "$repo" "$pr" "$box" "$dir" "$REPO_PATH" >/dev/null 2>&1 &
+    ' _ "$BAY" "$repo" "$pr" "$box" "$dir" "$REPO_PATH" "$PROMPT" >/dev/null 2>&1 &
 
     echo "$!" > "$dir/pid"
     echo "started $box"

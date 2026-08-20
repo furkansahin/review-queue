@@ -352,6 +352,40 @@ fi
 grep -q "rq-review" "$HOME/.ssh/authorized_keys" 2>/dev/null && ok "forced-command key present" \
   || todo "paste the key line from the dashboard's Dev box page into ~/.ssh/authorized_keys"
 
+# The review instructions. The wrapper copies this into a box worktree before
+# each review, because the bay command runs inside the container.
+PROMPT_URL="${RQ_PROMPT_URL:-https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/review-prompt.md}"
+PROMPT_PATH="$HOME/.rq/review-prompt.md"
+if can_change; then
+  doing "refreshing $PROMPT_PATH"
+  mkdir -p "$HOME/.rq"
+  if curl -fsSL "$PROMPT_URL" -o "$PROMPT_PATH.new" && [ -s "$PROMPT_PATH.new" ]; then
+    mv "$PROMPT_PATH.new" "$PROMPT_PATH" && ok "review prompt up to date"
+  else
+    rm -f "$PROMPT_PATH.new"
+    todo "could not fetch the review prompt from $PROMPT_URL"
+  fi
+elif [ -s "$PROMPT_PATH" ]; then
+  ok "review prompt installed"
+else
+  todo "install the review prompt: mkdir -p $HOME/.rq && curl -fsSL $PROMPT_URL -o $PROMPT_PATH"
+fi
+
+# The wrapper writes .rq/ into each box worktree, which otherwise shows up as
+# untracked noise in the git status the review itself reads. info/exclude is
+# local to this checkout and shared by every worktree, so one line covers them
+# all and nothing tracked is touched.
+EXCLUDE="$REPO_PATH/.git/info/exclude"
+if [ -d "$REPO_PATH/.git" ] && can_change; then
+  if grep -qx "\.rq/" "$EXCLUDE" 2>/dev/null; then
+    ok ".rq/ already hidden from git status"
+  else
+    mkdir -p "$(dirname "$EXCLUDE")"
+    printf '\n# review-queue: the prompt and follow-up files the wrapper writes\n.rq/\n' >> "$EXCLUDE" \
+      && ok ".rq/ hidden from git status"
+  fi
+fi
+
 echo "== capacity =="
 avail=$(df -Pk "$HOME" | awk 'NR==2 {print int($4/1048576)}')
 # measured: one box costs about 7G with its container images and a postgres

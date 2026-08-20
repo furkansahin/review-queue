@@ -3,6 +3,9 @@ SP="$1"; W="$2"
 export RQ_BAY="$SP/fakebay/bay" RQ_REPO_PATH="$SP/fakerepo" RQ_STATE_DIR="$SP/rqstate"
 export RQ_ALLOWED_REPOS="ubicloud/ubicloud"
 export RQ_BAY_CONFIG="$SP/fakecfg"
+# The wrapper refuses to review without its prompt, so give it one.
+printf 'run the specs that cover the change\n' > "$SP/prompt.md"
+export RQ_REVIEW_PROMPT="$SP/prompt.md"
 fail=0
 try() { # name, command, expect: allow|refuse
   local name="$1" cmd="$2" expect="$3"
@@ -49,6 +52,21 @@ try "ask needs a box"               "ask"                                       
 try "ask bad box refused"           "ask ../etc"                                    refuse
 try "result extra arg refused"      "result rq-x-1 JUNK"                            refuse
 try "build extra arg refused"       "build rq-x-1 JUNK"                             refuse
+# A missing prompt must stop the review here, not reach claude as an empty
+# argument. That is exactly how the follow-up used to fail.
+out=$(RQ_REVIEW_PROMPT="$SP/does-not-exist.md" SSH_ORIGINAL_COMMAND="review ubicloud/ubicloud 1 rq-x-1" bash "$W" 2>&1)
+if [ $? -ne 0 ] && [[ "$out" == *"review prompt missing"* ]]; then
+  printf "  ok    %-46s %s\n" "missing prompt refused, with a reason" "refuse"
+else
+  printf "  FAIL  %-46s %s\n" "missing prompt refused, with a reason" "got=$out"; fail=$((fail+1))
+fi
+out=$(RQ_REVIEW_PROMPT="$SP/empty.md" SSH_ORIGINAL_COMMAND="review ubicloud/ubicloud 1 rq-x-1" bash "$W" 2>&1)
+if [ $? -ne 0 ]; then
+  printf "  ok    %-46s %s\n" "empty prompt refused too" "refuse"
+else
+  printf "  FAIL  %-46s %s\n" "empty prompt refused too" "allowed"; fail=$((fail+1))
+fi
+
 echo
 [ $fail -eq 0 ] && echo "ALL PASS" || echo "$fail FAILURE(S)"
 exit $fail

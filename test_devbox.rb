@@ -170,6 +170,28 @@ check("the text is passed after --", ask_cmd.include?(" -- "), true)
 check("the wrapper writes to that same path", wrapper.include?("$wt/.rq/followup.txt"), true)
 check("and the worktree is the box worktree", wrapper.include?('wt="$REPO_PATH/.worktrees/$box"'), true)
 
+# The review prompt travels the same way, and for the same reason.
+review_cmd = toml[/^review = """\n(.*?)\n"""/m, 1].to_s
+prompt = File.read(File.join(__dir__, "devbox", "review-prompt.md"))
+setup = File.read(File.join(__dir__, "devbox", "setup.sh"))
+
+check("review reads its prompt from a file", review_cmd.include?(".rq/review-prompt.md"), true)
+check("relative, like the follow-up", review_cmd.include?("/workspace"), false)
+check("and after --", review_cmd.include?(" -- "), true)
+check("the wrapper copies the prompt in", wrapper.include?("$wt/.rq/review-prompt.md"), true)
+check("it refuses when the prompt is missing", wrapper.include?("review prompt missing"), true)
+check("setup.sh installs it where the wrapper looks",
+      setup.include?("$HOME/.rq/review-prompt.md"), true)
+check("and hides .rq from git status", setup.include?("info/exclude"), true)
+
+# The point of the harness is that the review runs things. If someone trims the
+# prompt back to reading only, these fail rather than the tab quietly reverting.
+check("the prompt tells it to run the specs", prompt.include?("bundle exec rspec"), true)
+check("with the right environment", prompt.include?("RACK_ENV=test"), true)
+check("it must mark findings verified or read-only",
+      prompt.include?("verified") && prompt.include?("read-only"), true)
+check("and it must not run the whole suite", prompt.include?("Do not run the whole suite"), true)
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
