@@ -34,19 +34,93 @@ module Jobs
     {ok: false, error: e.message}
   end
 
+  # Everything the list pages read, except `output`.
+  #
+  # `output` is deliberately absent. rq-review caps a review at 200 KB and this
+  # query takes 50 rows, so SELECT * hauls up to 10 MB out of Postgres -- on
+  # every load of a page that then prints a state word and a timestamp. The
+  # size is still wanted (the panel summary shows it), and octet_length costs
+  # no bandwidth.
+  LIST_COLUMNS = "id, login, dev_box_id, repo, pr_number, box_name, state, phase, " \
+                 "torn_down_at, error, created_at, started_at, finished_at, " \
+                 "octet_length(output) AS output_bytes"
+
   def for_user(login) = DB.rows(<<~SQL, [login])
-    SELECT * FROM review_jobs WHERE login = $1 ORDER BY created_at DESC LIMIT 50
+    SELECT #{LIST_COLUMNS} FROM review_jobs WHERE login = $1 ORDER BY created_at DESC LIMIT 50
   SQL
+
+  # The review text for one job, fetched only when something is going to show
+  # it. Scoped by login like every other read here.
+  def output(login, id)
+    DB.row("SELECT output FROM review_jobs WHERE login = $1 AND id = $2", [login, id])&.fetch("output")
+  end
+
+  # The review text for several jobs at once, as {id => output}. The sessions
+  # page inlines only the handful it shows expanded, so this stays one round
+  # trip instead of one per card.
+  def outputs(login, ids)
+    return {} if ids.empty?
+    holders = ids.each_index.map { |i| "$#{i + 2}" }.join(", ")
+    DB.rows("SELECT id, output FROM review_jobs WHERE login = $1 AND id IN (#{holders})", [login, *ids])
+      .each_with_object({}) { |r, h| h[r["id"]] = r["output"] }
+  end
+
+  # An older wrapper wrote bay's build log and claude's review into one stream.
+  # Split on the marker it used, so an old job still reads well instead of
+  # burying the review under thousands of build lines. Returns [noise, review];
+  # noise is nil for anything written by the current wrapper.
+  REVIEW_MARKER = "== review".freeze
+
+  def split_output(text)
+    full = text.to_s
+    idx = full.rindex(REVIEW_MARKER)
+    return [nil, full] unless idx
+    [full[0...idx], full[(idx + REVIEW_MARKER.length)..].to_s.lstrip]
+  end
+
+  # Which jobs the sessions page prints inline. Everything else loads when its
+  # panel is opened.
+  #
+  # A review is capped at 200 KB and this page lists 50 jobs, so inlining all
+  # of them built a 10 MB page -- almost all of it reviews from weeks ago,
+  # inside panels nobody opened. Spending a byte budget newest-first means the
+  # review you just ran is always already there, and the page has a ceiling
+  # instead of growing with your history.
+  INLINE_BUDGET = Integer(ENV.fetch("RQ_INLINE_BYTES", "262144"))
+
+  def inline_ids(jobs)
+    spent = 0
+    jobs.each_with_object([]) do |j, ids|
+      size = j["output_bytes"].to_i
+      next unless size.positive?
+      # A live job is inline whatever it costs: the no-JS refresh has nothing
+      # else to show it with, and there are only ever a few.
+      if %w[queued running].include?(j["state"])
+        ids << j["id"]
+      elsif spent + size <= INLINE_BUDGET
+        spent += size
+        ids << j["id"]
+      end
+    end
+  end
 
   # Newest job per pull request, so a row can show its state. A job whose box
   # has been torn down is skipped: its review is still readable on the sessions
   # page, but the row should offer Review again rather than claim it is done.
+  #
+  # The queue page reads only the state word off this, so the query returns
+  # three columns rather than fifty whole reviews. The inner LIMIT keeps the
+  # old window: the 50 newest jobs, then newest-per-pull-request within them.
   def by_key(login)
-    for_user(login).each_with_object({}) do |j, h|
-      next if j["torn_down_at"]
-      key = "#{j["repo"]}##{j["pr_number"]}"
-      h[key] ||= j
-    end
+    DB.rows(<<~SQL, [login]).each_with_object({}) { |j, h| h["#{j["repo"]}##{j["pr_number"]}"] = j }
+      SELECT DISTINCT ON (repo, pr_number) repo, pr_number, state
+      FROM (
+        SELECT repo, pr_number, state, torn_down_at, created_at
+        FROM review_jobs WHERE login = $1 ORDER BY created_at DESC LIMIT 50
+      ) recent
+      WHERE torn_down_at IS NULL
+      ORDER BY repo, pr_number, created_at DESC
+    SQL
   end
 
   # Marks every job that used this box, so the rows go back to offering Review.
@@ -94,10 +168,17 @@ module Jobs
 
   # Progress for a job that is still running. Only touches output, so it can
   # never move a job out of running by accident.
+  #
+  # The last clause matters: the worker polls every few seconds and re-sends
+  # the whole log each time, but claude writes in bursts, so most ticks carry
+  # exactly what is already stored. Without it every tick rewrote a row with a
+  # 200 KB toasted column -- a new row version, a new toast chain and the WAL
+  # for both -- to store nothing new.
   def progress(id, output, phase = nil)
     DB.exec(<<~SQL, [output, phase, id])
       UPDATE review_jobs SET output = $1, phase = COALESCE($2, phase)
       WHERE id = $3 AND state = 'running'
+        AND (output IS DISTINCT FROM $1 OR phase IS DISTINCT FROM COALESCE($2, phase))
     SQL
   end
 

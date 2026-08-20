@@ -21,6 +21,11 @@ def env_required(key)
   ENV[key] || abort("missing required env var #{key}")
 end
 
+# The shared colour tokens, inlined into the <style> of every page that is not
+# the queue. Read once at boot: it used to be a File.read inside the template,
+# so every render of every page went to the filesystem for a constant.
+PALETTE = File.read(File.expand_path("views/_palette.erb", __dir__)).freeze
+
 # Global defaults: every signed-in user watches the same scope and label.
 REGISTRY = ServiceRegistry.new(
   idle_ttl: ENV.fetch("RQ_IDLE_TTL", "3600").to_i,
@@ -30,6 +35,11 @@ REGISTRY = ServiceRegistry.new(
   hot_days: ENV.fetch("RQ_HOT_DAYS", "4").to_i,
   stale_days: ENV.fetch("RQ_STALE_DAYS", "7").to_i,
   ttl: ENV.fetch("RQ_CACHE_TTL", "300").to_i,
+  # How many pull requests are fetched at once. Each one then fans out again
+  # for its own timeline, so the real number of requests in flight is a few
+  # times this. Raise it to make a rebuild faster, at the cost of asking
+  # GitHub harder -- past a point that earns a secondary rate limit.
+  concurrency: ENV.fetch("RQ_CONCURRENCY", "5").to_i,
   quick_lines: ENV.fetch("RQ_QUICK_LINES", "50").to_i,
   lines_per_min: ENV.fetch("RQ_LINES_PER_MIN", "20").to_i
 )
@@ -268,6 +278,9 @@ class ReviewQueue < Roda
           session["sessions_error"] = "bad box name"
         else
           res = DevBox.run(box, "teardown #{name}")
+          # Whether or not it worked, what we remember about this box's list is
+          # no longer trustworthy.
+          DevBox.forget_box_list(box)
           if res[:ok]
             # Say so. A teardown that works and one that silently does nothing
             # looked identical before.
@@ -349,41 +362,70 @@ class ReviewQueue < Roda
       # Byte-offset tail. Returns only what is new, so a browser can follow a
       # running review with short requests instead of holding a thread open for
       # the five minutes a box takes.
+      #
+      # The slice is taken in Postgres rather than here. This runs every two
+      # seconds for as long as a review is open in a browser, and a review is
+      # capped at 200 KB, so selecting the column and cutting it in Ruby shipped
+      # the whole log across the network on every poll -- usually to answer
+      # "nothing new yet".
       r.get "tail" do
         response["Content-Type"] = "application/json"
         response["Cache-Control"] = "no-store"
         id = param_id(r.params["id"])
-        job = id && DB.row("SELECT id, state, phase, output FROM review_jobs WHERE login = $1 AND id = $2",
-                           [current_login, id])
+        offset = r.params["offset"].to_s.to_i
+        offset = 0 if offset.negative?
+        # An offset past the end means the log was replaced by a shorter one, and
+        # the answer is to send it again from the start -- not to send nothing,
+        # which left the client frozen on stale text forever. An offset equal to
+        # the length is simply caught up, and sends nothing.
+        job = id && DB.row(<<~SQL, [current_login, id, offset])
+          SELECT state, phase, octet_length(output) AS length,
+                 substring(convert_to(output, 'UTF8')
+                           FROM (CASE WHEN $3::bigint > octet_length(output) THEN 0
+                                      ELSE $3::bigint END)::int + 1) AS chunk
+          FROM review_jobs WHERE login = $1 AND id = $2
+        SQL
         next '{"error":"not found"}' unless job
 
-        text = job["output"].to_s
-        # Compare BEFORE clamping: clamp(0, bytesize) already caps the value, so
-        # the shrink check below it could never fire and a client holding a large
-        # offset against a replaced, shorter log sat frozen on stale text.
-        asked = r.params["offset"].to_s.to_i
-        offset = asked > text.bytesize ? 0 : asked.clamp(0, text.bytesize)
-        # byteslice can split a character, and JSON.generate raises on invalid
-        # UTF-8 -- which turned the tail into a permanent 500 loop, because the
-        # client retries the same offset forever. scrub drops the partial bytes.
-        chunk = text.byteslice(offset, text.bytesize - offset).to_s.scrub("")
-        JSON.generate(state: job["state"], phase: job["phase"], length: text.bytesize,
-                      chunk: chunk,
-                      done: !%w[queued running].include?(job["state"]))
+        # substring() on the bytea cuts at a byte offset, and the browser's
+        # offset is a byte count, so they agree -- but a hand-typed offset can
+        # still land inside a multibyte character. JSON.generate raises on
+        # invalid UTF-8, and the client retries the same offset every two
+        # seconds, so that became a permanent 500 loop. scrub drops the partial
+        # sequence instead.
+        chunk = job["chunk"].to_s.dup.force_encoding(Encoding::UTF_8)
+        chunk = chunk.scrub("") unless chunk.valid_encoding?
+        JSON.generate(state: job["state"], phase: job["phase"], length: job["length"].to_i,
+                      chunk: chunk, done: !%w[queued running].include?(job["state"]))
+      end
+
+      # One stored review, for a panel that was not printed with the page.
+      # Answers JSON to the script and a plain page to a browser without one,
+      # so the same link works either way.
+      r.get "review" do
+        id = param_id(r.params["id"])
+        text = id && Jobs.output(current_login, id)
+        noise, review = Jobs.split_output(text)
+        if r.params["format"] == "json"
+          response["Content-Type"] = "application/json"
+          response["Cache-Control"] = "no-store"
+          next JSON.generate(found: !text.nil?, review: review, noise: noise)
+        end
+        view("review", locals: {id: id, found: !text.nil?, review: review, noise: noise},
+          layout: false)
       end
 
       r.get true do
         jobs = Jobs.for_user(current_login)
+        # Only the reviews this page is going to print. The rest carry their
+        # size and load from /sessions/review when their panel is opened.
+        outputs = Jobs.outputs(current_login, Jobs.inline_ids(jobs))
         box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
         # Boxes outlive their reviews, so ask the dev box what actually exists
         # rather than trusting our own rows.
-        boxes = if box
-          res = DevBox.run(box, "list")
-          res[:ok] ? res[:output].to_s.lines.map { |l| l.strip.split("\t") }.reject(&:empty?) : []
-        else
-          []
-        end
-        view("sessions", locals: {jobs: jobs, boxes: boxes, dev_box: box, login: current_login,
+        boxes = box ? DevBox.box_list(box) : []
+        view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, dev_box: box,
+                                  login: current_login,
                                   error: session.delete("sessions_error"),
                                   notice: session.delete("sessions_notice"),
                                   csrf_teardown: csrf_tag("/sessions/teardown"),

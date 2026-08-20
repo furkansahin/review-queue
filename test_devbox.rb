@@ -68,6 +68,22 @@ res = DevBox.run(row, "ping", timeout: 3)
 check("unreachable box returns ok=false", res[:ok], false)
 check("unreachable box reports why", res[:error].to_s.empty?, false)
 
+# run_many runs several commands over one connection. A caller matches results
+# to commands by position, so a connection that never opens must still answer
+# once per command rather than returning a short list.
+many = DevBox.run_many(row, [["status a", nil], ["result a", nil], ["build a", nil]], timeout: 3)
+check("a broken connection answers once per command", many.size, 3)
+check("and every one of them failed", many.all? { |r| r[:ok] == false }, true)
+check("each carrying the reason", many.all? { |r| !r[:error].to_s.empty? }, true)
+
+# A key that cannot be decrypted fails before the connection is attempted, and
+# must not lose the shape of the answer either.
+bad = {"host" => "127.0.0.1", "ssh_user" => "nobody", "port" => "1",
+       "private_key_enc" => Crypto.encrypt(priv).sub(/.\z/) { |c| c == "A" ? "B" : "A" }}
+many = DevBox.run_many(bad, [["status a", nil], ["result a", nil]], timeout: 3)
+check("an unreadable key also answers once per command", many.size, 2)
+check("and says the key is the problem", many.first[:error].to_s.include?("cannot read the stored key"), true)
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)

@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
-<%= File.read(File.expand_path("_palette.erb", __dir__)) %>
+<%= PALETTE %>
   body { margin: 0; background: var(--bg); color: var(--fg);
          font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
   a { color: var(--link); text-decoration: none; }
@@ -59,7 +59,19 @@
   # A torn-down box has no box left to act on, so its card leaves Previous. The
   # review it produced is still worth reading, so it moves rather than vanishes.
   past, gone = rest.partition { |j| j["torn_down_at"].nil? }
-  claimed = jobs.map { |j| j["box_name"] }.to_set rescue claimed = jobs.map { |j| j["box_name"] }
+
+  # outputs holds only the reviews this page prints; see Jobs.inline_ids. Any
+  # other panel is rendered closed with a link, and the script below swaps the
+  # text in the first time it is opened.
+  chars = ->(j) { j["output_bytes"].to_i }
+  has_output = ->(j) { chars.call(j).positive? }
+  inline = ->(j) { outputs[j["id"]] }
+  human = ->(n) {
+    if n < 1024 then "#{n} bytes"
+    elsif n < 1_048_576 then "#{(n / 1024.0).round} KB"
+    else "#{(n / 1_048_576.0).round(1)} MB"
+    end
+  }
 %>
 <div class="bar">
   <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Sessions</div>
@@ -112,7 +124,7 @@
       <div class="sub">
         started <%= j["started_at"] || j["created_at"] %>
       </div>
-      <% if j["phase"] == "building" && j["output"].to_s.empty? %>
+      <% if j["phase"] == "building" && !has_output.call(j) %>
         <div class="sub" style="margin-top: 10px;">
           Preparing the box — worktree, containers, mise, bundle. About 5 minutes on a cold
           machine. Claude's output appears here as soon as it starts.
@@ -122,7 +134,7 @@
         <summary>claude output
           <span class="mono" id="s-<%= j["id"] %>" style="color: var(--muted-2);"><%= j["phase"] || "starting" %></span>
         </summary>
-        <pre class="tail" id="t-<%= j["id"] %>" data-job="<%= j["id"] %>"><%= j["output"] %></pre>
+        <pre class="tail" id="t-<%= j["id"] %>" data-job="<%= j["id"] %>"><%= inline.call(j) %></pre>
       </details>
     </div>
   <% end %>
@@ -147,23 +159,23 @@
         </form>
       </div>
       <div class="sub">finished <%= j["finished_at"] %><%= j["error"] ? " · #{j["error"]}" : "" %></div>
-      <% if j["output"] && !j["output"].empty? %>
-        <%
-          # An older wrapper wrote bay's build log and claude's review into one
-          # stream. Split on the marker it used, so an old job still reads well
-          # instead of burying the review under thousands of build lines.
-          full = j["output"].to_s
-          idx = full.rindex("== review")
-          noise, review = idx ? [full[0...idx], full[(idx + 9)..].to_s.lstrip] : [nil, full]
-        %>
-        <details data-keep="review-<%= j["id"] %>" open>
-          <summary>claude's review (<%= review.length %> characters)</summary>
-          <pre><%= review %></pre>
-        </details>
-        <% if noise && !noise.strip.empty? %>
-          <details data-keep="noise-<%= j["id"] %>">
-            <summary style="color: var(--muted-2);">build log from bay (<%= noise.lines.count %> lines) — not the review</summary>
-            <pre><%= noise.lines.last(200).join %></pre>
+      <% if has_output.call(j) %>
+        <% if (full = inline.call(j)) %>
+          <% noise, review = Jobs.split_output(full) %>
+          <details data-keep="review-<%= j["id"] %>" open>
+            <summary>claude's review (<%= human.call(review.bytesize) %>)</summary>
+            <pre><%= review %></pre>
+          </details>
+          <% if noise && !noise.strip.empty? %>
+            <details data-keep="noise-<%= j["id"] %>">
+              <summary style="color: var(--muted-2);">build log from bay (<%= noise.lines.count %> lines) — not the review</summary>
+              <pre><%= noise.lines.last(200).join %></pre>
+            </details>
+          <% end %>
+        <% else %>
+          <details data-keep="review-<%= j["id"] %>" data-review="<%= j["id"] %>">
+            <summary>claude's review (<%= human.call(chars.call(j)) %>) — older, loads when opened</summary>
+            <pre><a href="/sessions/review?id=<%= j["id"] %>">open the review</a></pre>
           </details>
         <% end %>
       <% end %>
@@ -200,11 +212,18 @@
             </form>
           </div>
           <div class="sub">box removed <%= j["torn_down_at"] %></div>
-          <% if j["output"] && !j["output"].to_s.empty? %>
-            <details data-keep="gonerev-<%= j["id"] %>">
-              <summary>claude's review (<%= j["output"].to_s.length %> characters)</summary>
-              <pre><%= j["output"] %></pre>
-            </details>
+          <% if has_output.call(j) %>
+            <% if (full = inline.call(j)) %>
+              <details data-keep="gonerev-<%= j["id"] %>">
+                <summary>claude's review (<%= human.call(full.bytesize) %>)</summary>
+                <pre><%= full %></pre>
+              </details>
+            <% else %>
+              <details data-keep="gonerev-<%= j["id"] %>" data-review="<%= j["id"] %>">
+                <summary>claude's review (<%= human.call(chars.call(j)) %>) — loads when opened</summary>
+                <pre><a href="/sessions/review?id=<%= j["id"] %>">open the review</a></pre>
+              </details>
+            <% end %>
           <% end %>
         </div>
       <% end %>
@@ -255,6 +274,41 @@
       saved[k] = d.open;
       try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* full or blocked */ }
     });
+  });
+})();
+
+// Older reviews are not printed with the page -- there can be fifty of them at
+// 200 KB each. Each one keeps its size and a plain link, and the first time its
+// panel is opened the text is fetched and swapped in. Without scripting the
+// link is simply followed instead.
+(function () {
+  document.querySelectorAll("details[data-review]").forEach(function (d) {
+    var loaded = false;
+    d.addEventListener("toggle", function () {
+      if (!d.open || loaded) return;
+      loaded = true;
+      var pre = d.querySelector("pre");
+      var id = d.dataset.review;
+      pre.textContent = "loading…";
+      fetch("/sessions/review?format=json&id=" + encodeURIComponent(id),
+            { headers: { "Accept": "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (data) {
+          if (!data.found) { throw "gone"; }
+          pre.textContent = data.review;
+        })
+        .catch(function () {
+          // Put the link back, so the panel is never a dead end.
+          loaded = false;
+          pre.innerHTML = "";
+          var a = document.createElement("a");
+          a.href = "/sessions/review?id=" + encodeURIComponent(id);
+          a.textContent = "could not load it here — open the review";
+          pre.appendChild(a);
+        });
+    });
+    // A panel restored open by the block above never fires toggle on its own.
+    if (d.open) { d.dispatchEvent(new Event("toggle")); }
   });
 })();
 

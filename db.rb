@@ -7,7 +7,13 @@ require "uri"
 module DB
   class Error < StandardError; end
 
-  POOL_SIZE = Integer(ENV.fetch("RQ_DB_POOL", "5"))
+  # Puma serves on up to RQ_PUMA_THREADS threads (see Procfile) and each one
+  # holds a connection for as long as it is working, so the default matches the
+  # thread count instead of sitting at 5. A pool smaller than that makes the
+  # extra threads queue in checkout, which waits in five-second steps -- a
+  # stall nobody would think to blame on the database. Connections are still
+  # opened lazily, so the worker, which uses one, opens one.
+  POOL_SIZE = Integer(ENV.fetch("RQ_DB_POOL", ENV.fetch("RQ_PUMA_THREADS", "16")))
 
   # USERTrust ECC Certification Authority -- the trust anchor for the managed
   # Postgres certificate:

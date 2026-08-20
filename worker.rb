@@ -51,7 +51,12 @@ def poll_running
       next
     end
 
-    status = DevBox.run(box, "status #{job["box_name"]}")
+    # Both answers over one connection. Every branch below that does anything
+    # wants the output, so asking for it up front costs a channel and saves a
+    # whole connection -- handshake, key exchange and a 4096-bit signature --
+    # for every running job on every tick.
+    status, result = DevBox.run_many(box, ["status #{job["box_name"]}",
+                                           "result #{job["box_name"]}"])
     state = status[:output].to_s.strip
 
     # A box that cannot be reached is not a failure yet: it may be rebooting.
@@ -63,7 +68,6 @@ def poll_running
 
     case state
     when "done", "failed"
-      result = DevBox.run(box, "result #{job["box_name"]}")
       # A failed build leaves no review text, so fall back to bay's log for the
       # error message only -- it is never shown as review output.
       detail = nil
@@ -86,9 +90,8 @@ def poll_running
       log("#{job["box_name"]} finished: #{state}")
     when "building", "reviewing", "running"
       # result is claude's output only; bay's build noise stays in build.log and
-      # is never streamed to the page.
-      partial = DevBox.run(box, "result #{job["box_name"]}")
-      Jobs.progress(job["id"], partial[:output], state) if partial[:ok]
+      # is never streamed to the page. It came back with the status above.
+      Jobs.progress(job["id"], result[:output], state) if result[:ok]
     else
       Jobs.finish(job["id"], "failed", output: nil, error: "gave up after #{Jobs::STALE_AFTER}s") if Jobs.stale?(job)
     end

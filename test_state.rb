@@ -68,5 +68,37 @@ check("order is work, work, draft, settled",
 check("oldest work still comes first", sorted.first[:state], "Your turn")
 
 puts
+puts "-- a rebuild must not make everyone else queue --"
+# build takes seconds against GitHub. A second reader arriving during one is
+# handed the snapshot that already exists instead of waiting for the fetch.
+slow = QueueService.new(token: "x", scope: "s", label: "", ttl: 0)
+builds = 0
+started = Queue.new
+release = Queue.new
+slow.define_singleton_method(:build) do
+  builds += 1
+  started << true
+  release.pop
+  {rows: [], login: ME, fetched_at: Time.now, rate: nil, error: nil, counts: {}, reviews_7d: nil}
+end
+
+release << true
+first = slow.snapshot                      # one real build, to have something to serve
+started.pop                                # drain its marker, so the next pop means the next build
+check("the first call builds", builds, 1)
+check("and returns a snapshot", first.is_a?(Hash), true)
+
+rebuild = Thread.new { slow.snapshot(force: true) }
+started.pop                                # the rebuild is now inside build, holding the lock
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+during = slow.snapshot                     # an ordinary page load arriving mid-rebuild
+waited = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+check("a reader during a rebuild is served at once", waited < 0.2, true)
+check("with the snapshot we already had", during.equal?(first), true)
+check("and did not start a second build", builds, 2)
+release << true
+check("the rebuild still produced a new snapshot", rebuild.value.equal?(first), false)
+
+puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)

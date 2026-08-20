@@ -38,7 +38,18 @@ re-push resets the clock: green below `RQ_WARN_DAYS`, amber at `RQ_WARN_DAYS`, o
 `RQ_HOT_DAYS`, red at `RQ_STALE_DAYS`.
 
 Snapshots cache for `RQ_CACHE_TTL` seconds; the page self-refreshes every 3 minutes and
-`Refresh` forces a rebuild. Roughly 6 GitHub API calls per PR per rebuild.
+`Refresh` forces a rebuild. Roughly 6 GitHub API calls per PR per rebuild, `RQ_CONCURRENCY`
+pull requests at a time.
+
+Those calls share pooled connections rather than opening one each. Against api.github.com a
+fresh connection costs about 130 ms of the ~390 ms a call takes, so a 25-PR rebuild was
+throwing away roughly 20 seconds of handshake; it now uses about five connections for the
+whole fetch. `/user` goes out with the bucket searches and the weekly count runs alongside
+the per-PR fetch, rather than each adding a round trip of its own.
+
+While a rebuild is running, other page loads are served the snapshot that already exists
+instead of queueing behind the fetch. `Refresh` is the exception — pressing it means asking
+for the fetch, so it waits for it.
 
 ## Getting through the queue
 
@@ -78,11 +89,26 @@ Entries also go away when the snooze time is complete or when the pull request l
 queue. Clearing your cookies clears the list, and the list does not follow you to another
 browser.
 
+## Sessions page
+
+A review is capped at 200 KB and the page lists the last 50, so printing every one of them
+built a 10 MB page out of reviews from weeks ago that nobody had opened. The newest fill a
+byte budget (`RQ_INLINE_BYTES`, 256 KB) and are printed with the page; the rest show their
+size and load when their panel is opened. Each one also carries a plain link to
+`/sessions/review`, which is what a browser without scripting follows.
+
+The queue page shows no review text at all, so it no longer reads any: it asks for the state
+word per pull request and nothing else.
+
+`Boxes on your dev box` comes from an ssh round trip to `bay list`, which was the slowest
+thing on the page and was paid on every load. It caches for `RQ_BOX_LIST_TTL` seconds, and a
+teardown clears it, so the list is never stale at the moment you are looking at it.
+
 ## Layout
 
 ```
 app.rb             routes, session/OAuth, allowlist, env config
-queue_service.rb   GitHub client, threaded fetch, timeline/state/age logic, TTL cache
+queue_service.rb   GitHub client with pooled connections, threaded fetch, state/age, TTL cache
 views/queue.erb    the table (no JS — tabs and filters are links)
 auth.rb            GitHub OAuth flow + per-user service registry
 snooze.rb          per-browser snooze list, kept in the session cookie
