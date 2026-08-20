@@ -31,6 +31,12 @@ wrapper.
 
 That is the whole setup: two tokens, one script, one paste.
 
+The script also installs the two bay commands the dashboard calls (`review` and
+`ask`). They go into `bay.local.toml`, not the shared `bay.toml`: bay layers its
+config files and merges the commands map across them, so the untracked
+per-machine file can add commands without touching a tracked file or fighting a
+later `git pull`. Re-running `setup.sh` updates them in place.
+
 ## The GITHUB_TOKEN needs three repositories
 
 A fine-grained PAT lists repositories **explicitly**, so one that works for the

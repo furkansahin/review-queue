@@ -221,6 +221,64 @@ fi
 # bay.local.toml is per-machine and gitignored. Copying one between boxes
 # carries a baseImage that does not exist here, and bay then tries to pull it
 # from Docker Hub and fails with "pull access denied".
+# The dashboard needs two bay commands. They go in bay.local.toml rather than
+# the shared bay.toml: bay layers its config files and MERGES the commands map
+# across them (verified), so the untracked per-machine file can add commands
+# without touching a tracked file or conflicting with a later git pull.
+echo "== bay commands the dashboard needs =="
+CMDS_URL="${RQ_COMMANDS_URL:-https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/bay-review-command.toml}"
+LOCAL_TOML="$BAY_CONFIG/bay.local.toml"
+if [ ! -f "$BAY_CONFIG/bay.toml" ]; then
+  todo "bay config missing, so the commands cannot be installed yet"
+elif ! command -v python3 >/dev/null; then
+  todo "python3 is needed to install the bay commands"
+elif can_change; then
+  tmp=$(mktemp)
+  if curl -fsSL "$CMDS_URL" -o "$tmp"; then
+    python3 - "$tmp" "$LOCAL_TOML" <<'PYEOF'
+import sys, tomllib, re
+src, dest = sys.argv[1], sys.argv[2]
+cmds = tomllib.load(open(src, "rb"))["commands"]
+
+try:
+    text = open(dest).read()
+except FileNotFoundError:
+    text = ""
+
+# Replace our own block only; anything the developer put in the file stays.
+START = "# >>> review-queue commands (managed by setup.sh)"
+END = "# <<< review-queue commands"
+text = re.sub(re.escape(START) + r".*?" + re.escape(END) + r"\n?", "", text, flags=re.S)
+
+def toml_str(v):
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
+
+block = [START, "[commands]"]
+for k, v in cmds.items():
+    block.append(f"{k} = {toml_str(' '.join(v.split()))}")
+block.append(END)
+
+open(dest, "w").write(text.rstrip("\n") + "\n\n" + "\n".join(block) + "\n")
+
+# prove the result still parses, and that nothing was lost
+d = tomllib.load(open(dest, "rb"))
+print("  installed: " + ", ".join(sorted(d.get("commands", {}))))
+if d.get("remote", {}).get("host"):
+    print("  kept [remote] host =", d["remote"]["host"])
+PYEOF
+    ok "bay commands up to date in bay.local.toml"
+  else
+    todo "could not fetch $CMDS_URL"
+  fi
+  rm -f "$tmp"
+else
+  if grep -q "review-queue commands" "$LOCAL_TOML" 2>/dev/null; then
+    ok "bay commands present in bay.local.toml"
+  else
+    todo "the dashboard's bay commands are not installed; run without --check"
+  fi
+fi
+
 echo "== base image =="
 BASE_IMAGE=$(grep -E '^\s*baseImage\s*=' "$BAY_CONFIG/bay.local.toml" "$BAY_CONFIG/bay.toml" 2>/dev/null \
   | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/')
