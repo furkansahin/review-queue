@@ -47,6 +47,10 @@ throwing away roughly 20 seconds of handshake; it now uses about five connection
 whole fetch. `/user` goes out with the bucket searches and the weekly count runs alongside
 the per-PR fetch, rather than each adding a round trip of its own.
 
+While a rebuild is running, other page loads are served the snapshot that already exists
+instead of queueing behind the fetch. `Refresh` is the exception — pressing it means asking
+for the fetch, so it waits for it.
+
 ## Getting through the queue
 
 The list is ordered reddest-first, so row one is always the next thing to review; it is

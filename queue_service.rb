@@ -178,7 +178,20 @@ class QueueService
   end
 
   def snapshot(force: false)
-    @lock.synchronize do
+    # A rebuild takes seconds and holds the lock for all of them. A request that
+    # arrives meanwhile -- a second tab, the page's own three-minute refresh,
+    # anything -- used to queue behind it and pay the entire wait to be handed
+    # a snapshot that was about to exist anyway. If there is already one to
+    # show, show it, and let the rebuild in flight finish for the next caller.
+    #
+    # Refresh is exempt: pressing it means asking for the fetch, so it waits.
+    current = @snapshot
+    unless @lock.try_lock
+      return current if current && !force
+      @lock.lock
+    end
+
+    begin
       fresh = @snapshot && (Time.now - @snapshot[:fetched_at] < @ttl)
       return @snapshot if fresh && !force
 
@@ -190,6 +203,8 @@ class QueueService
         )
       end
       @snapshot
+    ensure
+      @lock.unlock
     end
   end
 
