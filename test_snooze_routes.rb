@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 # Snooze route tests:  bundle exec ruby test_snooze_routes.rb
+ENV["RQ_ENCRYPTION_KEY"]        = "0" * 64
 ENV["RQ_ALLOWED_LOGINS"]       = "furkansahin"
 ENV["RQ_GITHUB_CLIENT_ID"]     = "cid"
 ENV["RQ_GITHUB_CLIENT_SECRET"] = "csecret"

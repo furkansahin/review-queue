@@ -46,6 +46,10 @@ WRAPPER_URL = ENV.fetch("RQ_WRAPPER_URL",
   "https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/rq-review")
 
 # Fails closed: with no allowlist nobody gets in, rather than everybody.
+# Required at boot alongside the other secrets. It was not, so a fresh deploy
+# booted green and then 500'd on every page that touches a stored key.
+env_required("RQ_ENCRYPTION_KEY") if REVIEWS_ENABLED
+
 ALLOWED_LOGINS = env_required("RQ_ALLOWED_LOGINS")
   .split(",").map { |s| s.strip.downcase }.reject(&:empty?).freeze
 abort("RQ_ALLOWED_LOGINS is empty") if ALLOWED_LOGINS.empty?
@@ -133,6 +137,12 @@ class ReviewQueue < Roda
             layout: false)
         end
 
+        # Clear first. Without this, switching GitHub accounts -- or a second
+        # person on a shared browser -- inherits the previous user's watch
+        # label and snooze list, which is the same inheritance bug the watch
+        # label was moved per-user to fix. It also rotates the session across
+        # an authentication boundary.
+        session.clear
         session["login"] = login
         session["token"] = token
         r.redirect "/"

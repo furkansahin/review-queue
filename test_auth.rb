@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 # Route-level auth tests:  bundle exec ruby test_auth.rb
+ENV["RQ_ENCRYPTION_KEY"]        = "0" * 64
 ENV["RQ_ALLOWED_LOGINS"]      = "furkansahin, Alice"
 ENV["RQ_GITHUB_CLIENT_ID"]    = "cid"
 ENV["RQ_GITHUB_CLIENT_SECRET"]= "csecret"

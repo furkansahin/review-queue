@@ -22,7 +22,7 @@ QueueService.class_eval do
 end
 PING = {ok: false, output: "", error: "unreachable"}
 DevBox.singleton_class.prepend(Module.new do
-  def run(_box, cmd, timeout: 30) = cmd == "ping" ? PING : {ok: true, output: ""}
+  def run(_box, cmd, timeout: 30, stdin: nil) = cmd == "ping" ? PING : {ok: true, output: ""}
 end)
 
 include Rack::Test::Methods

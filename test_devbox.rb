@@ -40,7 +40,7 @@ line = DevBox.authorized_keys_line(pub)
 check("forced command is set", line.start_with?('command="/usr/local/bin/rq-review",restrict '), true)
 check("the key is in the line", line.include?(pub), true)
 
-check("box name from repo and PR", DevBox.box_name("ubicloud/ubicloud", 6172), "rq-ubicloud-6172")
+check("box name carries owner and repo", DevBox.box_name("ubicloud/ubicloud", 6172), "rq-ubicloud-ubicloud-6172")
 
 cmd = DevBox.review_command(repo: "ubicloud/ubicloud", pr_number: 6172, box: "rq-ubicloud-6172")
 check("command is plain fields", cmd, "review ubicloud/ubicloud 6172 rq-ubicloud-6172")

@@ -71,6 +71,15 @@ def poll_running
         b = DevBox.run(box, "build #{job["box_name"]}")
         detail = b[:output].to_s.lines.last(12).join.strip
       end
+      # Only write output when the fetch actually succeeded. DevBox.run's rescue
+      # path returns output:"", so a single dropped connection here used to
+      # overwrite a finished review with nothing -- and jobs.rb only rescans
+      # state='running', so it was gone for good.
+      unless result[:ok]
+        log("could not collect #{job["box_name"]}: #{result[:error]} -- leaving it running to retry")
+        Jobs.finish(job["id"], "failed", error: "could not collect the review: #{result[:error]}") if Jobs.stale?(job)
+        next
+      end
       Jobs.finish(job["id"], state == "done" ? "done" : "failed",
         output: result[:output],
         error: state == "failed" ? "the run failed on the dev box\n#{detail}" : nil)

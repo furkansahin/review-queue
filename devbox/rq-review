@@ -43,8 +43,15 @@ valid_box()  { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,48}$ ]]; }
 valid_pr()   { [[ "$1" =~ ^[0-9]{1,7}$ ]]; }
 valid_repo() {
   [[ "$1" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || return 1
+  # Split on whitespace WITHOUT pathname expansion. Unquoted `for r in
+  # $ALLOWED_REPOS` globs against the working directory, so a natural
+  # wildcard entry like "ubicloud/*" expands to the checkout's filenames --
+  # refusing the intended repo and accepting whatever files happen to sit
+  # there. This is the boundary a stolen key runs into, so it must be exact.
   local r
-  for r in $ALLOWED_REPOS; do [ "$r" = "$1" ] && return 0; done
+  local -a allowed
+  read -r -a allowed <<< "$ALLOWED_REPOS"
+  for r in "${allowed[@]}"; do [ "$r" = "$1" ] && return 0; done
   return 1
 }
 
@@ -64,13 +71,24 @@ case "$verb" in
 
   review)
     repo="${ARGV[1]:-}"; pr="${ARGV[2]:-}"; box="${ARGV[3]:-}"
-    valid_repo "$repo" || die "repo not allowed: ${repo:-<empty>}"
+    if ! valid_repo "$repo"; then
+      case "$ALLOWED_REPOS" in
+        *[*?]*) die "repo not allowed: ${repo:-<empty>}
+          RQ_ALLOWED_REPOS is matched exactly and does not take wildcards.
+          List each repository in full, separated by spaces." ;;
+        *) die "repo not allowed: ${repo:-<empty>} (allowed: $ALLOWED_REPOS)" ;;
+      esac
+    fi
     valid_pr   "$pr"   || die "bad pull request number"
     valid_box  "$box"  || die "bad box name"
 
     dir="$STATE_DIR/$box"
     mkdir -p "$dir"
-    if [ -f "$dir/state" ] && [ "$(cat "$dir/state")" = "running" ] \
+    # The states this script writes are building/reviewing/done/failed. An
+    # earlier version wrote "running", and this guard kept testing for it --
+    # dead, so a second Review started concurrently in the same worktree and
+    # truncated the first review's log.
+    if [ -f "$dir/state" ] && grep -qE '^(building|reviewing)$' "$dir/state" 2>/dev/null \
        && [ -f "$dir/pid" ] && kill -0 "$(cat "$dir/pid")" 2>/dev/null; then
       echo "already running"; exit 0
     fi
@@ -122,6 +140,11 @@ case "$verb" in
     wt="$REPO_PATH/.worktrees/$box"
     [ -d "$wt" ] || die "no worktree for $box; has the box been torn down?"
 
+    if [ -f "$dir/state" ] && grep -qE '^(building|reviewing)$' "$dir/state" 2>/dev/null \
+       && [ -f "$dir/pid" ] && kill -0 "$(cat "$dir/pid")" 2>/dev/null; then
+      die "that box is still working; wait for it to finish"
+    fi
+
     mkdir -p "$wt/.rq"
     # Bounded: a prompt is a question, not a payload.
     head -c 8192 > "$wt/.rq/followup.txt"
@@ -159,13 +182,16 @@ case "$verb" in
     # Claude's output only. Use `build` for bay's side of it.
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     dir="$STATE_DIR/$box"
-    [ -f "$dir/log" ] && tail -c 200000 "$dir/log" || true
+    # tail -c cuts at a byte offset, so it can split a multibyte character and
+    # the invalid UTF-8 then makes Postgres reject the whole write, wedging the
+    # job. iconv -c drops any partial sequence at the boundary.
+    [ -f "$dir/log" ] && tail -c 200000 "$dir/log" | iconv -c -f utf-8 -t utf-8 || true
     ;;
 
   build)
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     dir="$STATE_DIR/$box"
-    [ -f "$dir/build.log" ] && tail -c 40000 "$dir/build.log" || true
+    [ -f "$dir/build.log" ] && tail -c 40000 "$dir/build.log" | iconv -c -f utf-8 -t utf-8 || true
     ;;
 
   list)
@@ -177,7 +203,9 @@ case "$verb" in
         br = $NF; gsub(/[\[\]]/, "", br)
         print n "\t" br
       }' | while IFS=$'\t' read -r name branch; do
-      up=$(docker ps --filter "name=bay-.*-${name}-app" --format '{{.Status}}' 2>/dev/null | head -1)
+      # set -e would abort the whole verb on a failed substitution, so /sessions
+      # would show "No boxes" on a box where docker is simply not reachable.
+      up=$(docker ps --filter "name=bay-.*-${name}-app" --format '{{.Status}}' 2>/dev/null | head -1) || true
       printf '%s\t%s\t%s\n' "$name" "$branch" "${up:-stopped}"
     done
     ;;

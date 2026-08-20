@@ -27,6 +27,16 @@ else
 fi
 
 # Rotating this signs everyone out, so only mint one when there isn't one yet.
+ENCRYPTION_KEY=$(dokku config:get "$APP" RQ_ENCRYPTION_KEY 2>/dev/null || true)
+if [ -z "$ENCRYPTION_KEY" ]; then
+  ENCRYPTION_KEY=$(openssl rand -hex 32)
+  echo "generated a new encryption key -- SAVE IT: losing it makes every stored"
+  echo "dev box key and token permanently unreadable."
+  echo "  RQ_ENCRYPTION_KEY=$ENCRYPTION_KEY"
+else
+  echo "keeping the existing encryption key"
+fi
+
 SESSION_SECRET=$(dokku config:get "$APP" RQ_SESSION_SECRET 2>/dev/null || true)
 if [ -z "$SESSION_SECRET" ]; then
   SESSION_SECRET=$(openssl rand -hex 32)   # 64 chars; the Roda sessions plugin requires >= 64
@@ -39,6 +49,7 @@ dokku config:set --no-restart "$APP" \
   RQ_GITHUB_CLIENT_ID="$GITHUB_CLIENT_ID" \
   RQ_GITHUB_CLIENT_SECRET="$GITHUB_CLIENT_SECRET" \
   RQ_SESSION_SECRET="$SESSION_SECRET" \
+  RQ_ENCRYPTION_KEY="$ENCRYPTION_KEY" \
   RQ_ALLOWED_LOGINS="$ALLOWED_LOGINS" \
   RQ_BASE_URL="$BASE_URL" \
   RQ_SCOPE=repo:ubicloud/ubicloud \

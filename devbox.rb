@@ -1,5 +1,6 @@
 require "openssl"
 require "net/ssh"
+require "timeout"
 require_relative "crypto"
 
 # One remote dev box per user. The dashboard connects to it and asks bay to
@@ -51,7 +52,23 @@ module DevBox
   end
 
   # A box name derived from the pull request, so a repeat review reuses it.
-  def box_name(repo, pr_number) = "#{BOX_PREFIX}-#{repo.split("/").last}-#{pr_number}"
+  #
+  # The whole repository, not just its last segment: ubicloud/ubicloud and
+  # furkansahin/ubicloud used to collide on rq-ubicloud-5, sharing one state
+  # directory and one log, so each published the other's review and tearing one
+  # down removed the other's box.
+  #
+  # Lowercased and non-alphanumerics folded to dashes, because BOX_RE accepts
+  # neither uppercase nor dots -- ubicloud/Bay was otherwise unreviewable, with
+  # an error naming a box name the user never typed.
+  MAX_BOX = 49
+
+  def box_name(repo, pr_number)
+    slug = repo.to_s.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-+|-+\z/, "")
+    suffix = "-#{pr_number}"
+    room = MAX_BOX - BOX_PREFIX.length - 1 - suffix.length
+    "#{BOX_PREFIX}-#{slug[0, [room, 1].max]}#{suffix}"
+  end
 
   # The command sent to the box. With a forced command it is not interpreted by
   # a shell there: it arrives whole in $SSH_ORIGINAL_COMMAND and the wrapper
@@ -120,10 +137,26 @@ module DevBox
           ch.on_request("exit-status") { |_, data| code = data.read_long }
         end
       end
-      ssh.loop
+      # Net::SSH's :timeout bounds connect/version/KEX only, and loop with no
+      # wait blocks in IO.select indefinitely. A box that accepts TCP but never
+      # finishes the command would otherwise hold a Puma thread, or the single
+      # worker loop, for good.
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      ssh.loop(0.1) do
+        raise Timeout::Error, "no reply from the dev box after #{timeout}s" \
+          if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        true
+      end
     end
 
-    {ok: code.to_i.zero?, output: output, exit_code: code.to_i}
+    # code stays nil when the channel closed without an exit-status request --
+    # a dropped connection, a killed box. nil.to_i is 0, so `code.to_i.zero?`
+    # called that success, and teardown then reported "tore down" for a box that
+    # is still there. Only a real zero counts.
+    {ok: code == 0, output: output, exit_code: code}
+  rescue Crypto::Error => e
+    {ok: false, output: "", exit_code: nil,
+     error: "cannot read the stored key: #{e.message}. Is RQ_ENCRYPTION_KEY set correctly?"}
   rescue Net::SSH::Exception, Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Errno::ETIMEDOUT,
          SocketError, IOError, Timeout::Error => e
     {ok: false, output: "", exit_code: nil, error: "#{e.class}: #{e.message}"}
