@@ -359,27 +359,41 @@ class ReviewQueue < Roda
       # Byte-offset tail. Returns only what is new, so a browser can follow a
       # running review with short requests instead of holding a thread open for
       # the five minutes a box takes.
+      #
+      # The slice is taken in Postgres rather than here. This runs every two
+      # seconds for as long as a review is open in a browser, and a review is
+      # capped at 200 KB, so selecting the column and cutting it in Ruby shipped
+      # the whole log across the network on every poll -- usually to answer
+      # "nothing new yet".
       r.get "tail" do
         response["Content-Type"] = "application/json"
         response["Cache-Control"] = "no-store"
         id = param_id(r.params["id"])
-        job = id && DB.row("SELECT id, state, phase, output FROM review_jobs WHERE login = $1 AND id = $2",
-                           [current_login, id])
+        offset = r.params["offset"].to_s.to_i
+        offset = 0 if offset.negative?
+        # An offset past the end means the log was replaced by a shorter one, and
+        # the answer is to send it again from the start -- not to send nothing,
+        # which left the client frozen on stale text forever. An offset equal to
+        # the length is simply caught up, and sends nothing.
+        job = id && DB.row(<<~SQL, [current_login, id, offset])
+          SELECT state, phase, octet_length(output) AS length,
+                 substring(convert_to(output, 'UTF8')
+                           FROM (CASE WHEN $3::bigint > octet_length(output) THEN 0
+                                      ELSE $3::bigint END)::int + 1) AS chunk
+          FROM review_jobs WHERE login = $1 AND id = $2
+        SQL
         next '{"error":"not found"}' unless job
 
-        text = job["output"].to_s
-        # Compare BEFORE clamping: clamp(0, bytesize) already caps the value, so
-        # the shrink check below it could never fire and a client holding a large
-        # offset against a replaced, shorter log sat frozen on stale text.
-        asked = r.params["offset"].to_s.to_i
-        offset = asked > text.bytesize ? 0 : asked.clamp(0, text.bytesize)
-        # byteslice can split a character, and JSON.generate raises on invalid
-        # UTF-8 -- which turned the tail into a permanent 500 loop, because the
-        # client retries the same offset forever. scrub drops the partial bytes.
-        chunk = text.byteslice(offset, text.bytesize - offset).to_s.scrub("")
-        JSON.generate(state: job["state"], phase: job["phase"], length: text.bytesize,
-                      chunk: chunk,
-                      done: !%w[queued running].include?(job["state"]))
+        # substring() on the bytea cuts at a byte offset, and the browser's
+        # offset is a byte count, so they agree -- but a hand-typed offset can
+        # still land inside a multibyte character. JSON.generate raises on
+        # invalid UTF-8, and the client retries the same offset every two
+        # seconds, so that became a permanent 500 loop. scrub drops the partial
+        # sequence instead.
+        chunk = job["chunk"].to_s.dup.force_encoding(Encoding::UTF_8)
+        chunk = chunk.scrub("") unless chunk.valid_encoding?
+        JSON.generate(state: job["state"], phase: job["phase"], length: job["length"].to_i,
+                      chunk: chunk, done: !%w[queued running].include?(job["state"]))
       end
 
       r.get true do
