@@ -195,17 +195,25 @@ class ReviewQueue < Roda
         begin
           t = DevBox.check_target!(host: r.params["host"], ssh_user: r.params["ssh_user"],
                                    port: r.params["port"].to_s.empty? ? 22 : r.params["port"])
+          skills = DevBox.check_skills_repo!(r.params["skills_repo"])
           if (row = current.call)
             # Keep the existing keypair: changing the address must not force the
             # user to reinstall the key.
-            DB.exec("UPDATE dev_boxes SET host=$1, ssh_user=$2, port=$3 WHERE id=$4",
-                    [t[:host], t[:ssh_user], t[:port], row["id"]])
+            DB.exec("UPDATE dev_boxes SET host=$1, ssh_user=$2, port=$3, skills_repo=$4 WHERE id=$5",
+                    [t[:host], t[:ssh_user], t[:port], skills, row["id"]])
           else
             priv, pub = DevBox.generate_keypair(comment: "review-queue:#{current_login}")
-            DB.exec(<<~SQL, [current_login, t[:host], t[:ssh_user], t[:port], Crypto.encrypt(priv), pub])
-              INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key)
-              VALUES ($1, $2, $3, $4, $5, $6)
+            DB.exec(<<~SQL, [current_login, t[:host], t[:ssh_user], t[:port], Crypto.encrypt(priv), pub, skills])
+              INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key, skills_repo)
+              VALUES ($1, $2, $3, $4, $5, $6, $7)
             SQL
+          end
+          # The box is where this has to take effect, so tell it now. A box that
+          # cannot be reached keeps the stored value: Test connection pushes it
+          # again, and so does the next save.
+          if (row = current.call)
+            res = DevBox.push_skills(row, skills)
+            session["devbox_notice"] = res[:ok] ? nil : "saved, but the box did not take the skills repository yet: #{(res[:error] || res[:output]).to_s[0, 200]}"
           end
         rescue DevBox::Error => e
           error = e.message
@@ -220,6 +228,9 @@ class ReviewQueue < Roda
           res = DevBox.check(row)
           if res[:ok]
             DB.exec("UPDATE dev_boxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
+            # A reachable box is the moment to make the stored value true again,
+            # for a box that was down when it was saved, or was rebuilt since.
+            DevBox.push_skills(row, row["skills_repo"])
           else
             detail = (res[:error] || res[:output].to_s)[0, 500]
             DB.exec("UPDATE dev_boxes SET last_error = $1 WHERE id = $2", [detail, row["id"]])
@@ -249,6 +260,7 @@ class ReviewQueue < Roda
         box = current.call
         view("devbox", locals: {box: box, login: current_login,
                                 error: session.delete("devbox_error"),
+                                notice: session.delete("devbox_notice"),
                                 wrapper_url: WRAPPER_URL,
                                 authorized_line: box && DevBox.authorized_keys_line(box["public_key"]),
                                 csrf_save: csrf_tag("/devbox/save"),

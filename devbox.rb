@@ -84,6 +84,30 @@ module DevBox
     {host: host.to_s.strip, ssh_user: ssh_user.to_s.strip, port: p.to_i}
   end
 
+  # A skills repository is typed by a person and ends up in a TOML file on the
+  # box, which bay hands to `git clone` inside a container. So it is checked
+  # here and again in the wrapper, and only one shape is allowed. GitHub over
+  # https is the only shape that works anyway: that is what bay's credential
+  # helper authenticates with GITHUB_TOKEN. Anything carrying its own
+  # credentials, another host, or a character that is not in a repository name
+  # is refused rather than cleaned up.
+  SKILLS_RE = %r{\Ahttps://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:\.git)?\z}
+
+  # Returns the URL to store, or nil for "no skills repository". Accepts the
+  # owner/name shorthand and writes it out in full, because that is what people
+  # type and the long form is what bay needs.
+  def check_skills_repo!(value)
+    v = value.to_s.strip
+    return nil if v.empty?
+    v = "https://github.com/#{v}" if v.match?(REPO_RE)
+    v = v.chomp("/")
+    unless v.match?(SKILLS_RE)
+      raise Error, "skills repository must be a GitHub https URL, " \
+                   "like https://github.com/you/skills (got #{shown(value)})"
+    end
+    v
+  end
+
   REPO_RE = %r{\A[A-Za-z0-9._-]+/[A-Za-z0-9._-]+\z}
   BOX_RE = /\A[a-z0-9][a-z0-9-]{0,48}\z/
 
@@ -188,6 +212,12 @@ module DevBox
     results + Array.new(commands.size - results.size) {
       {ok: false, output: "", exit_code: nil, error: message}
     }
+  end
+
+  # Tell the box which skills repository bay should clone into new boxes.
+  # nil or empty clears it. The wrapper checks the value again on the far side.
+  def push_skills(box_row, url)
+    run(box_row, "skills #{url.to_s.strip.empty? ? "-" : url.to_s.strip}")
   end
 
   # Cheapest call that proves the key is installed and the wrapper is present.

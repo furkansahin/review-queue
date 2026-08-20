@@ -190,6 +190,44 @@ case "$verb" in
     echo "asked $box"
     ;;
 
+  skills)
+    # Point bay at a git repository of Claude skills, so a box is created with
+    # them. bay clones it into the box's ~/.claude/skills on `up`, and pulls it
+    # on later ups. "-" clears it.
+    #
+    # The value is checked here as well as in the dashboard. This wrapper is the
+    # security boundary -- it is what a key can reach -- and the value ends up
+    # in a config file that bay hands to git. Only a GitHub https URL passes,
+    # which is also the only kind bay can authenticate.
+    [ "${#ARGV[@]}" -eq 2 ] || die "usage: skills <https url|->"
+    url="${ARGV[1]}"
+    if [ "$url" = "-" ]; then
+      url=""
+    elif ! [[ "$url" =~ ^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(\.git)?$ ]]; then
+      die "bad skills repository; expected https://github.com/owner/name"
+    fi
+    [ -d "$BAY_CONFIG" ] || die "no bay config at $BAY_CONFIG"
+    command -v python3 >/dev/null 2>&1 || die "python3 is needed to write the bay config"
+    # The URL goes in as an argument, never inside the program text.
+    python3 - "$BAY_CONFIG/bay.local.toml" "$url" <<'RQPY' || die "could not write $BAY_CONFIG/bay.local.toml"
+import re, sys
+path, url = sys.argv[1], sys.argv[2]
+try:
+    body = open(path).read()
+except FileNotFoundError:
+    body = ""
+body = re.sub(r'^claudeSkills = .*\n', '', body, flags=re.M)
+if url:
+    line = 'claudeSkills = "%s"\n' % url
+    if re.search(r'^\[box\]\s*$', body, flags=re.M):
+        body = re.sub(r'^(\[box\][^\S\n]*\n)', lambda m: m.group(1) + line, body, count=1, flags=re.M)
+    else:
+        body = body.rstrip("\n") + "\n\n[box]\n" + line
+open(path, "w").write(body)
+RQPY
+    if [ -n "$url" ]; then echo "skills set to $url"; else echo "skills cleared"; fi
+    ;;
+
   status)
     [ "${#ARGV[@]}" -eq 2 ] || die "usage: status <box>"
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"

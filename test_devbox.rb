@@ -84,6 +84,50 @@ many = DevBox.run_many(bad, [["status a", nil], ["result a", nil]], timeout: 3)
 check("an unreadable key also answers once per command", many.size, 2)
 check("and says the key is the problem", many.first[:error].to_s.include?("cannot read the stored key"), true)
 
+# --- the skills repository ---------------------------------------------------
+# It is typed by a person, stored, written into a TOML file on the box, and
+# handed to git clone inside a container. Only one shape survives that trip.
+ok_skills = {
+  "https://github.com/furkansahin/skills" => "https://github.com/furkansahin/skills",
+  "https://github.com/a/b.git"            => "https://github.com/a/b.git",
+  "furkansahin/skills"                    => "https://github.com/furkansahin/skills",
+  "  furkansahin/skills  "                => "https://github.com/furkansahin/skills",
+  "https://github.com/a/b/"               => "https://github.com/a/b"
+}
+ok_skills.each do |input, want|
+  check("accepts #{input.strip[0, 34]}", DevBox.check_skills_repo!(input), want)
+end
+check("empty means no skills repository", DevBox.check_skills_repo!(""), nil)
+check("nil means the same", DevBox.check_skills_repo!(nil), nil)
+
+[
+  "http://github.com/a/b",            # not https
+  "https://gitlab.com/a/b",           # bay authenticates github only
+  "https://github.com/a",             # no repository
+  "https://x:y@github.com/a/b",       # carries its own credentials
+  "https://github.com/a/b;id",        # shell metacharacter
+  "https://github.com/a/b$(id)",
+  "git@github.com:a/b.git",           # ssh form: no token auth in the box
+  "https://github.com/a/b/../../c"    # traversal
+].each do |bad|
+  refused = begin
+    DevBox.check_skills_repo!(bad)
+    false
+  rescue DevBox::Error
+    true
+  end
+  check("refuses #{bad[0, 34]}", refused, true)
+end
+
+# The wrapper is the security boundary, so it must not trust the dashboard's
+# check. Both sides carry the same rule.
+wrapper_src = File.read(File.join(__dir__, "devbox", "rq-review"))
+check("the wrapper checks the URL itself",
+      wrapper_src.include?('^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(\\.git)?$'), true)
+check("and takes - to clear it", wrapper_src.include?('[ "$url" = "-" ]'), true)
+check("push_skills sends - for nothing",
+      DevBox.method(:push_skills).source_location.is_a?(Array), true)
+
 # --- the ssh wait loop -------------------------------------------------------
 # net-ssh runs ssh.loop while the block gives back true, so the block must say
 # whether the command is still running. A block that always gives back true

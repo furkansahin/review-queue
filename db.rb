@@ -221,6 +221,7 @@ module DB
       public_key      text        NOT NULL,
       last_ok_at      timestamptz,
       last_error      text,
+      skills_repo     text,
       created_at      timestamptz NOT NULL DEFAULT now()
     );
 
@@ -259,6 +260,7 @@ module DB
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS torn_down_at timestamptz;
     ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_ok_at   timestamptz;
     ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_error   text;
+    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS skills_repo  text;
   SQL
 
   def setup!

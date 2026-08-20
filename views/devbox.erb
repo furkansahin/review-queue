@@ -61,6 +61,7 @@
 
 <div class="wrap">
   <% if error %><div class="banner err"><%= error %></div><% end %>
+  <% if notice %><div class="banner" style="border-color: var(--btn-border);"><%= notice %></div><% end %>
 
   <div class="note" style="margin-bottom: 18px;">
     A review runs on your own machine, not on this server. The dashboard connects to it and
@@ -86,6 +87,19 @@
         <div class="f-port">
           <label for="port">port</label>
           <input type="number" id="port" name="port" value="<%= box ? box["port"] : 22 %>" min="1" max="65535" />
+        </div>
+      </div>
+      <div style="margin-top: 14px;">
+        <label for="skills_repo">skills repository <span class="note">(optional)</span></label>
+        <input type="text" id="skills_repo" name="skills_repo" style="width: 100%;"
+               value="<%= box ? box["skills_repo"] : "" %>"
+               placeholder="https://github.com/you/skills" />
+        <div class="note" style="margin-top: 6px;">
+          A repository whose top level holds skill directories, each with a SKILL.md. bay clones
+          it into every new box's <span class="mono">~/.claude/skills</span> and pulls it on later
+          starts, so a review has the skills you rely on. It is cloned inside the box using that
+          box's own GitHub token, so a private repository works and this server never reads it.
+          Leave empty for none. <span class="mono">owner/name</span> is accepted too.
         </div>
       </div>
       <div style="margin-top: 14px; display: flex; gap: 8px; align-items: center;">

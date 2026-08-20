@@ -3,6 +3,9 @@
 # Run ON the dev box, as the user the dashboard will connect as (e.g. ubi).
 #
 #   ./setup.sh                     install and configure what it can
+#   ./setup.sh --upgrade-bay       also rebuild bay from main (it is never
+#                                  refreshed otherwise, so a box keeps the bay
+#                                  it was built with)
 #   ./setup.sh --check             report only, change nothing
 #   ./setup.sh --build-base-image  also build the prebaked box image (66s boxes)
 #
@@ -23,10 +26,12 @@ fi
 
 CHECK_ONLY=false
 BUILD_BASE=false
+UPGRADE_BAY=false
 for a in "$@"; do
   case "$a" in
     --check) CHECK_ONLY=true ;;
     --build-base-image) BUILD_BASE=true ;;
+    --upgrade-bay) UPGRADE_BAY=true ;;
   esac
 done
 
@@ -133,7 +138,28 @@ docker info >/dev/null 2>&1 && ok "docker usable without sudo" \
   || todo "log out and back in so the docker group applies (or: sg docker -c ...)"
 
 echo "== bay =="
-if [ -x "$BAY" ]; then
+if [ -x "$BAY" ] && [ "${UPGRADE_BAY:-false}" = true ] && [ -n "${GITHUB_TOKEN:-}" ] && can_change; then
+  # An existing bay was never refreshed, so a box kept whatever bay it was built
+  # with. Features land in bay that the dashboard depends on -- claudeSkills is
+  # one -- and a stale binary ignores the config silently. Opt in, because a
+  # rebuild costs a clone and a go build.
+  doing "rebuilding bay from main"
+  command -v go >/dev/null || {
+    GO_VER=$(curl -fsSL "https://go.dev/VERSION?m=text" | head -1)
+    curl -fsSL "https://go.dev/dl/${GO_VER}.linux-$(dpkg --print-architecture).tar.gz" -o /tmp/go.tgz
+    sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf /tmp/go.tgz && rm -f /tmp/go.tgz
+  }
+  export PATH=/usr/local/go/bin:$HOME/go/bin:$PATH
+  rm -rf /tmp/bay-src
+  if git clone --quiet --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/ubicloud/bay.git" /tmp/bay-src; then
+    cp "$BAY" "$BAY.bak" 2>/dev/null || true
+    (cd /tmp/bay-src && GOFLAGS=-mod=vendor go build -o "$BAY" .) \
+      && ok "bay rebuilt (previous binary kept at $BAY.bak)" || todo "bay rebuild failed"
+    rm -rf /tmp/bay-src
+  else
+    todo "could not clone ubicloud/bay -- does this token have access?"
+  fi
+elif [ -x "$BAY" ]; then
   ok "bay at $BAY"
 elif [ -n "${GITHUB_TOKEN:-}" ] && can_change; then
   # `go install github.com/ubicloud/bay@latest`, the command in bay's README,
@@ -171,6 +197,17 @@ elif [ -n "$BAY_SRC" ] && [ -d "$BAY_SRC" ] && can_change; then
 else
   todo "bay is a private repo, so go install cannot fetch it.
           Bake the binary into the image, or set RQ_BAY_SRC to a source copy."
+fi
+
+# A bay without claudeSkills ignores the skills repository the dashboard sets,
+# and says nothing about it. Name it here instead.
+if [ -x "$BAY" ]; then
+  if grep -qa "claudeSkills" "$BAY" 2>/dev/null; then
+    ok "bay supports the skills repository"
+  else
+    todo "this bay predates claudeSkills, so the skills repository is ignored.
+          Rebuild it:  ./setup.sh --upgrade-bay"
+  fi
 fi
 
 echo "== checkouts =="

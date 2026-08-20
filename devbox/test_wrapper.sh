@@ -52,6 +52,13 @@ try "ask needs a box"               "ask"                                       
 try "ask bad box refused"           "ask ../etc"                                    refuse
 try "result extra arg refused"      "result rq-x-1 JUNK"                            refuse
 try "build extra arg refused"       "build rq-x-1 JUNK"                             refuse
+try "skills needs a value"          "skills"                                        refuse
+try "skills rejects another host"   "skills https://gitlab.com/a/b"                 refuse
+try "skills rejects ssh form"       "skills git@github.com:a/b.git"                 refuse
+try "skills rejects a metachar"     "skills https://github.com/a/b;id"              refuse
+try "skills rejects extra args"     "skills https://github.com/a/b x"               refuse
+try "skills accepts a github url"   "skills https://github.com/a/b"                 allow
+try "skills accepts - to clear"     "skills -"                                      allow
 # A missing prompt must stop the review here, not reach claude as an empty
 # argument. That is exactly how the follow-up used to fail.
 out=$(RQ_REVIEW_PROMPT="$SP/does-not-exist.md" SSH_ORIGINAL_COMMAND="review ubicloud/ubicloud 1 rq-x-1" bash "$W" 2>&1)
