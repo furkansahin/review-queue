@@ -72,6 +72,11 @@ module DevBox
     ["review", repo, pr_number.to_s, box].join(" ")
   end
 
+  # Single quotes, for a path that is built here and read by a remote shell.
+  # Everything inside single quotes is literal to a shell except a single quote
+  # itself, which is closed, escaped and reopened.
+  def sh_quote(value) = "'" + value.to_s.gsub("'", %q('"'"')) + "'"
+
   # A host is a name or an address; no spaces, no shell characters, no scheme.
   HOST_RE = /\A[A-Za-z0-9][A-Za-z0-9._:-]{0,252}\z/
   USER_RE = /\A[a-z_][a-z0-9_-]{0,31}\z/
@@ -104,6 +109,18 @@ module DevBox
     unless v.match?(SKILLS_RE)
       raise Error, "skills repository must be a GitHub https URL, " \
                    "like https://github.com/you/skills (got #{shown(value)})"
+    end
+    v
+  end
+
+  # Where the repo sits on the user's own machine. It is written into a TOML
+  # file and handed to bay, which passes it to ssh, so it stays a plain
+  # home-relative path: no traversal, no absolute path, no shell characters.
+  def check_repo_path!(value)
+    v = value.to_s.strip.sub(%r{\A~/}, "").chomp("/")
+    return nil if v.empty?
+    unless v.match?(%r{\A[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\z}) && !v.split("/").include?("..")
+      raise Error, "repo path must be a plain path under the home directory, like ubicloud (got #{shown(value)})"
     end
     v
   end

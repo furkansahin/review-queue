@@ -13,6 +13,11 @@ if REVIEWS_ENABLED
   require_relative "db"
   require_relative "jobs"
   require_relative "devbox"
+require_relative "runner"
+
+# bay runs here now. RQ_TRANSPORT=ssh falls back to the wrapper on the box,
+# which is what every box ran before this change.
+BOX = (ENV.fetch("RQ_TRANSPORT", "bay") == "bay") ? Runner : DevBox
   warn "[review-queue] #{DB.describe}"
   DB.setup!
 end
@@ -189,6 +194,15 @@ class ReviewQueue < Roda
 
       current = -> { DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login]) }
 
+      # A blank box means keep what is stored, "-" means clear it. The page
+      # never shows a token back, so blank cannot mean "set it to empty".
+      token_update = lambda do |typed, row, column|
+        v = typed.to_s.strip
+        next row && row[column] if v.empty?
+        next nil if v == "-"
+        Crypto.encrypt(v)
+      end
+
       r.post "save" do
         check_csrf!
         error = nil
@@ -196,23 +210,38 @@ class ReviewQueue < Roda
           t = DevBox.check_target!(host: r.params["host"], ssh_user: r.params["ssh_user"],
                                    port: r.params["port"].to_s.empty? ? 22 : r.params["port"])
           skills = DevBox.check_skills_repo!(r.params["skills_repo"])
+          repo_path = DevBox.check_repo_path!(r.params["repo_path"])
+          # A blank field means "leave what is stored". Otherwise a user who
+          # only wants to change the host would have to retype both tokens,
+          # and the page never shows them back.
+          stored = current.call
+          claude = token_update.call(r.params["claude_token"], stored, "claude_token_enc")
+          github = token_update.call(r.params["github_token"], stored, "github_token_enc")
           if (row = current.call)
             # Keep the existing keypair: changing the address must not force the
             # user to reinstall the key.
-            DB.exec("UPDATE dev_boxes SET host=$1, ssh_user=$2, port=$3, skills_repo=$4 WHERE id=$5",
-                    [t[:host], t[:ssh_user], t[:port], skills, row["id"]])
+            DB.exec(<<~SQL, [t[:host], t[:ssh_user], t[:port], skills, repo_path, claude, github, row["id"]])
+              UPDATE dev_boxes SET host=$1, ssh_user=$2, port=$3, skills_repo=$4,
+                                   repo_path=$5, claude_token_enc=$6, github_token_enc=$7
+              WHERE id=$8
+            SQL
           else
             priv, pub = DevBox.generate_keypair(comment: "review-queue:#{current_login}")
-            DB.exec(<<~SQL, [current_login, t[:host], t[:ssh_user], t[:port], Crypto.encrypt(priv), pub, skills])
-              INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key, skills_repo)
-              VALUES ($1, $2, $3, $4, $5, $6, $7)
+            # The array is built first: a heredoc body starts on the next line,
+            # so a continuation inside the argument list lands inside the SQL.
+            values = [current_login, t[:host], t[:ssh_user], t[:port],
+                      Crypto.encrypt(priv), pub, skills, repo_path, claude, github]
+            DB.exec(<<~SQL, values)
+              INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key,
+                                     skills_repo, repo_path, claude_token_enc, github_token_enc)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             SQL
           end
           # The box is where this has to take effect, so tell it now. A box that
           # cannot be reached keeps the stored value: Test connection pushes it
           # again, and so does the next save.
           if (row = current.call)
-            res = DevBox.push_skills(row, skills)
+            res = BOX.run(row, "skills #{skills}")
             session["devbox_notice"] = res[:ok] ? nil : "saved, but the box did not take the skills repository yet: #{(res[:error] || res[:output]).to_s[0, 200]}"
           end
         rescue DevBox::Error => e
@@ -225,12 +254,12 @@ class ReviewQueue < Roda
       r.post "test" do
         check_csrf!
         if (row = current.call)
-          res = DevBox.check(row)
+          res = BOX.check(row)
           if res[:ok]
             DB.exec("UPDATE dev_boxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
             # A reachable box is the moment to make the stored value true again,
             # for a box that was down when it was saved, or was rebuilt since.
-            DevBox.push_skills(row, row["skills_repo"])
+            BOX.run(row, "skills #{row["skills_repo"]}")
           else
             detail = (res[:error] || res[:output].to_s)[0, 500]
             DB.exec("UPDATE dev_boxes SET last_error = $1 WHERE id = $2", [detail, row["id"]])
@@ -292,10 +321,10 @@ class ReviewQueue < Roda
         elsif !name.match?(DevBox::BOX_RE)
           session["sessions_error"] = "bad box name"
         else
-          res = DevBox.run(box, "teardown #{name}")
+          res = BOX.run(box, "teardown #{name}")
           # Whether or not it worked, what we remember about this box's list is
           # no longer trustworthy.
-          DevBox.forget_box_list(box)
+          BOX.forget_box_list(box)
           if res[:ok]
             # Say so. A teardown that works and one that silently does nothing
             # looked identical before.
@@ -342,7 +371,7 @@ class ReviewQueue < Roda
               "another review is already running for that pull request; wait for it to finish"
           else
             # The question goes over stdin, so it is never part of a command line.
-            res = DevBox.run(box, "ask #{job["box_name"]}", stdin: prompt)
+            res = BOX.run(box, "ask #{job["box_name"]}", stdin: prompt)
             unless res[:ok]
               detail = (res[:error] || res[:output]).to_s.strip
               Jobs.finish(job["id"], "failed", error: "could not ask: #{detail[0, 400]}")
@@ -438,7 +467,7 @@ class ReviewQueue < Roda
         box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
         # Boxes outlive their reviews, so ask the dev box what actually exists
         # rather than trusting our own rows.
-        boxes = box ? DevBox.box_list(box) : []
+        boxes = box ? BOX.box_list(box) : []
         view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, dev_box: box,
                                   login: current_login,
                                   error: session.delete("sessions_error"),

@@ -2,14 +2,18 @@
 # The review worker. Runs as its own Dokku process (see Procfile).
 #
 # Each tick does two independent things, so a restart never loses work:
-#   1. start queued jobs   — ssh to the user's dev box, rq-review review ...
-#   2. poll running jobs   — rq-review status, then result when it is finished
+#   1. start queued jobs   — bay up + bay run, against the user's own machine
+#   2. poll running jobs   — status, then result when it is finished
 #
-# rq-review detaches on the box, so neither step holds a connection open for
-# the minutes a review takes.
+# The review runs detached here, so neither step waits out the minutes a review
+# takes. bay drives the user's Docker over ssh; the containers are still theirs.
 require_relative "db"
 require_relative "jobs"
 require_relative "devbox"
+require_relative "runner"
+
+# bay runs here now, not on the box. RQ_TRANSPORT=ssh falls back to the wrapper.
+BOX = (ENV.fetch("RQ_TRANSPORT", "bay") == "bay") ? Runner : DevBox
 
 TICK = Integer(ENV.fetch("RQ_WORKER_TICK", "10"))
 
@@ -34,7 +38,7 @@ def start_one(job)
   return Jobs.finish(job["id"], "failed", error: "the dev box was removed") unless box
 
   command = DevBox.review_command(repo: job["repo"], pr_number: job["pr_number"], box: job["box_name"])
-  res = DevBox.run(box, command)
+  res = BOX.run(box, command)
   if res[:ok]
     log("started #{job["box_name"]} for #{job["login"]}")
   else
@@ -55,8 +59,8 @@ def poll_running
     # wants the output, so asking for it up front costs a channel and saves a
     # whole connection -- handshake, key exchange and a 4096-bit signature --
     # for every running job on every tick.
-    status, result = DevBox.run_many(box, ["status #{job["box_name"]}",
-                                           "result #{job["box_name"]}"])
+    status, result = BOX.run_many(box, ["status #{job["box_name"]}",
+                                        "result #{job["box_name"]}"])
     state = status[:output].to_s.strip
 
     # A box that cannot be reached is not a failure yet: it may be rebooting.
@@ -72,7 +76,7 @@ def poll_running
       # error message only -- it is never shown as review output.
       detail = nil
       if state == "failed"
-        b = DevBox.run(box, "build #{job["box_name"]}")
+        b = BOX.run(box, "build #{job["box_name"]}")
         detail = b[:output].to_s.lines.last(12).join.strip
       end
       # Only write output when the fetch actually succeeded. DevBox.run's rescue

@@ -10,6 +10,7 @@ ENV["RQ_SESSION_SECRET"]       = "a" * 64
 ENV["RQ_INSECURE_COOKIES"]     = "1"
 require "rack/test"
 require_relative "app"
+require_relative "runner"
 
 WHO = {login: "furkansahin"}
 GitHubOAuth.class_eval { define_method(:exchange) { |_| "gho_x" } }
@@ -21,9 +22,15 @@ QueueService.class_eval do
   end
 end
 PING = {ok: false, output: "", error: "unreachable"}
-DevBox.singleton_class.prepend(Module.new do
-  def run(_box, cmd, timeout: 30, stdin: nil) = cmd == "ping" ? PING : {ok: true, output: ""}
-end)
+# Both transports, so the test holds whichever one the app is built with.
+box_stub = Module.new do
+  def run(_box, cmd, timeout: 30, stdin: nil) = cmd.to_s.start_with?("ping") ? PING : {ok: true, output: ""}
+  def check(box_row) = run(box_row, "ping")
+  def box_list(_box_row) = []
+  def forget_box_list(_box_row) = nil
+end
+DevBox.singleton_class.prepend(box_stub)
+Runner.singleton_class.prepend(box_stub)
 
 include Rack::Test::Methods
 def app = ReviewQueue.app
@@ -83,6 +90,46 @@ get "/devbox"; post "/devbox/test", {"_csrf" => csrf_for(last_response.body, "/d
 check("failed test is recorded", DB.row("SELECT last_error FROM dev_boxes WHERE login=$1", ["furkansahin"])["last_error"], "unreachable")
 get "/devbox"
 check("failure is shown", last_response.body.include?("unreachable"), true)
+
+# --- the tokens bay needs, now that it runs on the dashboard -----------------
+post "/devbox/save", {"host" => "203.0.113.10", "ssh_user" => "ubi", "port" => "22",
+                      "claude_token" => "sk-ant-oat01-SECRET", "github_token" => "github_pat_SECRET",
+                      "repo_path" => "ubicloud",
+                      "_csrf" => csrf_for(last_response.body, "/devbox/save")}
+row = DB.row("SELECT * FROM dev_boxes WHERE login=$1", ["furkansahin"])
+check("the claude token is encrypted at rest", row["claude_token_enc"].include?("SECRET"), false)
+check("and decrypts back", Crypto.decrypt(row["claude_token_enc"]), "sk-ant-oat01-SECRET")
+check("the github token too", Crypto.decrypt(row["github_token_enc"]), "github_pat_SECRET")
+check("the repo path is stored", row["repo_path"], "ubicloud")
+
+get "/devbox"
+check("no token is ever shown back", last_response.body.include?("SECRET"), false)
+check("the page says one is stored", last_response.body.include?("stored — leave blank"), true)
+
+# Blank means keep. Otherwise changing the host would clear both tokens, which
+# is a silent way to break every future review.
+post "/devbox/save", {"host" => "203.0.113.11", "ssh_user" => "ubi", "port" => "22",
+                      "claude_token" => "", "github_token" => "", "repo_path" => "ubicloud",
+                      "_csrf" => csrf_for(last_response.body, "/devbox/save")}
+row = DB.row("SELECT * FROM dev_boxes WHERE login=$1", ["furkansahin"])
+check("a blank field keeps the stored token", Crypto.decrypt(row["claude_token_enc"]), "sk-ant-oat01-SECRET")
+check("while the host did change", row["host"], "203.0.113.11")
+
+get "/devbox"
+post "/devbox/save", {"host" => "203.0.113.11", "ssh_user" => "ubi", "port" => "22",
+                      "claude_token" => "-", "repo_path" => "ubicloud",
+                      "_csrf" => csrf_for(last_response.body, "/devbox/save")}
+check("a dash clears it",
+      DB.row("SELECT claude_token_enc FROM dev_boxes WHERE login=$1", ["furkansahin"])["claude_token_enc"], nil)
+
+get "/devbox"
+post "/devbox/save", {"host" => "203.0.113.11", "ssh_user" => "ubi", "port" => "22",
+                      "repo_path" => "../../etc",
+                      "_csrf" => csrf_for(last_response.body, "/devbox/save")}
+check("a traversing repo path is refused",
+      DB.row("SELECT repo_path FROM dev_boxes WHERE login=$1", ["furkansahin"])["repo_path"], "ubicloud")
+
+get "/devbox"   # the next CSRF token comes from a rendered form, not a redirect
 
 # rotation replaces the key
 old_pub = DB.row("SELECT public_key FROM dev_boxes WHERE login=$1", ["furkansahin"])["public_key"]

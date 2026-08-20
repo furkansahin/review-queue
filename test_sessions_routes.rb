@@ -37,7 +37,9 @@ QueueService.class_eval do
 end
 # One stub for the dev box. Mutable, so a test can change how a verb behaves.
 STUB = {teardown: {ok: true, output: "torn down"}, asked: nil}
-DevBox.singleton_class.prepend(Module.new do
+# Both transports are stubbed, so these tests hold whichever one the app is
+# built with -- bay running here, or the wrapper on the box.
+box_stub = Module.new do
   def run(_box, command, timeout: 30, stdin: nil)
     case command
     when "list" then {ok: true, output: "rq-ubicloud-6172\tdeepak/x\tUp 2 minutes\n"}
@@ -46,7 +48,17 @@ DevBox.singleton_class.prepend(Module.new do
     else {ok: true, output: "started"}
     end
   end
-end)
+
+  def box_list(box_row)
+    res = run(box_row, "list")
+    res[:ok] ? res[:output].to_s.lines.map { |l| l.strip.split("\t") }.reject(&:empty?) : []
+  end
+
+  def forget_box_list(_box_row) = nil
+  def check(box_row) = run(box_row, "ping")
+end
+DevBox.singleton_class.prepend(box_stub)
+Runner.singleton_class.prepend(box_stub)
 
 include Rack::Test::Methods
 def app = ReviewQueue.app

@@ -90,6 +90,36 @@
         </div>
       </div>
       <div style="margin-top: 14px;">
+        <label for="repo_path">repo path on that machine</label>
+        <input type="text" id="repo_path" name="repo_path" style="width: 100%;"
+               value="<%= box ? box["repo_path"] : "" %>" placeholder="ubicloud" />
+        <div class="note" style="margin-top: 6px;">
+          Where your checkout of the repository sits, relative to your home directory.
+          Default <span class="mono">ubicloud</span>.
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label for="claude_token">Claude Code token</label>
+        <input type="password" id="claude_token" name="claude_token" style="width: 100%;"
+               autocomplete="new-password"
+               placeholder="<%= box && box["claude_token_enc"] ? "stored — leave blank to keep it" : "sk-ant-oat01-… (from claude setup-token)" %>" />
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label for="github_token">GitHub token</label>
+        <input type="password" id="github_token" name="github_token" style="width: 100%;"
+               autocomplete="new-password"
+               placeholder="<%= box && box["github_token_enc"] ? "stored — leave blank to keep it" : "a PAT that can read the repository" %>" />
+        <div class="note" style="margin-top: 6px;">
+          The dashboard runs bay for you, so it needs the two tokens your boxes used to read
+          from <span class="mono">~/.bay/env</span> on your own machine. Both are encrypted
+          with the same key as your SSH key and are never shown back on this page. Leave a
+          field blank to keep what is stored; type <span class="mono">-</span> to clear it.
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
         <label for="skills_repo">skills repository <span class="note">(optional)</span></label>
         <input type="text" id="skills_repo" name="skills_repo" style="width: 100%;"
                value="<%= box ? box["skills_repo"] : "" %>"

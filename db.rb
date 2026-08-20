@@ -222,6 +222,9 @@ module DB
       last_ok_at      timestamptz,
       last_error      text,
       skills_repo     text,
+      repo_path       text,
+      claude_token_enc text,
+      github_token_enc text,
       created_at      timestamptz NOT NULL DEFAULT now()
     );
 
@@ -261,6 +264,11 @@ module DB
     ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_ok_at   timestamptz;
     ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_error   text;
     ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS skills_repo  text;
+    -- bay runs here now, so it needs the tokens it used to read from the
+    -- user's own ~/.bay/env. Encrypted with the same key as the ssh key.
+    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS repo_path        text;
+    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS claude_token_enc text;
+    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS github_token_enc text;
   SQL
 
   def setup!
