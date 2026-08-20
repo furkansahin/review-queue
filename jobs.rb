@@ -38,12 +38,23 @@ module Jobs
     SELECT * FROM review_jobs WHERE login = $1 ORDER BY created_at DESC LIMIT 50
   SQL
 
-  # Newest job per pull request, so a row can show its state.
+  # Newest job per pull request, so a row can show its state. A job whose box
+  # has been torn down is skipped: its review is still readable on the sessions
+  # page, but the row should offer Review again rather than claim it is done.
   def by_key(login)
     for_user(login).each_with_object({}) do |j, h|
+      next if j["torn_down_at"]
       key = "#{j["repo"]}##{j["pr_number"]}"
       h[key] ||= j
     end
+  end
+
+  # Marks every job that used this box, so the rows go back to offering Review.
+  def mark_torn_down(login, box_name)
+    DB.exec(<<~SQL, [login, box_name])
+      UPDATE review_jobs SET torn_down_at = now()
+      WHERE login = $1 AND box_name = $2 AND torn_down_at IS NULL
+    SQL
   end
 
   def cancel(login:, id:)

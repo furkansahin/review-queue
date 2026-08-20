@@ -68,6 +68,12 @@
 </div>
 
 <div class="wrap">
+  <% if notice %>
+    <div class="mono" style="padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px;
+         background: var(--chip-blue-bg); border: 1px solid var(--chip-blue-br); color: var(--chip-blue-fg);">
+      <%= notice %>
+    </div>
+  <% end %>
   <% if error %>
     <div class="mono" style="padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px;
          background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg);">

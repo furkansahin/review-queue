@@ -212,6 +212,20 @@ post "/sessions/ask", {"id" => job_id, "prompt" => "no csrf"}
 check("ask without CSRF is blocked", last_response.status, 403)
 
 # --- teardown -------------------------------------------------------------
+# a teardown that works must say so, and must free the pull request
+DB.exec("UPDATE review_jobs SET state='done', box_name='rq-ubicloud-6172' WHERE id=$1", [job_id])
+get "/"
+check("row claims reviewed before teardown", last_response.body.include?("review ✓"), true)
+get "/sessions"
+post "/sessions/teardown", {"box" => "rq-ubicloud-6172", "_csrf" => csrf_for(last_response.body, "/sessions/teardown")}
+get "/sessions"
+check("a successful teardown is confirmed", last_response.body.include?("tore down rq-ubicloud-6172"), true)
+check("the job is marked torn down",
+      DB.row("SELECT torn_down_at IS NOT NULL AS t FROM review_jobs WHERE id=$1", [job_id])["t"], true)
+get "/"
+check("row offers Review again after teardown", last_response.body.include?(">Review<"), true)
+check("row no longer claims reviewed", last_response.body.include?("review ✓"), false)
+
 STUB[:teardown] = {ok: false, output: "", error: "box \"rq-x\" has uncommitted changes in its worktree"}
 get "/sessions"
 tok = csrf_for(last_response.body, "/sessions/teardown")

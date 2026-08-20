@@ -233,8 +233,12 @@ class ReviewQueue < Roda
           session["sessions_error"] = "bad box name"
         else
           res = DevBox.run(box, "teardown #{name}")
-          # Never report success for a box that is still there.
-          unless res[:ok]
+          if res[:ok]
+            # Say so. A teardown that works and one that silently does nothing
+            # looked identical before.
+            Jobs.mark_torn_down(current_login, name)
+            session["sessions_notice"] = "tore down #{name}. That pull request can be reviewed again."
+          else
             detail = (res[:error] || res[:output]).to_s.strip
             session["sessions_error"] = "could not tear down #{name}: #{detail[0, 400]}"
           end
@@ -309,6 +313,7 @@ class ReviewQueue < Roda
         end
         view("sessions", locals: {jobs: jobs, boxes: boxes, dev_box: box, login: current_login,
                                   error: session.delete("sessions_error"),
+                                  notice: session.delete("sessions_notice"),
                                   csrf_teardown: csrf_tag("/sessions/teardown"),
                                   csrf_cancel: csrf_tag("/sessions/cancel"),
                                   csrf_ask: csrf_tag("/sessions/ask")},
