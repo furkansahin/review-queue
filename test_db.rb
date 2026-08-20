@@ -17,6 +17,36 @@ DB.exec("DROP TABLE IF EXISTS review_jobs, runners, dev_boxes, user_settings CAS
 check("setup! applies the schema", DB.setup!, true)
 check("setup! is idempotent", DB.setup!, true)
 
+# An EXISTING table must gain new columns. CREATE TABLE IF NOT EXISTS does
+# nothing to one that is already there, so a column added only to the CREATE
+# never reaches a live database -- which is how torn_down_at shipped missing and
+# every teardown raised PG::UndefinedColumn. Dropping the table first, as the
+# other tests do, hides exactly this.
+DB.exec("ALTER TABLE review_jobs DROP COLUMN IF EXISTS torn_down_at")
+DB.exec("ALTER TABLE review_jobs DROP COLUMN IF EXISTS phase")
+DB.exec("ALTER TABLE dev_boxes DROP COLUMN IF EXISTS last_ok_at")
+DB.setup!
+%w[torn_down_at phase].each do |col|
+  present = DB.row(<<~SQL, ["review_jobs", col])["n"]
+    SELECT count(*)::int AS n FROM information_schema.columns
+    WHERE table_name = $1 AND column_name = $2
+  SQL
+  check("setup! adds #{col} to an existing table", present, 1)
+end
+check("setup! adds last_ok_at to an existing dev_boxes",
+      DB.row("SELECT count(*)::int AS n FROM information_schema.columns WHERE table_name='dev_boxes' AND column_name='last_ok_at'")["n"], 1)
+
+# and every column the code selects must actually exist
+%w[phase torn_down_at box_name dev_box_id output error].each do |col|
+  ok = begin
+    DB.exec("SELECT #{col} FROM review_jobs LIMIT 0")
+    true
+  rescue PG::Error
+    false
+  end
+  check("review_jobs.#{col} is queryable", ok, true)
+end
+
 # --- a dev box, with its private key encrypted at rest ----------------------
 priv, pub = DevBox.generate_keypair
 box = DB.row(<<~SQL, ["furkansahin", "10.0.0.5", "ubi", 22, Crypto.encrypt(priv), pub])

@@ -226,6 +226,16 @@ module DB
     CREATE UNIQUE INDEX IF NOT EXISTS review_jobs_live_idx
       ON review_jobs (login, repo, pr_number)
       WHERE state IN ('queued', 'running');
+
+    -- Columns added after the first deploy. CREATE TABLE IF NOT EXISTS does
+    -- nothing to a table that already exists, so without these an existing
+    -- database never gains them and the code that uses them fails with
+    -- PG::UndefinedColumn. Every column added from now on belongs here too.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS phase        text;
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS torn_down_at timestamptz;
+    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS host_fingerprint text;
+    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_ok_at   timestamptz;
+    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_error   text;
   SQL
 
   def setup!
