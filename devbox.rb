@@ -137,7 +137,7 @@ module DevBox
       commands.each do |command, stdin|
         output = +""
         code = nil
-        ssh.open_channel do |ch|
+        channel = ssh.open_channel do |ch|
           ch.exec(command) do |_, success|
             raise Error, "could not start the command on the dev box" unless success
             if stdin
@@ -153,11 +153,16 @@ module DevBox
         # wait blocks in IO.select indefinitely. A box that accepts TCP but never
         # finishes the command would otherwise hold a Puma thread, or the single
         # worker loop, for good. Each command gets its own deadline.
+        #
+        # ssh.loop runs while the block gives back true, so the block must say
+        # whether the command is still running. A block that always gives back
+        # true never stops. It then runs to the deadline and raises, for every
+        # command, including a command that finished in a millisecond.
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
         ssh.loop(0.1) do
           raise Timeout::Error, "no reply from the dev box after #{timeout}s" \
             if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-          true
+          channel.active?
         end
 
         # code stays nil when the channel closed without an exit-status request

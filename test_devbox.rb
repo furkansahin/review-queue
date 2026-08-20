@@ -84,6 +84,75 @@ many = DevBox.run_many(bad, [["status a", nil], ["result a", nil]], timeout: 3)
 check("an unreadable key also answers once per command", many.size, 2)
 check("and says the key is the problem", many.first[:error].to_s.include?("cannot read the stored key"), true)
 
+# --- the ssh wait loop -------------------------------------------------------
+# net-ssh runs ssh.loop while the block gives back true, so the block must say
+# whether the command is still running. A block that always gives back true
+# never stops. It runs to the deadline and raises for every command, even one
+# that answered at once, which made every dev box command fail after 30s.
+#
+# These fakes copy that contract: the block is asked first, then one step of
+# the conversation happens, exactly as net-ssh preprocesses before it reads.
+FakeData = Struct.new(:value) { def read_long = value }
+
+class FakeChannel
+  def initialize(script)
+    @script = script
+    @handlers = {}
+    @open = true
+  end
+  def active? = @open
+  def exec(_command) = yield(self, true)
+  def on_data(&b) = @handlers[:data] = b
+  def on_extended_data(&b) = @handlers[:extended] = b
+  def on_request(name, &b) = @handlers[name] = b
+  def send_data(_bytes) = nil
+  def eof! = nil
+
+  def step
+    case @script.shift
+    when :data then @handlers[:data]&.call(self, "pong\n")
+    when :exit
+      @handlers["exit-status"]&.call(self, FakeData.new(0))
+      @open = false
+    end
+  end
+end
+
+class FakeSession
+  attr_reader :turns
+  def initialize = @turns = 0
+  def open_channel(&block)
+    @channel = FakeChannel.new([:data, :exit])
+    block.call(@channel)
+    @channel
+  end
+  def loop(_wait = nil)
+    while yield
+      @turns += 1
+      # A loop that cannot stop is the bug. Cut it off, and report it the way a
+      # dead box reports, so the check below fails instead of hanging.
+      raise Timeout::Error, "the wait loop never stopped" if @turns > 200
+      @channel.step
+    end
+  end
+end
+
+$fake_session = FakeSession.new
+Net::SSH.singleton_class.prepend(Module.new do
+  define_method(:start) { |*_args, **_opts, &block| block.call($fake_session) }
+end)
+
+row = {"host" => "10.0.0.1", "ssh_user" => "ubi", "port" => 22,
+       "private_key_enc" => Crypto.encrypt(priv)}
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+res = DevBox.run(row, "ping", timeout: 30)
+elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+check("the loop stops when the channel closes", res[:ok], true)
+check("the output is kept", res[:output].strip, "pong")
+check("the exit status is read", res[:exit_code], 0)
+check("it does not wait out the deadline", elapsed < 1.0, true)
+check("and it stops in a few turns", $fake_session.turns < 10, true)
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
