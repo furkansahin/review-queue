@@ -37,6 +37,9 @@ File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
 prompt = File.join(ROOT, "prompt.md")
 File.write(prompt, "run the specs\n")
 ENV["RQ_REVIEW_PROMPT"] = prompt
+FAKE_HOME = File.join(ROOT, "fakehome")
+FileUtils.mkdir_p(FAKE_HOME)
+ENV["RQ_SSH_HOME"] = FAKE_HOME
 
 require_relative "runner"
 require_relative "crypto"
@@ -75,7 +78,7 @@ dir = Runner.config_dir("furkansahin")
 check("the shared config is linked in", File.symlink?(File.join(dir, "db.compose.yml")), true)
 check("bay.local.toml is this user's own", File.symlink?(File.join(dir, "bay.local.toml")), false)
 toml = File.read(File.join(dir, "bay.local.toml"))
-check("it names the remote", toml.include?('host = "rqremote"'), true)
+check("it names this user's alias", toml.include?('host = "rq-furkansahin"'), true)
 check("and carries the skills repo", toml.include?("furkansahin/skills"), true)
 check("the key is written 0600",
       format("%o", File.stat(Runner.key_path("furkansahin")).mode & 0o777), "600")
@@ -84,10 +87,17 @@ check("the key is the decrypted one",
 sshcfg = File.read(Runner.ssh_config_path("furkansahin"))
 check("ssh points at the user's machine", sshcfg.include?("HostName 10.0.0.5"), true)
 # bay runs ssh itself, with no -F, so the config must resolve from HOME.
-check("the config is where ssh looks by itself",
-      Runner.ssh_config_path("furkansahin"), File.join(ROOT, "users", "furkansahin", ".ssh", "config"))
-check("and HOME points at that user", Runner.send(:env_for, BOXROW)["HOME"],
-      File.join(ROOT, "users", "furkansahin"))
+check("the alias is this user's alone", Runner.host_alias("furkansahin"), "rq-furkansahin")
+check("two users cannot share an alias",
+      Runner.host_alias("a") == Runner.host_alias("b"), false)
+check("the config defines that alias", sshcfg.include?("Host rq-furkansahin"), true)
+check("docker is pointed at it",
+      Runner.send(:env_for, BOXROW)["DOCKER_HOST"], "ssh://rq-furkansahin")
+# ssh reads ~/.ssh/config from the passwd entry, not $HOME, so the real home
+# must include every user's config or the alias does not resolve at all.
+home_cfg = File.join(FAKE_HOME, ".ssh", "config")
+check("the real home includes the per-user configs",
+      File.exist?(home_cfg) && File.read(home_cfg).include?("Include #{ROOT}/users/*/.ssh/config"), true)
 check("the ssh directory is 0700",
       format("%o", File.stat(Runner.ssh_dir("furkansahin")).mode & 0o777), "700")
 
@@ -97,7 +107,7 @@ Runner.run(BOXROW, "ping")
 seen = File.read("#{ROOT}/env.seen")
 check("claude token is passed", seen.include?("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTTOKEN"), true)
 check("github token is passed", seen.include?("GITHUB_TOKEN=github_pat_TEST"), true)
-check("docker is pointed at the machine", seen.include?("DOCKER_HOST=ssh://rqremote"), true)
+check("docker is pointed at the machine", seen.include?("DOCKER_HOST=ssh://rq-furkansahin"), true)
 check("BAY_HOME is this user's", seen.include?("BAY_HOME=#{ROOT}/users/furkansahin/bay"), true)
 
 puts "-- the verbs --"

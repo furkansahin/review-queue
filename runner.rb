@@ -60,6 +60,10 @@ module Runner
   def config_dir(login) = File.join(bay_home(login), "ubicloud")
   def state_dir(login, box) = File.join(user_dir(login), "state", box)
   def ssh_dir(login) = File.join(user_dir(login), ".ssh")
+
+  # One alias per user, not one name shared by everybody: several users' configs
+  # are visible to the same ssh, so the alias has to say whose machine it is.
+  def host_alias(login) = "rq-#{login}"
   def key_path(login) = File.join(ssh_dir(login), "key")
 
   # Builds (or refreshes) everything bay needs for this user. Cheap enough to
@@ -86,17 +90,45 @@ module Runner
 
     write_private(key_path(login), Crypto.decrypt(box_row["private_key_enc"]))
     write_file(ssh_config_path(login), ssh_config(box_row), 0o600)
+    link_ssh_config!
     write_file(File.join(dir, "bay.local.toml"), local_toml(box_row), 0o600)
     dir
   end
 
   def ssh_config_path(login) = File.join(ssh_dir(login), "config")
 
+  # ssh reads ~/.ssh/config from the passwd entry, not from $HOME -- setting
+  # HOME does not move it, which is why the alias did not resolve at first. So
+  # the real home gets one Include line covering every user's own config. The
+  # home is the slug, replaced on each deploy, so this is written every time.
+  # RQ_SSH_HOME exists so a test never writes into a real person's ~/.ssh. It
+  # is not a production setting: in the container this is the passwd home.
+  def ssh_home = ENV.fetch("RQ_SSH_HOME", Dir.home)
+
+  def link_ssh_config!
+    home = ssh_home
+    dir = File.join(home, ".ssh")
+    FileUtils.mkdir_p(dir)
+    File.chmod(0o700, dir)
+    path = File.join(dir, "config")
+    line = "Include #{File.join(ROOT, "users", "*", ".ssh", "config")}"
+    body = File.exist?(path) ? File.read(path) : ""
+    return if body.include?(line)
+    # Include has to come first: an Include inside a Host block only applies
+    # to that block.
+    File.write(path, "#{line}\n#{body}")
+    File.chmod(0o600, path)
+  rescue SystemCallError
+    # A read-only home is not fatal on its own; the command below will say so.
+    nil
+  end
+
   # The one file that differs per user: which machine is theirs, and which
   # skills repository their boxes get.
   def local_toml(box_row)
     lines = ["# Written by review-queue. Edits here are overwritten.",
-             "", "[remote]", %(host = "rqremote"), %(repo = #{(box_row["repo_path"] || "ubicloud").inspect}), "", "[box]"]
+             "", "[remote]", %(host = #{host_alias(box_row["login"]).inspect}),
+             %(repo = #{(box_row["repo_path"] || "ubicloud").inspect}), "", "[box]"]
     skills = box_row["skills_repo"].to_s.strip
     lines << %(claudeSkills = #{skills.inspect}) unless skills.empty?
     base = ENV["RQ_BOX_BASE_IMAGE"].to_s.strip
@@ -107,7 +139,7 @@ module Runner
   def ssh_config(box_row)
     <<~SSH
       # Written by review-queue. Edits here are overwritten.
-      Host rqremote
+      Host #{host_alias(box_row["login"])}
         HostName #{box_row["host"]}
         User #{box_row["ssh_user"]}
         Port #{box_row["port"]}
@@ -132,7 +164,7 @@ module Runner
       "HOME" => user_dir(login),
       "BAY_HOME" => bay_home(login),
       "BAY_CONFIG" => File.join(config_dir(login), "bay.toml"),
-      "DOCKER_HOST" => "ssh://rqremote",
+      "DOCKER_HOST" => "ssh://#{host_alias(login)}",
       "DOCKER_CONFIG" => File.join(user_dir(login), "docker"),
       # bay runs `ssh` itself for DOCKER_HOST and for git, with no -F of its
       # own, so the host alias has to resolve from $HOME/.ssh/config. Setting
@@ -352,14 +384,15 @@ module Runner
     return "" unless File.exist?(PROMPT)
     path = "#{worktree(box_row, box)}/.rq/review-prompt.md"
     quoted = DevBox.sh_quote(path)
-    "\"$SSH\" rqremote #{DevBox.sh_quote("mkdir -p #{File.dirname(path)} && cat > #{quoted}")} < \"$PROMPT_FILE\" || true"
+    "\"$SSH\" #{host_alias(box_row["login"])} " \
+      "#{DevBox.sh_quote("mkdir -p #{File.dirname(path)} && cat > #{quoted}")} < \"$PROMPT_FILE\" || true"
   end
 
   # A small file onto the machine, over the same ssh bay uses. The path is
   # built here and quoted once; the bytes go on stdin so nothing in them is
   # ever parsed by a shell.
   def put_file(box_row, path, body)
-    argv = ["ssh", "-F", ssh_config_path(box_row["login"]), "rqremote",
+    argv = ["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
             "mkdir -p #{DevBox.sh_quote(File.dirname(path))} && cat > #{DevBox.sh_quote(path)}"]
     capture(argv, env_for(box_row), timeout: 30, stdin: body)
   end
