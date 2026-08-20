@@ -94,10 +94,17 @@ module Jobs
 
   # Progress for a job that is still running. Only touches output, so it can
   # never move a job out of running by accident.
+  #
+  # The last clause matters: the worker polls every few seconds and re-sends
+  # the whole log each time, but claude writes in bursts, so most ticks carry
+  # exactly what is already stored. Without it every tick rewrote a row with a
+  # 200 KB toasted column -- a new row version, a new toast chain and the WAL
+  # for both -- to store nothing new.
   def progress(id, output, phase = nil)
     DB.exec(<<~SQL, [output, phase, id])
       UPDATE review_jobs SET output = $1, phase = COALESCE($2, phase)
       WHERE id = $3 AND state = 'running'
+        AND (output IS DISTINCT FROM $1 OR phase IS DISTINCT FROM COALESCE($2, phase))
     SQL
   end
 

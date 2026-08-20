@@ -89,6 +89,12 @@ Entries also go away when the snooze time is complete or when the pull request l
 queue. Clearing your cookies clears the list, and the list does not follow you to another
 browser.
 
+## Sessions page
+
+`Boxes on your dev box` comes from an ssh round trip to `bay list`, which was the slowest
+thing on the page and was paid on every load. It caches for `RQ_BOX_LIST_TTL` seconds, and a
+teardown clears it, so the list is never stale at the moment you are looking at it.
+
 ## Layout
 
 ```

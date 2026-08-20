@@ -278,6 +278,9 @@ class ReviewQueue < Roda
           session["sessions_error"] = "bad box name"
         else
           res = DevBox.run(box, "teardown #{name}")
+          # Whether or not it worked, what we remember about this box's list is
+          # no longer trustworthy.
+          DevBox.forget_box_list(box)
           if res[:ok]
             # Say so. A teardown that works and one that silently does nothing
             # looked identical before.
@@ -401,12 +404,7 @@ class ReviewQueue < Roda
         box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
         # Boxes outlive their reviews, so ask the dev box what actually exists
         # rather than trusting our own rows.
-        boxes = if box
-          res = DevBox.run(box, "list")
-          res[:ok] ? res[:output].to_s.lines.map { |l| l.strip.split("\t") }.reject(&:empty?) : []
-        else
-          []
-        end
+        boxes = box ? DevBox.box_list(box) : []
         view("sessions", locals: {jobs: jobs, boxes: boxes, dev_box: box, login: current_login,
                                   error: session.delete("sessions_error"),
                                   notice: session.delete("sessions_notice"),
