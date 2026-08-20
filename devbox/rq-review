@@ -70,6 +70,8 @@ case "$verb" in
     ;;
 
   review)
+    [ -n "$BAY" ] || die "bay not found; run setup.sh or set RQ_BAY"
+    [ "${#ARGV[@]}" -eq 4 ] || die "usage: review <owner/repo> <pr> <box>"
     repo="${ARGV[1]:-}"; pr="${ARGV[2]:-}"; box="${ARGV[3]:-}"
     if ! valid_repo "$repo"; then
       case "$ALLOWED_REPOS" in
@@ -173,6 +175,7 @@ case "$verb" in
     ;;
 
   status)
+    [ "${#ARGV[@]}" -eq 2 ] || die "usage: status <box>"
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     dir="$STATE_DIR/$box"
     [ -f "$dir/state" ] && cat "$dir/state" || echo unknown
@@ -180,6 +183,7 @@ case "$verb" in
 
   result)
     # Claude's output only. Use `build` for bay's side of it.
+    [ "${#ARGV[@]}" -eq 2 ] || die "usage: result <box>"
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     dir="$STATE_DIR/$box"
     # tail -c cuts at a byte offset, so it can split a multibyte character and
@@ -189,12 +193,14 @@ case "$verb" in
     ;;
 
   build)
+    [ "${#ARGV[@]}" -eq 2 ] || die "usage: build <box>"
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     dir="$STATE_DIR/$box"
     [ -f "$dir/build.log" ] && tail -c 40000 "$dir/build.log" | iconv -c -f utf-8 -t utf-8 || true
     ;;
 
   list)
+    [ -n "$BAY" ] || die "bay not found; run setup.sh or set RQ_BAY"
     # One line per box: name, branch, and whether its container is up. A box
     # outlives its review, so the dashboard cannot infer this from its own rows.
     cd "$REPO_PATH" || die "checkout not found at $REPO_PATH"
@@ -211,6 +217,8 @@ case "$verb" in
     ;;
 
   teardown)
+    [ -n "$BAY" ] || die "bay not found; run setup.sh or set RQ_BAY"
+    [ "${#ARGV[@]}" -eq 2 ] || die "usage: teardown <box>"
     box="${ARGV[1]:-}"; valid_box "$box" || die "bad box name"
     cd "$REPO_PATH" || die "checkout not found at $REPO_PATH"
     # --force on purpose. post-create.sh writes .env.rb and builds CSS into the

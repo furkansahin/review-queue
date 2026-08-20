@@ -1,9 +1,8 @@
 require "openssl"
-require "securerandom"
 
-# Encryption at rest for the secrets a user gives us: their Ubicloud personal
-# access token and their Anthropic API key. These are stored in Postgres, so a
-# database backup or a stolen dump must not reveal them.
+# Encryption at rest for the one secret this application holds: the SSH private
+# key for a user's dev box, in dev_boxes.private_key_enc. The key stays in
+# Postgres, so a database backup or a stolen dump must not reveal it.
 #
 # AES-256-GCM gives both secrecy and authentication: a modified ciphertext
 # fails to decrypt instead of returning wrong plaintext. The key comes from
@@ -60,26 +59,5 @@ module Crypto
     (cipher.update(body) + cipher.final).force_encoding(Encoding::UTF_8)
   rescue OpenSSL::Cipher::CipherError, ArgumentError => e
     raise Error, "cannot decrypt: #{e.class}"
-  end
-
-  # Callback tokens are stored as a hash, so reading the database does not let
-  # anyone post a false review result for a job.
-  def token = SecureRandom.urlsafe_base64(32)
-
-  def hash_token(value) = OpenSSL::Digest::SHA256.hexdigest("rq-job:#{value}")
-
-  def secure_equal?(a, b)
-    a = a.to_s
-    b = b.to_s
-    return false unless a.bytesize == b.bytesize
-    OpenSSL.secure_compare(a, b)
-  end
-
-  # Shown once, never stored: "ghp_1234...cdef" style preview for the UI.
-  def preview(secret)
-    s = secret.to_s
-    return "" if s.empty?
-    return "#{"*" * s.length}" if s.length < 12
-    "#{s[0, 4]}#{"*" * 8}#{s[-4, 4]}"
   end
 end

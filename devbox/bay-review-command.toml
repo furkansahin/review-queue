@@ -44,6 +44,10 @@ findings to fill space.' 2>&1
 # A follow-up in the same box, after the review. --continue resumes the review's
 # own conversation, so the question has the whole review in context instead of
 # starting cold. The prompt comes from the file the dashboard wrote.
+#
+# The -- is necessary. The shell quotes the text correctly, but the text is
+# still an argument to claude. Without --, claude reads a question that starts
+# with a dash as an option.
 ask = """
-cd /workspace && claude -p --continue --model opus --effort max "$(cat /workspace/.rq/followup.txt)" 2>&1
+cd /workspace && claude -p --continue --model opus --effort max -- "$(cat /workspace/.rq/followup.txt)" 2>&1
 """

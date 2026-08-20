@@ -34,6 +34,21 @@ try "overlong box refused"          "review ubicloud/ubicloud 1 $(printf 'a%.0s'
 try "status ok"                     "status rq-ubicloud-6172"                       allow
 try "status bad box refused"        "status ../etc"                                 refuse
 try "result ok"                     "result rq-ubicloud-6172"                       allow
+
+# The verbs below had no test before: ask, build, list, teardown, and arity.
+try "extra argument refused"        "review ubicloud/ubicloud 1 rq-x-1 JUNK"        refuse
+try "too few arguments refused"     "review ubicloud/ubicloud 1"                    refuse
+try "status needs a box"            "status"                                        refuse
+try "status extra arg refused"      "status rq-x-1 JUNK"                            refuse
+try "teardown needs a box"          "teardown"                                      refuse
+try "teardown extra arg refused"    "teardown rq-x-1 JUNK"                          refuse
+try "build bad box refused"         "build ../etc"                                  refuse
+try "build ok"                      "build rq-x-1"                                  allow
+try "list takes no box"             "list"                                          allow
+try "ask needs a box"               "ask"                                           refuse
+try "ask bad box refused"           "ask ../etc"                                    refuse
+try "result extra arg refused"      "result rq-x-1 JUNK"                            refuse
+try "build extra arg refused"       "build rq-x-1 JUNK"                             refuse
 echo
 [ $fail -eq 0 ] && echo "ALL PASS" || echo "$fail FAILURE(S)"
 exit $fail

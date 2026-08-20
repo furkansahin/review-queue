@@ -80,15 +80,21 @@ module DB
 
     ca = ENV["RQ_DB_CA_CERT"].to_s.strip
     root = ca_path(ca.empty? ? DEFAULT_CA_PEM : ca)
+    # libpq has no connect timeout by default. One database that you cannot
+    # reach then stops the whole application. A limit fails the request instead.
+    connect_timeout = ENV.fetch("RQ_DB_CONNECT_TIMEOUT", "10")
 
     if raw.match?(%r{\Apostgres(?:ql)?://})
       uri = URI.parse(raw)
       query = URI.decode_www_form(uri.query.to_s).reject { |k, _| k == "sslrootcert" }
       query << ["sslrootcert", root]
+      query << ["connect_timeout", connect_timeout] unless raw.include?("connect_timeout=")
       uri.query = URI.encode_www_form(query)
       uri.to_s
     else
-      raw.gsub(/(?:\A|\s)sslrootcert=\S+/, "").strip + " sslrootcert=#{root}"
+      out = raw.gsub(/(?:\A|\s)sslrootcert=\S+/, "").strip + " sslrootcert=#{root}"
+      out += " connect_timeout=#{connect_timeout}" unless raw.include?("connect_timeout=")
+      out
     end
   end
 
@@ -128,21 +134,34 @@ module DB
     end
   end
 
+  # Do not call PG.connect while you hold @lock. If the database accepts the TCP
+  # connection but sends no answer, PG.connect stops. Every Puma thread then
+  # waits for the same lock. /healthz uses no database, so /healthz continues to
+  # answer ok, and Dokku does not restart the application. Keep the slot under
+  # the lock. Make the connection outside the lock.
   def checkout
     @lock.synchronize do
       loop do
         return @pool.pop unless @pool.empty?
         if @created < POOL_SIZE
           @created += 1
-          begin
-            return new_connection
-          rescue StandardError
-            @created -= 1
-            raise
-          end
+          break
         end
         @cv.wait(@lock, 5)
       end
+    end
+
+    begin
+      new_connection
+    rescue StandardError
+      # Give the slot back and also send a signal. The old code decreased the
+      # count but sent no signal. A thread in @cv.wait then waited for the full
+      # timeout, although a slot was free.
+      @lock.synchronize do
+        @created -= 1
+        @cv.signal
+      end
+      raise
     end
   end
 
@@ -194,7 +213,6 @@ module DB
       port            integer     NOT NULL DEFAULT 22,
       private_key_enc text        NOT NULL,
       public_key      text        NOT NULL,
-      host_fingerprint text,
       last_ok_at      timestamptz,
       last_error      text,
       created_at      timestamptz NOT NULL DEFAULT now()
@@ -233,7 +251,6 @@ module DB
     -- PG::UndefinedColumn. Every column added from now on belongs here too.
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS phase        text;
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS torn_down_at timestamptz;
-    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS host_fingerprint text;
     ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_ok_at   timestamptz;
     ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_error   text;
   SQL

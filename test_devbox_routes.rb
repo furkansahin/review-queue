@@ -102,7 +102,19 @@ o.get "/auth/start"; st2 = o.last_response.location[/state=([^&]+)/, 1]
 o.get "/auth/callback?code=c&state=#{st2}"
 o.get "/devbox"
 check("another user sees no box", o.last_response.body.include?("10.0.0.9"), false)
+
+# Give this user their own box first. With no box their page shows no delete
+# form. The delete then fails on CSRF, and a CSRF failure tells you nothing
+# about the login scope. The delete must reach the route to be a real test.
+o.post "/devbox/save", {"host" => "198.51.100.5", "ssh_user" => "ubi", "port" => "22",
+                        "_csrf" => csrf_for(o.last_response.body, "/devbox/save")}
+check("their box saved",
+      DB.row("SELECT host FROM dev_boxes WHERE login=$1", ["mohi-kalantari"])["host"], "198.51.100.5")
+o.get "/devbox"
 o.post "/devbox/delete", {"_csrf" => csrf_for(o.last_response.body, "/devbox/delete")}
+check("their delete passes CSRF", o.last_response.status == 403, false)
+check("their delete removes their box",
+      DB.row("SELECT count(*)::int n FROM dev_boxes WHERE login=$1", ["mohi-kalantari"])["n"], 0)
 check("their delete cannot remove mine",
       DB.row("SELECT count(*)::int n FROM dev_boxes WHERE login=$1", ["furkansahin"])["n"], 1)
 

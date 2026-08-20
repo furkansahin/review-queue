@@ -49,19 +49,6 @@ ENV["RQ_ENCRYPTION_KEY"] = "z" * 64
 check("non-hex key rejected", raises?(Crypto::Error) { Crypto.encrypt("x") }, true)
 ENV["RQ_ENCRYPTION_KEY"] = "0" * 64
 
-# tokens
-t = Crypto.token
-check("token is long enough", t.length >= 40, true)
-check("token hash is stable", Crypto.hash_token(t), Crypto.hash_token(t))
-check("different tokens hash differently", Crypto.hash_token(t) == Crypto.hash_token(Crypto.token), false)
-check("hash does not contain the token", Crypto.hash_token(t).include?(t), false)
-check("secure_equal? matches", Crypto.secure_equal?("abc", "abc"), true)
-check("secure_equal? rejects", Crypto.secure_equal?("abc", "abd"), false)
-check("secure_equal? length mismatch", Crypto.secure_equal?("abc", "abcd"), false)
-
-check("preview masks the middle", Crypto.preview("ubi_pat_abcdef0123456789"), "ubi_********6789")
-check("short secret fully masked", Crypto.preview("short"), "*****")
-
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)

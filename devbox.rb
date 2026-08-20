@@ -32,19 +32,9 @@ module DevBox
     [key.to_pem, openssh_public(key, comment)]
   end
 
-  # ssh-rsa wire format: string "ssh-rsa", then mpint e, then mpint n.
-  def openssh_public(key, comment)
-    blob = ssh_string("ssh-rsa") + ssh_mpint(key.e) + ssh_mpint(key.n)
-    "ssh-rsa #{[blob].pack("m0")} #{comment}"
-  end
-
-  def ssh_string(value) = [value.bytesize].pack("N") + value
-
-  def ssh_mpint(bn)
-    bytes = bn.to_s(2)
-    bytes = "\x00".b + bytes if bytes.bytes.first.to_i >= 0x80   # keep it positive
-    [bytes.bytesize].pack("N") + bytes
-  end
+  # net-ssh writes the SSH key format. Its output is the same, byte for byte, as
+  # the code that was here before. Use net-ssh. Do not write the format again.
+  def openssh_public(key, comment) = "ssh-rsa #{[key.to_blob].pack("m0")} #{comment}"
 
   # The exact line the user pastes into ~/.ssh/authorized_keys on their box.
   def authorized_keys_line(public_key, wrapper: "/usr/local/bin/rq-review")

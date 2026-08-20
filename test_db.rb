@@ -120,6 +120,74 @@ errors = Queue.new
 12.times.map { Thread.new { 20.times { DB.row("SELECT count(*)::int AS n FROM review_jobs") } rescue errors << $! } }.each(&:join)
 check("pool survives 12 threads x 20 queries", errors.empty?, true)
 
+# libpq waits with no limit by default. One database that answers the TCP
+# connection but sends nothing then stops every request.
+check("the URL sets a connect timeout", DB.send(:url).include?("connect_timeout="), true)
+
+sing  = DB.singleton_class
+orig  = sing.instance_method(:new_connection)
+reset = -> { sing.send(:define_method, :new_connection) { orig.bind(DB).call } }
+# Empty the pool, so the next checkout must open a connection instead of
+# taking one that an earlier test left behind.
+drain = lambda do
+  DB.instance_variable_get(:@lock).synchronize do
+    pool = DB.instance_variable_get(:@pool)
+    pool.each { |c| c.close rescue nil }
+    pool.clear
+    DB.instance_variable_set(:@created, 0)
+  end
+end
+
+# A connect that fails must give its slot back. Without this the pool shrinks
+# to nothing after a database restart, and the application never recovers.
+drain.call
+sing.send(:define_method, :new_connection) { raise PG::ConnectionBad, "boom" }
+30.times { DB.checkout rescue nil }
+check("a failed connect leaks no slot", DB.instance_variable_get(:@created), 0)
+reset.call
+
+# The failure path must also send a signal. It gave the slot back but sent no
+# signal before. Two threads wait for a slot. One slot becomes free, which wakes
+# the first thread. That thread then fails to connect and gives the slot back.
+# Without a signal the second thread stays asleep for the full 5 second timeout,
+# although a slot is free.
+drain.call
+held = Array.new(DB::POOL_SIZE) { DB.checkout }   # every slot is taken, pool is empty
+waits = Queue.new
+two = 2.times.map do
+  Thread.new do
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    c = (DB.checkout rescue nil)
+    waits << Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+    DB.checkin(c) if c
+  end
+end
+sleep 0.3                                         # both threads are now waiting
+sing.send(:define_method, :new_connection) { raise PG::ConnectionBad, "boom" }
+dead = held.pop
+dead.close
+DB.checkin(dead)                                  # frees one slot and wakes one thread
+two.each(&:join)
+slowest = [waits.pop, waits.pop].max
+held.each { |c| DB.checkin(c) }
+reset.call
+check("a failed connect wakes the next waiter", slowest < 2.0, true)
+
+
+
+# PG.connect must run outside @lock. It ran inside the lock before. One slow
+# connect then blocked every other thread on the mutex.
+drain.call
+sing.send(:define_method, :new_connection) { sleep 2; orig.bind(DB).call }
+slow = Thread.new { c = (DB.checkout rescue nil); DB.checkin(c) if c }
+sleep 0.3
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+DB.instance_variable_get(:@lock).synchronize { nil }
+blocked = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+slow.join
+reset.call
+check("a slow connect does not hold the pool lock", blocked < 0.5, true)
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
