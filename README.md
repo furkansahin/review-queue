@@ -38,7 +38,14 @@ re-push resets the clock: green below `RQ_WARN_DAYS`, amber at `RQ_WARN_DAYS`, o
 `RQ_HOT_DAYS`, red at `RQ_STALE_DAYS`.
 
 Snapshots cache for `RQ_CACHE_TTL` seconds; the page self-refreshes every 3 minutes and
-`Refresh` forces a rebuild. Roughly 6 GitHub API calls per PR per rebuild.
+`Refresh` forces a rebuild. Roughly 6 GitHub API calls per PR per rebuild, `RQ_CONCURRENCY`
+pull requests at a time.
+
+Those calls share pooled connections rather than opening one each. Against api.github.com a
+fresh connection costs about 130 ms of the ~390 ms a call takes, so a 25-PR rebuild was
+throwing away roughly 20 seconds of handshake; it now uses about five connections for the
+whole fetch. `/user` goes out with the bucket searches and the weekly count runs alongside
+the per-PR fetch, rather than each adding a round trip of its own.
 
 ## Getting through the queue
 

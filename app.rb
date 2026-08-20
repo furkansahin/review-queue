@@ -35,6 +35,11 @@ REGISTRY = ServiceRegistry.new(
   hot_days: ENV.fetch("RQ_HOT_DAYS", "4").to_i,
   stale_days: ENV.fetch("RQ_STALE_DAYS", "7").to_i,
   ttl: ENV.fetch("RQ_CACHE_TTL", "300").to_i,
+  # How many pull requests are fetched at once. Each one then fans out again
+  # for its own timeline, so the real number of requests in flight is a few
+  # times this. Raise it to make a rebuild faster, at the cost of asking
+  # GitHub harder -- past a point that earns a secondary rate limit.
+  concurrency: ENV.fetch("RQ_CONCURRENCY", "5").to_i,
   quick_lines: ENV.fetch("RQ_QUICK_LINES", "50").to_i,
   lines_per_min: ENV.fetch("RQ_LINES_PER_MIN", "20").to_i
 )

@@ -6,23 +6,30 @@ require "time"
 class GitHubClient
   API = "https://api.github.com"
 
+  # Connections are pooled and reused across requests.
+  #
+  # A rebuild makes about six calls per pull request, and Net::HTTP.start per
+  # call paid for a fresh TCP connection and TLS handshake every time --
+  # measured against api.github.com at ~130 ms of the ~390 ms a call took, so
+  # a 25-pull-request queue threw away roughly twenty seconds of handshake.
+  #
+  # The pool is a free list rather than a thread-local, because the fetch
+  # spawns a new set of threads for every pull request: a thread-local
+  # connection would be built and dropped again after a single request. A
+  # thread takes a connection for the length of one request and returns it.
+  MAX_IDLE = 16
+
   attr_reader :rate_remaining
 
   def initialize(token)
     @token = token
     @mutex = Mutex.new
+    @idle = Hash.new { |h, k| h[k] = [] }
   end
 
   def get(path)
     uri = URI(path.start_with?("http") ? path : API + path)
-    req = Net::HTTP::Get.new(uri)
-    req["Authorization"] = "Bearer #{@token}"
-    req["Accept"] = "application/vnd.github+json"
-    req["X-GitHub-Api-Version"] = "2022-11-28"
-    req["User-Agent"] = "review-queue"
-    res = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, open_timeout: 10, read_timeout: 25) do |http|
-      http.request(req)
-    end
+    res = request(uri)
     @mutex.synchronize { @rate_remaining = res["x-ratelimit-remaining"] }
     unless res.is_a?(Net::HTTPSuccess)
       raise "GitHub #{res.code} on #{uri.path}: #{res.body.to_s[0, 200]}"
@@ -33,6 +40,86 @@ class GitHubClient
   # Best-effort: nil instead of raising (used for optional data like check runs).
   def try(path)
     get(path)
+  rescue StandardError
+    nil
+  end
+
+  # Closes every idle connection. Nothing depends on this in the app -- the
+  # sockets go when the process does -- but a test can leave the machine tidy.
+  def close_idle
+    taken = @mutex.synchronize { @idle.values.flatten.tap { @idle.clear } }
+    taken.each { |http| finish(http) }
+  end
+
+  private
+
+  # An idle keep-alive connection can be closed by the far end at any moment,
+  # and that only shows up as an error on the next write. Retry those exactly
+  # once, on a fresh connection. A timeout is not retried: it has already spent
+  # the caller's time once.
+  DROPPED = [EOFError, Errno::ECONNRESET, Errno::EPIPE, IOError, Net::HTTPBadResponse].freeze
+
+  def request(uri)
+    fresh = false
+    begin
+      http = take(uri, fresh: fresh)
+      begin
+        res = http.request(build_request(uri))
+      rescue StandardError
+        finish(http)
+        raise
+      end
+      keep(uri, http)
+      res
+    rescue *DROPPED
+      raise if fresh
+      fresh = true
+      retry
+    end
+  end
+
+  def build_request(uri)
+    req = Net::HTTP::Get.new(uri)
+    req["Authorization"] = "Bearer #{@token}"
+    req["Accept"] = "application/vnd.github+json"
+    req["X-GitHub-Api-Version"] = "2022-11-28"
+    req["User-Agent"] = "review-queue"
+    req
+  end
+
+  def key_for(uri) = "#{uri.hostname}:#{uri.port}"
+
+  def take(uri, fresh: false)
+    unless fresh
+      http = @mutex.synchronize { @idle[key_for(uri)].pop }
+      return http if http&.started?
+    end
+    connect(uri)
+  end
+
+  def connect(uri)
+    http = Net::HTTP.new(uri.hostname, uri.port)
+    http.use_ssl = uri.scheme == "https"
+    http.open_timeout = 10
+    http.read_timeout = 25
+    http.keep_alive_timeout = 30
+    http.start
+    http
+  end
+
+  # Capped, so a wide fan-out cannot leave dozens of sockets open afterwards.
+  # Closing happens outside the lock: it is I/O, and nothing else needs to wait
+  # for it.
+  def keep(uri, http)
+    kept = @mutex.synchronize do
+      list = @idle[key_for(uri)]
+      list.size < MAX_IDLE && http.started? && list.push(http)
+    end
+    finish(http) unless kept
+  end
+
+  def finish(http)
+    http.finish if http&.started?
   rescue StandardError
     nil
   end
@@ -118,13 +205,35 @@ class QueueService
   private
 
   def build
-    login = @gh.get("/user").fetch("login")
+    # /user and the bucket searches do not depend on one another -- the search
+    # queries say `@me` and GitHub expands it -- so they go together. Fetching
+    # the login first put one whole round trip in front of every rebuild.
+    #
+    # threaded turns a failure into nil, which for the login would mean quietly
+    # building the queue for nobody, so this one keeps its exception and raises
+    # it after the wave. snapshot turns that into the error the page shows.
+    failure = nil
+    tasks = [-> {
+      begin
+        @gh.get("/user").fetch("login")
+      rescue StandardError => e
+        failure = e
+        nil
+      end
+    }]
+    tasks += buckets.map { |b|
+      -> {
+        res = @gh.get("/search/issues?per_page=#{@per_page}&sort=updated&q=#{URI.encode_www_form_component(b[:q])}")
+        [b[:key], res["items"] || []]
+      }
+    }
+    login, *found = threaded(tasks, &:call)
+    raise failure if failure
+    raise "GitHub did not say who is signed in" if login.nil?
 
     entries = {}
-    threaded(buckets) do |b|
-      res = @gh.get("/search/issues?per_page=#{@per_page}&sort=updated&q=#{URI.encode_www_form_component(b[:q])}")
-      [b[:key], res["items"] || []]
-    end.each do |key, items|
+    found.each do |result|
+      key, items = result
       next unless items
       items.each do |item|
         e = entries[item["html_url"]] ||= {item: item, buckets: []}
@@ -132,11 +241,16 @@ class QueueService
       end
     end
 
+    # The weekly count reads the events feed, which nothing else here depends
+    # on, so it runs alongside the per-pull-request fetch. It used to be up to
+    # three more serial round trips tacked onto the end of every rebuild.
+    weekly = Thread.new { reviews_this_week(login) }
+
     prs = threaded(entries.values) { |entry| detail(entry, login) }.compact
     rows = prs.map { |pr| row(pr, login) }.sort_by { |r| r[:sort_key] }
 
     {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
-     counts: counts(rows), reviews_7d: reviews_this_week(login)}
+     counts: counts(rows), reviews_7d: weekly.value}
   end
 
   # Pull requests you reviewed in the last 7 days.
