@@ -299,13 +299,27 @@ class ReviewQueue < Roda
         elsif !%w[done failed].include?(job["state"])
           session["sessions_error"] = "wait for the review to finish first"
         else
-          # The question goes over stdin, so it is never part of a command line.
-          res = DevBox.run(box, "ask #{job["box_name"]}", stdin: prompt)
-          if res[:ok]
+          # Reopen FIRST. reopen re-enters review_jobs_live_idx, so it can lose
+          # to another live job for the same pull request; firing the ask before
+          # knowing that left the box answering into a row that was never
+          # reopened, and raised a 500 on the way out.
+          reopened = begin
             Jobs.reopen(job["id"], current_login)
+          rescue PG::UniqueViolation
+            nil
+          end
+
+          if reopened.nil?
+            session["sessions_error"] =
+              "another review is already running for that pull request; wait for it to finish"
           else
-            detail = (res[:error] || res[:output]).to_s.strip
-            session["sessions_error"] = "could not ask: #{detail[0, 400]}"
+            # The question goes over stdin, so it is never part of a command line.
+            res = DevBox.run(box, "ask #{job["box_name"]}", stdin: prompt)
+            unless res[:ok]
+              detail = (res[:error] || res[:output]).to_s.strip
+              Jobs.finish(job["id"], "failed", error: "could not ask: #{detail[0, 400]}")
+              session["sessions_error"] = "could not ask: #{detail[0, 400]}"
+            end
           end
         end
         r.redirect "/sessions"
@@ -344,11 +358,17 @@ class ReviewQueue < Roda
         next '{"error":"not found"}' unless job
 
         text = job["output"].to_s
-        offset = r.params["offset"].to_s.to_i.clamp(0, text.bytesize)
-        # A shrinking log means it was replaced; send it from the start again.
-        offset = 0 if offset > text.bytesize
+        # Compare BEFORE clamping: clamp(0, bytesize) already caps the value, so
+        # the shrink check below it could never fire and a client holding a large
+        # offset against a replaced, shorter log sat frozen on stale text.
+        asked = r.params["offset"].to_s.to_i
+        offset = asked > text.bytesize ? 0 : asked.clamp(0, text.bytesize)
+        # byteslice can split a character, and JSON.generate raises on invalid
+        # UTF-8 -- which turned the tail into a permanent 500 loop, because the
+        # client retries the same offset forever. scrub drops the partial bytes.
+        chunk = text.byteslice(offset, text.bytesize - offset).to_s.scrub("")
         JSON.generate(state: job["state"], phase: job["phase"], length: text.bytesize,
-                      chunk: text.byteslice(offset, text.bytesize - offset).to_s,
+                      chunk: chunk,
                       done: !%w[queued running].include?(job["state"]))
       end
 
@@ -377,11 +397,15 @@ class ReviewQueue < Roda
     r.post "review" do
       check_csrf!
       if REVIEWS_ENABLED
-        res = Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s,
-                           pr_number: r.params["pr"].to_s.to_i)
-        # Never swallow this: pressing Review and seeing nothing happen is
-        # worse than seeing an error.
-        session["review_error"] = res[:error] unless res[:ok]
+        pr = param_id(r.params["pr"])
+        if pr.nil?
+          session["review_error"] = "that pull request number is not valid"
+        else
+          res = Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s, pr_number: pr)
+          # Never swallow this: pressing Review and seeing nothing happen is
+          # worse than seeing an error.
+          session["review_error"] = res[:error] unless res[:ok]
+        end
       end
       r.redirect "/?#{r.query_string}"
     end
@@ -410,7 +434,12 @@ class ReviewQueue < Roda
 
     r.root do
       snap = service.snapshot
-      tab = (r.params["tab"] || "all").to_sym
+      # .to_sym on a raw param raises NoMethodError for ?tab[]=all, and every
+      # redirect re-appends the query string, so the 500 followed the user
+      # around. Coerce, then accept only a tab that exists.
+      known = service.tabs.map { |t| t[:key] }
+      asked = r.params["tab"].to_s.to_sym
+      tab = known.include?(asked) ? asked : :all
       hide = r.params["hide"] == "1"
 
       # sweep first: it wakes every row that expired or that has new activity.

@@ -12,6 +12,7 @@ ENV["RQ_INSECURE_COOKIES"]       = "1"
 require "rack/test"
 require "json"
 require_relative "app"
+require_relative "jobs"
 require_relative "devbox"
 
 WHO = {login: "furkansahin"}
@@ -289,6 +290,56 @@ end
 post "/sessions/teardown", {"_csrf" => tt}
 check("teardown survives no id at all", last_response.status < 500, true)
 
+# --- review pass 2 regressions -------------------------------------------
+# teardown must free the pull request it says it frees, even mid-review
+DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
+live = DB.row(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 4242, "rq-ubicloud-ubicloud-4242"])
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, state)
+  VALUES ($1,$2,$3,$4,'running') RETURNING *
+SQL
+STUB[:teardown] = {ok: true, output: "torn down"}
+get "/sessions"
+post "/sessions/teardown", {"box" => "rq-ubicloud-ubicloud-4242", "_csrf" => csrf_for(last_response.body, "/sessions/teardown")}
+row = DB.row("SELECT state, torn_down_at FROM review_jobs WHERE id=$1", [live["id"]])
+check("teardown settles a running job", row["state"], "failed")
+check("and stamps it torn down", !row["torn_down_at"].nil?, true)
+again = Jobs.enqueue(login: "furkansahin", repo: "ubicloud/ubicloud", pr_number: 4242)
+check("so the pull request really can be reviewed again", again[:ok], true)
+DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
+
+# a junk pull request number must not become PR 0 or PR 12
+get "/"
+rt = csrf_for(last_response.body, "/review")
+post "/review", {"repo" => "ubicloud/ubicloud", "pr" => "abc", "_csrf" => rt}
+check("pr=abc creates no job", DB.row("SELECT count(*)::int n FROM review_jobs")["n"], 0)
+post "/review", {"repo" => "ubicloud/ubicloud", "pr" => "12abc", "_csrf" => rt}
+check("pr=12abc creates no job", DB.row("SELECT count(*)::int n FROM review_jobs")["n"], 0)
+get "/"
+check("and the user is told", last_response.body.include?("not valid"), true)
+
+# ?tab[]=all must not 500
+get "/?tab[]=all"
+check("an array tab param does not 500", last_response.status, 200)
+get "/?tab[x]=1"
+check("a hash tab param does not 500", last_response.status, 200)
+get "/?tab=nonsense"
+check("an unknown tab falls back", last_response.status, 200)
+
+# the tail must survive an offset inside a multibyte character
+j = DB.row(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 99, "rq-x-99"])
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, state, output)
+  VALUES ($1,$2,$3,$4,'running','finding — one') RETURNING *
+SQL
+(8..12).each do |off|
+  get "/sessions/tail?id=#{j["id"]}&offset=#{off}"
+  check("tail at byte offset #{off} does not 500", last_response.status, 200)
+end
+# a shrinking log must reset rather than freeze
+DB.exec("UPDATE review_jobs SET output='short' WHERE id=$1", [j["id"]])
+t = JSON.parse(get("/sessions/tail?id=#{j["id"]}&offset=99999").body)
+check("a shrunk log resends from the start", t["chunk"], "short")
+DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
+
 # a box name that is not ours must be refused before it is sent anywhere
 post "/sessions/teardown", {"box" => "../etc/passwd", "_csrf" => tok}
 get "/sessions"
@@ -306,6 +357,33 @@ other.get "/auth/callback?code=c&state=#{st2}"
 other.get "/sessions"
 check("another user sees no sessions of mine", other.last_response.body.include?("FINDING: something"), false)
 check("another user gets their own empty page", other.last_response.status, 200)
+
+# --- the ask/reopen race --------------------------------------------------
+# A failed job still shows the Ask form. A second job for the same pull request
+# can be live at the same time, because a failed job does not block enqueue. So
+# reopen re-enters the unique index and used to raise a 500 -- after the ask had
+# already been sent to the box.
+DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
+boxid = DB.row("SELECT id FROM dev_boxes WHERE login=$1", ["furkansahin"])["id"]
+failed = DB.row(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 555, "rq-a-555", boxid])
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, state, error, dev_box_id)
+  VALUES ($1,$2,$3,$4,'failed','cancelled',$5) RETURNING *
+SQL
+DB.exec(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 555, "rq-a-555"])
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, state)
+  VALUES ($1,$2,$3,$4,'queued')
+SQL
+STUB[:asked] = nil
+get "/sessions"
+post "/sessions/ask", {"id" => failed["id"], "prompt" => "why?",
+                       "_csrf" => csrf_for(last_response.body, "/sessions/ask")}
+check("a blocked reopen does not 500", last_response.status < 500, true)
+check("and the question is NOT sent to the box", STUB[:asked], nil)
+get "/sessions"
+banner = last_response.body[/background: var\(--err-bg\).*?>\s*(.*?)\s*<\/div>/m, 1].to_s.strip
+puts "        banner: #{banner[0,90]}"
+check("the user is told why", banner.include?("already running for that pull request"), true)
+DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
 
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")

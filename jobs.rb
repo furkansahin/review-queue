@@ -52,7 +52,16 @@ module Jobs
   # Marks every job that used this box, so the rows go back to offering Review.
   def mark_torn_down(login, box_name)
     DB.exec(<<~SQL, [login, box_name])
-      UPDATE review_jobs SET torn_down_at = now()
+      UPDATE review_jobs
+      SET torn_down_at = now(),
+          -- A queued or running job still occupies review_jobs_live_idx, so
+          -- without settling it the user is told "can be reviewed again" and
+          -- then refused with "a review is already running". The box is gone;
+          -- the job cannot continue.
+          state       = CASE WHEN state IN ('queued', 'running') THEN 'failed' ELSE state END,
+          error       = CASE WHEN state IN ('queued', 'running')
+                             THEN 'the box was torn down' ELSE error END,
+          finished_at = COALESCE(finished_at, now())
       WHERE login = $1 AND box_name = $2 AND torn_down_at IS NULL
     SQL
   end
@@ -103,7 +112,10 @@ module Jobs
   def reopen(id, login)
     DB.row(<<~SQL, [login, id])
       UPDATE review_jobs
-      SET state = 'running', phase = 'reviewing', finished_at = NULL, error = NULL
+      -- started_at drives the staleness timeout, so a follow-up on a job from
+      -- last week would be given up on at the first blip, discarding the answer.
+      SET state = 'running', phase = 'reviewing', finished_at = NULL, error = NULL,
+          started_at = now()
       WHERE login = $1 AND id = $2 AND state IN ('done', 'failed')
       RETURNING *
     SQL
