@@ -226,6 +226,39 @@ get "/"
 check("row offers Review again after teardown", last_response.body.include?(">Review<"), true)
 check("row no longer claims reviewed", last_response.body.include?("review ✓"), false)
 
+# the card must leave Previous, not sit there looking untouched
+get "/sessions"
+body = last_response.body
+prev_start = body.index("Previous")
+gone_start = body.index("Torn down")
+check("a Torn down section appears", !gone_start.nil?, true)
+check("the card sits after Previous, not in it", (gone_start || 0) > (prev_start || 0), true)
+check("it is labelled torn down", body.include?(">torn down<"), true)
+# assert on the review text itself, not on template wording
+kept = DB.row("SELECT output FROM review_jobs WHERE id=$1", [job_id])["output"].to_s
+check("the torn-down job still has its review in the database", kept.empty?, false)
+check("and the page still renders it",
+      body[gone_start..].to_s.include?(kept.split("\n").last.to_s.strip), true)
+check("Previous no longer offers a teardown for it",
+      body[prev_start...gone_start].to_s.include?("Tear down box"), false)
+
+# forget deletes the record outright
+ft = csrf_for(body, "/sessions/forget")
+post "/sessions/forget", {"id" => job_id, "_csrf" => ft}
+check("forget removes the record",
+      DB.row("SELECT count(*)::int n FROM review_jobs WHERE id=$1", [job_id])["n"], 0)
+
+# and it must refuse a job whose box is still alive
+j2 = DB.row(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 7777, "rq-ubicloud-7777"])
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, state)
+  VALUES ($1,$2,$3,$4,'done') RETURNING *
+SQL
+get "/sessions"
+post "/sessions/forget", {"id" => j2["id"], "_csrf" => csrf_for(last_response.body, "/sessions/forget")}
+check("forget refuses a job whose box still exists",
+      DB.row("SELECT count(*)::int n FROM review_jobs WHERE id=$1", [j2["id"]])["n"], 1)
+DB.exec("DELETE FROM review_jobs WHERE id=$1", [j2["id"]])
+
 STUB[:teardown] = {ok: false, output: "", error: "box \"rq-x\" has uncommitted changes in its worktree"}
 get "/sessions"
 tok = csrf_for(last_response.body, "/sessions/teardown")

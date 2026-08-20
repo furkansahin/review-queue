@@ -301,6 +301,19 @@ class ReviewQueue < Roda
         r.redirect "/sessions"
       end
 
+      # Deletes the record and its review text. Only offered once the box is
+      # gone, so nothing live can be forgotten by accident.
+      r.post "forget" do
+        check_csrf!
+        if (id = param_id(r.params["id"]))
+          DB.exec(<<~SQL, [current_login, id])
+            DELETE FROM review_jobs
+            WHERE login = $1 AND id = $2 AND torn_down_at IS NOT NULL
+          SQL
+        end
+        r.redirect "/sessions"
+      end
+
       r.post "cancel" do
         check_csrf!
         if (id = param_id(r.params["id"]))
@@ -345,7 +358,8 @@ class ReviewQueue < Roda
                                   notice: session.delete("sessions_notice"),
                                   csrf_teardown: csrf_tag("/sessions/teardown"),
                                   csrf_cancel: csrf_tag("/sessions/cancel"),
-                                  csrf_ask: csrf_tag("/sessions/ask")},
+                                  csrf_ask: csrf_tag("/sessions/ask"),
+                                  csrf_forget: csrf_tag("/sessions/forget")},
           layout: false)
       end
     end
