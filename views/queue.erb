@@ -158,9 +158,31 @@
   .mono { font-family: 'IBM Plex Mono', monospace; }
   .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
          border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  /* nowrap and no shrink: these are flex items in a single-line bar, so without
+     them an over-full bar squeezes the buttons until their labels break
+     mid-word -- "Dev box" rendered as "Dev" over "box". */
   .btn { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 6px 14px; border: 1px solid var(--btn-border);
-         background: var(--btn-bg); border-radius: 6px; cursor: pointer; color: var(--btn-fg); }
+         background: var(--btn-bg); border-radius: 6px; cursor: pointer; color: var(--btn-fg);
+         white-space: nowrap; flex-shrink: 0; }
   .btn:hover { background: var(--btn-hover-bg); }
+
+  /* The settings the bar used to carry inline. A <details> so it opens without
+     script, absolutely positioned so opening it never moves the bar. */
+  .menu { position: relative; flex-shrink: 0; }
+  .menu > summary { list-style: none; display: block; line-height: 1.3; }
+  .menu > summary::-webkit-details-marker { display: none; }
+  .menu[open] > summary { background: var(--btn-hover-bg); }
+  .menu-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 10;
+                background: var(--surface); border: 1px solid var(--border);
+                border-radius: 8px; padding: 12px 14px; min-width: 200px;
+                box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); }
+
+  /* The status text is the only thing left in the bar that can grow without
+     bound, so it is the one that gives way: it truncates before the buttons
+     are pushed anywhere, and steps aside entirely when the bar gets short.
+     Nothing in it is actionable, and Refresh restates "updated" anyway. */
+  .status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 860px) { .status { display: none; } }
   .tabs { display: flex; align-items: stretch; padding: 0 24px; background: var(--surface);
           border-bottom: 1px solid var(--border); }
   .tab { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 11px 14px; display: flex; align-items: center;
@@ -194,6 +216,12 @@
 
   /* progress: how much of this view is already dealt with */
   .track { height: 4px; background: var(--track); border-radius: 2px; overflow: hidden; flex: 1; }
+  /* Rides in the tab row. Fixed width so the tabs keep their own space, and it
+     is the first thing to go when the row runs out: every tab still carries its
+     own count, so nothing is only knowable from here. */
+  .progress { display: flex; align-items: center; align-self: center; gap: 10px;
+              width: 200px; flex-shrink: 0; margin: 0 14px; }
+  @media (max-width: 1100px) { .progress { display: none; } }
   .fill { height: 100%; background: var(--track-fill); border-radius: 2px; transition: width 400ms ease; }
 
   /* hero: the single next thing to review */
@@ -220,32 +248,31 @@
 <body>
 
 <div class="bar">
-  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Review queue</div>
-  <div class="mono" style="font-size: 12px; color: var(--tag-fg); background: var(--tag-bg);
-       border: 1px solid var(--tag-border); padding: 3px 8px; border-radius: 4px;">
-    <%= service.scope %>
+  <%
+    # The scope is fixed configuration -- it changes when someone edits the
+    # deploy, not during a day's reviewing. It reads as a name beside the title
+    # rather than as a chip competing with the controls; the raw search
+    # fragment is still there on hover.
+    scope_name = service.scope.sub(/\Arepo:/, "")
+  %>
+  <div style="min-width: 0;">
+    <span style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Review queue</span>
+    <span class="mono" title="RQ_SCOPE: <%= service.scope %>"
+          style="font-size: 12px; color: var(--muted-2); margin-left: 8px;"><%= scope_name %></span>
   </div>
-  <form method="post" action="/settings?tab=<%= tab %><%= hide ? "&hide=1" : "" %>"
-        style="margin: 0; display: flex; align-items: center; gap: 6px;">
-    <%== csrf_settings %>
-    <label class="mono" for="label" style="font-size: 11px; color: var(--muted-2);">watch label</label>
-    <input class="mono" id="label" name="label" value="<%= service.label %>" maxlength="64"
-           placeholder="<%= suggested_label.empty? ? "none" : suggested_label %>"
-           title="Show every open PR with this label, even when nobody asked you. Leave empty to watch nothing."
-           style="font-size: 12px; width: 108px; padding: 4px 8px; border-radius: 5px;
-                  border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg);" />
-    <button class="mini" type="submit">Set</button>
-  </form>
   <div style="flex: 1;"></div>
-  <div class="mono" style="font-size: 11px; color: var(--muted-2);">
-    <% meta = [] %>
-    <% meta << "@#{login}" if login %>
-    <% if reviews_7d %>
-      <% meta << "#{reviews_7d[:count]}#{reviews_7d[:complete] ? "" : "+"} reviewed this week" %>
-    <% end %>
-    <% meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at] %>
-    <% meta << "#{snap[:rate]} api calls left" if snap[:rate] %>
-    <%= meta.join("  ·  ") %>
+  <div class="mono status" style="font-size: 11px; color: var(--muted-2); white-space: nowrap;">
+    <%
+      # Three facts, not four. The rate limit is a diagnostic -- it belongs on
+      # the thing it describes, not in the strip you read every few minutes.
+      meta = []
+      meta << "@#{login}" if login
+      if reviews_7d
+        meta << "#{reviews_7d[:count]}#{reviews_7d[:complete] ? "" : "+"} reviewed this week"
+      end
+      meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at]
+    %>
+    <span title="<%= snap[:rate] ? "#{snap[:rate]} GitHub API calls left this hour" : "" %>"><%= meta.join("  ·  ") %></span>
   </div>
   <form method="post" action="/refresh?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
     <%== csrf %>
@@ -255,10 +282,34 @@
     <a class="btn" href="/sessions" style="text-decoration: none;">Sessions</a>
     <a class="btn" href="/devbox" style="text-decoration: none;">Dev box</a>
   <% end %>
-  <form method="post" action="/logout" style="margin: 0;">
-    <%== csrf_logout %>
-    <button class="btn" type="submit">Sign out</button>
-  </form>
+
+  <%# <details> is the disclosure this page can afford: it opens with no script,
+      which is what the rest of the queue already relies on. %>
+  <details class="menu">
+    <summary class="btn" title="Watch label and sign out">⋯</summary>
+    <div class="menu-panel">
+      <form method="post" action="/settings?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+        <%== csrf_settings %>
+        <label class="mono" for="label"
+               style="font-size: 11px; color: var(--muted-2); display: block; margin-bottom: 6px;">
+          watch label
+        </label>
+        <div style="display: flex; gap: 6px;">
+          <input class="mono" id="label" name="label" value="<%= service.label %>" maxlength="64"
+                 placeholder="<%= suggested_label.empty? ? "none" : suggested_label %>"
+                 title="Show every open PR with this label, even when nobody asked you. Leave empty to watch nothing."
+                 style="font-size: 12px; width: 132px; padding: 4px 8px; border-radius: 5px;
+                        border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg);" />
+          <button class="mini" type="submit">Set</button>
+        </div>
+      </form>
+      <div style="height: 1px; background: var(--border); margin: 12px 0;"></div>
+      <form method="post" action="/logout" style="margin: 0;">
+        <%== csrf_logout %>
+        <button class="mini" type="submit">Sign out</button>
+      </form>
+    </div>
+  </details>
 </div>
 
 <div class="tabs">
@@ -270,20 +321,24 @@
     </a>
   <% end %>
   <div style="flex: 1;"></div>
+
+  <%# The progress used to be a band of its own under the tabs, which made "how
+      much is left" a third full-width statement after the All badge and the
+      bar. It rides in the space the tab row already had spare. The counts it
+      dropped are on the bar itself, for when the number matters more than the
+      shape. %>
+  <% unless total.zero? && drafts.zero? %>
+    <div class="progress" title="<%= active %> to go<%= done.positive? ? ", #{done} done" : "" %><%= drafts.positive? ? ", #{drafts} draft" : "" %>">
+      <span class="mono" style="font-size: 11px; color: var(--muted-2); white-space: nowrap;"><%= active %> to go</span>
+      <div class="track"><div class="fill" style="width: <%= pct %>%;"></div></div>
+      <span class="mono" style="font-size: 11px; color: var(--muted-2);"><%= pct %>%</span>
+    </div>
+  <% end %>
+
   <a class="tab" href="<%= qs.call(tab, !hide) %>" style="color: var(--muted);">
     <%= hide ? "Show settled" : "Hide settled" %>
   </a>
 </div>
-
-<% unless total.zero? && drafts.zero? %>
-  <div style="display: flex; align-items: center; gap: 12px; padding: 10px 24px 0;">
-    <div class="mono" style="font-size: 11px; color: var(--muted-2); white-space: nowrap;">
-      <%= active %> to go<%= done.positive? ? " · #{done} done" : "" %><%= drafts.positive? ? " · #{drafts} draft" : "" %>
-    </div>
-    <div class="track"><div class="fill" style="width: <%= pct %>%;"></div></div>
-    <div class="mono" style="font-size: 11px; color: var(--muted-2);"><%= pct %>%</div>
-  </div>
-<% end %>
 
 <% if review_error %>
   <div class="mono" style="margin: 14px 24px 0; padding: 10px 16px; border: 1px solid var(--err-border);
