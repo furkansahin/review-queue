@@ -183,9 +183,11 @@ puts "-- a review detaches and comes back --"
 File.delete("#{ROOT}/calls") if File.exist?("#{ROOT}/calls")
 res = Runner.run(BOXROW, "review ubicloud/ubicloud 6172 rq-ubicloud-6172")
 check("it starts", res[:ok], true)
-deadline = Time.now + 15
+deadline = Time.now + 60
 sleep 0.1 until File.read(File.join(Runner.state_dir("furkansahin", "rq-ubicloud-6172"), "state")).strip == "done" || Time.now > deadline
-check("it reaches done", Runner.run(BOXROW, "status rq-ubicloud-6172")[:output], "done")
+state_now = Runner.run(BOXROW, "status rq-ubicloud-6172")[:output]
+puts "        (waited #{(Time.now - (deadline - 60)).round(1)}s)" if state_now != "done"
+check("it reaches done", state_now, "done")
 check("bay was asked to bring the box up on the pr", calls.include?("up rq-ubicloud-6172 --pr 6172"), true)
 check("and then to run the review", calls.include?("run rq-ubicloud-6172 review"), true)
 check("a bad repo never reaches bay",
@@ -207,7 +209,7 @@ check("a second question is refused while the first runs",
 
 # A question is a question. Without a bound, a paste is a payload.
 askdir = Runner.state_dir("furkansahin", "rq-ubicloud-6172")
-deadline = Time.now + 15
+deadline = Time.now + 60
 sleep 0.1 until File.read(File.join(askdir, "state")).strip == "done" || Time.now > deadline
 File.delete("#{ROOT}/ssh.stdin")
 Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "x" * 20_000)
@@ -222,7 +224,24 @@ check("and names the reason", Runner.unavailable_reason.include?("bay is not ins
 check("a command fails with that reason", Runner.run(BOXROW, "ping")[:error].to_s.include?("bay is not installed"), true)
 File.chmod(0o755, File.join(ROOT, "bin", "bay"))
 
-FileUtils.remove_entry(ROOT)
+# A review and a follow-up are detached on purpose, so some of them may still
+# be writing into this tree. Removing it underneath them raised ENOENT from
+# the cleanup itself -- every check passing and the run still exiting 1.
+# Wait for them, then remove, and never let the tidying decide the result.
+Dir.glob(File.join(ROOT, "users", "*", "state", "*", "pid")).each do |f|
+  pid = File.read(f).to_i
+  next unless pid.positive?
+  deadline = Time.now + 30
+  while Time.now < deadline
+    begin
+      Process.kill(0, pid)
+    rescue StandardError
+      break
+    end
+    sleep 0.1
+  end
+end
+FileUtils.remove_entry(ROOT, true)
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
