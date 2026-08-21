@@ -54,6 +54,11 @@ REGISTRY = ServiceRegistry.new(
 
 SNOOZE_SECONDS = ENV.fetch("RQ_SNOOZE_DAYS", "7").to_i * 86_400
 
+# How recently signed in a user has to be for the page to stop trying to fix a
+# 401 by signing them in again. Long enough to cover the redirect back from
+# GitHub, short enough that a genuinely expired token still refreshes itself.
+REAUTH_GRACE = ENV.fetch("RQ_REAUTH_GRACE", "30").to_i
+
 # Only a hint in the settings box. It is deliberately NOT applied as a default:
 # a shared default is what made every user inherit one person's topic feed.
 SUGGESTED_LABEL = ENV.fetch("RQ_LABEL", "")
@@ -160,9 +165,22 @@ class ReviewQueue < Roda
         # label and snooze list, which is the same inheritance bug the watch
         # label was moved per-user to fix. It also rotates the session across
         # an authentication boundary.
+        #
+        # Signing in again as the SAME person is not that boundary, though.
+        # The watch label and the snooze list live only in the session, so
+        # clearing them on a token refresh would quietly throw away everything
+        # the user had put out of sight. Carry them over, and only them.
+        same_user = current_login == login
+        carried = same_user ? session.to_hash.slice("label", "snoozed") : {}
+        REGISTRY.forget(login)
         session.clear
+        carried.each { |k, v| session[k] = v }
         session["login"] = login
         session["token"] = token
+        # When this stamp is recent, the page will not send the user back here:
+        # a token minted seconds ago that is already refused is not something
+        # another round trip fixes.
+        session["authed_at"] = Time.now.to_i
         r.redirect "/"
       end
     end
@@ -521,6 +539,21 @@ class ReviewQueue < Roda
 
     r.root do
       snap = service.snapshot
+
+      # A dead token is the one error a user can actually clear, and the banner
+      # left them to work out how. GitHub already knows this browser, so the
+      # round trip is usually invisible: back here, signed in, queue drawn.
+      #
+      # Guarded by when the token was issued. One minted seconds ago that is
+      # already refused will be refused again, and without the guard the page
+      # would bounce through GitHub forever. Past that window the banner
+      # stands, because that failure is not a stale session.
+      if snap[:unauthorized] && Time.now.to_i - session["authed_at"].to_i > REAUTH_GRACE
+        REGISTRY.forget(current_login)
+        session.delete("token")
+        next r.redirect "/auth/start"
+      end
+
       # .to_sym on a raw param raises NoMethodError for ?tab[]=all, and every
       # redirect re-appends the query string, so the 500 followed the user
       # around. Coerce, then accept only a tab that exists.

@@ -6,6 +6,12 @@ require "time"
 class GitHubClient
   API = "https://api.github.com"
 
+  # A dead token, told apart from every other failure. An OAuth token is
+  # revoked when the user removes the app, and GitHub expires one after a year
+  # of no use. Nothing here can fix that, but signing in again can, so the
+  # caller needs to know this failure from a rate limit or an outage.
+  class Unauthorized < StandardError; end
+
   # Connections are pooled and reused across requests.
   #
   # A rebuild makes about six calls per pull request, and Net::HTTP.start per
@@ -32,7 +38,9 @@ class GitHubClient
     res = request(uri)
     @mutex.synchronize { @rate_remaining = res["x-ratelimit-remaining"] }
     unless res.is_a?(Net::HTTPSuccess)
-      raise "GitHub #{res.code} on #{uri.path}: #{res.body.to_s[0, 200]}"
+      message = "GitHub #{res.code} on #{uri.path}: #{res.body.to_s[0, 200]}"
+      raise Unauthorized, message if res.code == "401"
+      raise message
     end
     JSON.parse(res.body)
   end
@@ -208,7 +216,10 @@ class QueueService
         @snapshot = build
       rescue StandardError => e
         @snapshot = (@snapshot || {rows: [], login: nil, fetched_at: Time.now}).merge(
-          error: e.message, fetched_at: Time.now, rate: @gh.rate_remaining
+          error: e.message, fetched_at: Time.now, rate: @gh.rate_remaining,
+          # The page turns this into a fresh sign-in rather than a banner
+          # nobody can act on.
+          unauthorized: e.is_a?(GitHubClient::Unauthorized)
         )
       end
       @snapshot
