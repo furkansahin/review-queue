@@ -175,6 +175,23 @@ module Runner
 
   # The one file that differs per user: which machine is theirs, and which
   # skills repository their boxes get.
+  # The two commands the dashboard drives. They live here, generated, rather
+  # than in the repo's shared bay.toml, which is the point of running one bay:
+  # they are versioned with this app and every user gets the same pair. bay
+  # merges the commands map across config layers, so the repo's own commands
+  # (pry, agent, seed-account, the dataplane pair) are still there.
+  #
+  # Both are pinned. Unpinned, a review runs on whatever the box's account
+  # happens to default to, which moves between releases -- so the same pull
+  # request could be reviewed at two depths, unattended, with nobody to notice
+  # a shallow answer.
+  #
+  # Both read their text from a file in the worktree rather than a command
+  # line: free text never gets parsed by a shell, and the path is relative
+  # because bay starts a command in the box's own worktree.
+  REVIEW_CMD = 'claude -p --model opus --effort max -- "$(cat .rq/review-prompt.md)" 2>&1'
+  ASK_CMD = 'claude -p --continue --model opus --effort max -- "$(cat .rq/followup.txt)" 2>&1'
+
   def local_toml(box_row)
     lines = ["# Written by review-queue. Edits here are overwritten.",
              "", "[remote]", %(host = #{host_alias(box_row["login"]).inspect}),
@@ -183,6 +200,9 @@ module Runner
     lines << %(claudeSkills = #{skills.inspect}) unless skills.empty?
     base = ENV["RQ_BOX_BASE_IMAGE"].to_s.strip
     lines << %(baseImage = #{base.inspect}) unless base.empty?
+    lines += ["", "[commands]",
+              "review = #{REVIEW_CMD.inspect}",
+              "ask = #{ASK_CMD.inspect}"]
     lines.join("\n") + "\n"
   end
 

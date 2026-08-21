@@ -93,6 +93,21 @@ check("bay.local.toml is this user's own", File.symlink?(File.join(dir, "bay.loc
 toml = File.read(File.join(dir, "bay.local.toml"))
 check("it names this user's alias", toml.include?('host = "rq-furkansahin"'), true)
 check("and carries the skills repo", toml.include?("furkansahin/skills"), true)
+
+# The commands are the dashboard's now, not the repo's. Without them bay falls
+# back to whatever the shared bay.toml defines -- which is how a review ran
+# unpinned, on the default model, with none of the harness prompt.
+check("it defines the review command", toml.include?("[commands]") && toml.include?("review ="), true)
+check("and the follow-up command", toml.include?("ask ="), true)
+check("the review is pinned to a model",
+      toml.include?("--model opus") && toml.include?("--effort max"), true)
+check("so is the follow-up",
+      toml.scan("--model opus").size == 2 && toml.scan("--effort max").size == 2, true)
+check("the review reads the harness prompt", toml.include?(".rq/review-prompt.md"), true)
+check("the follow-up reads its question", toml.include?(".rq/followup.txt"), true)
+check("both after --, so a leading dash is text",
+      toml.scan(/ -- \\"\$\(cat/).size, 2)
+check("and by a relative path, never /workspace", toml.include?("/workspace"), false)
 check("the key is written 0600",
       format("%o", File.stat(Runner.key_path("furkansahin")).mode & 0o777), "600")
 check("the key is the decrypted one",
