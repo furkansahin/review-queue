@@ -183,6 +183,18 @@ check("an unknown box is unknown", Runner.run(BOXROW, "status rq-nope")[:output]
 File.write(File.join(sd, "pid"), "999999\n")
 check("a dead run reports failed, not reviewing", Runner.run(BOXROW, "status rq-x-2")[:output], "failed")
 
+# ...but only the process that spawned it may judge that. web and worker are
+# separate containers with separate pid namespaces, so the web container sees
+# ESRCH for every healthy review. state_word, which the live log uses, must
+# therefore report what the run wrote and nothing more -- it called a running
+# review failed and ended the stream on it.
+check("the state word itself ignores the pid",
+      Runner.state_word("furkansahin", "rq-x-2"), "reviewing")
+File.write(File.join(sd, "state"), "done\n")
+check("and still reports a finished run", Runner.state_word("furkansahin", "rq-x-2"), "done")
+File.write(File.join(sd, "state"), "reviewing\n")
+File.write(File.join(sd, "pid"), "#{Process.pid}\n")
+
 puts "-- a review detaches and comes back --"
 File.delete("#{ROOT}/calls") if File.exist?("#{ROOT}/calls")
 res = Runner.run(BOXROW, "review ubicloud/ubicloud 6172 rq-ubicloud-6172")

@@ -514,23 +514,30 @@ module Runner
     false
   end
 
-  # The state word from disk. Takes a login rather than the whole row, so the
-  # live stream can ask without loading a dev box.
+  # The state word, exactly as the run itself wrote it. No liveness check: see
+  # read_state for why that cannot be done from just anywhere.
   def state_word(login, box)
     return nil unless box.to_s.match?(BOX_RE)
-    dir = state_dir(login, box)
-    state = File.read(File.join(dir, "state")).to_s.strip
-    # A detached run that died -- a redeploy, an OOM -- leaves the state word it
-    # last wrote. Saying so is better than reporting work that is not happening.
-    return "failed" if %w[building reviewing].include?(state) && !alive?(dir)
+    state = File.read(File.join(state_dir(login, box), "state")).to_s.strip
     state.empty? ? nil : state
   rescue Errno::ENOENT
     nil
   end
 
+  # The worker's view, which is the one that decides a job's fate.
+  #
+  # A detached run that died -- a redeploy, an OOM -- leaves behind the state
+  # word it last wrote, so the pid is checked as well. That check is only valid
+  # in the process that spawned it: web and worker are separate containers with
+  # separate pid namespaces, and the web container asking about the worker's
+  # child gets ESRCH for every healthy review. It did, and the live log called
+  # a running review failed.
   def read_state(box_row, box)
     return bad_box unless box.to_s.match?(BOX_RE)
-    {ok: true, output: state_word(box_row["login"], box) || "unknown", exit_code: 0}
+    dir = state_dir(box_row["login"], box)
+    state = state_word(box_row["login"], box)
+    state = "failed" if %w[building reviewing].include?(state) && !alive?(dir)
+    {ok: true, output: state || "unknown", exit_code: 0}
   end
 
   # The live log, as a path. With bay running here the review writes straight to
