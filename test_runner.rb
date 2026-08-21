@@ -33,6 +33,10 @@ File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
   exit 0
 SH
 File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
+# bay needs the compose plugin, and docker only finds one under DOCKER_CONFIG.
+FileUtils.mkdir_p(File.join(ROOT, "bin", "cli-plugins"))
+File.write(File.join(ROOT, "bin", "cli-plugins", "docker-compose"), "#!/bin/sh\nexit 0\n")
+File.chmod(0o755, File.join(ROOT, "bin", "cli-plugins", "docker-compose"))
 %w[bay.toml db.compose.yml post-create.sh].each { |f| File.write(File.join(ROOT, "config", f), "# #{f}\n") }
 prompt = File.join(ROOT, "prompt.md")
 File.write(prompt, "run the specs\n")
@@ -86,6 +90,13 @@ check("the key is the decrypted one",
       File.read(Runner.key_path("furkansahin")).start_with?("-----BEGIN"), true)
 sshcfg = File.read(Runner.ssh_config_path("furkansahin"))
 check("ssh points at the user's machine", sshcfg.include?("HostName 10.0.0.5"), true)
+# Every other doctor check passed without this, and the box build stopped at
+# "missing required tools" with nothing naming compose.
+compose_link = File.join(ROOT, "users", "furkansahin", "docker", "cli-plugins", "docker-compose")
+check("compose is linked where docker looks", File.symlink?(compose_link), true)
+check("and DOCKER_CONFIG points at that folder",
+      Runner.send(:env_for, BOXROW)["DOCKER_CONFIG"],
+      File.join(ROOT, "users", "furkansahin", "docker"))
 # bay runs ssh itself, with no -F, so the config must resolve from HOME.
 check("the alias is this user's alone", Runner.host_alias("furkansahin"), "rq-furkansahin")
 check("two users cannot share an alias",

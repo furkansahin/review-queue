@@ -29,6 +29,9 @@ module Runner
   ROOT = ENV.fetch("RQ_BAY_ROOT", "/app/rqbay")
   BIN = File.join(ROOT, "bin")
   BAY = File.join(BIN, "bay")
+  # docker looks for its plugins under $DOCKER_CONFIG/cli-plugins, not on PATH,
+  # so staging the binary is not enough on its own.
+  COMPOSE = File.join(BIN, "cli-plugins", "docker-compose")
   # The repo's own bay config folder (bay-ubicloud): compose files, post-create,
   # seed-account, nvim. Shared by every user, read only.
   SHARED_CONFIG = File.join(ROOT, "config")
@@ -38,12 +41,13 @@ module Runner
 
   BOX_RE = /\A[a-z0-9][a-z0-9-]{0,48}\z/
 
-  def enabled? = File.executable?(BAY) && File.directory?(SHARED_CONFIG)
+  def enabled? = File.executable?(BAY) && File.directory?(SHARED_CONFIG) && File.exist?(COMPOSE)
 
   # Why not, in a sentence, for the Dev box page to show.
   def unavailable_reason
     return nil if enabled?
     return "bay is not installed at #{BAY}" unless File.executable?(BAY)
+    return "the docker compose plugin is missing at #{COMPOSE}" unless File.exist?(COMPOSE)
     "the bay config folder is missing at #{SHARED_CONFIG}"
   end
 
@@ -92,7 +96,19 @@ module Runner
     write_file(ssh_config_path(login), ssh_config(box_row), 0o600)
     link_ssh_config!
     write_file(File.join(dir, "bay.local.toml"), local_toml(box_row), 0o600)
+    link_compose!(login)
     dir
+  end
+
+  # bay drives docker compose, and docker finds a plugin only under
+  # $DOCKER_CONFIG/cli-plugins. Without this the box build stops at
+  # "missing required tools" with every other check passing.
+  def link_compose!(login)
+    link = File.join(user_dir(login), "docker", "cli-plugins", "docker-compose")
+    return if File.symlink?(link) && File.readlink(link) == COMPOSE
+    FileUtils.mkdir_p(File.dirname(link))
+    FileUtils.rm_f(link)
+    FileUtils.ln_s(COMPOSE, link)
   end
 
   def ssh_config_path(login) = File.join(ssh_dir(login), "config")
