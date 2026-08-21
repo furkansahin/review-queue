@@ -101,6 +101,10 @@ check("it defines the review command", toml.include?("[commands]") && toml.inclu
 check("and the follow-up command", toml.include?("ask ="), true)
 check("the review is pinned to a model",
       toml.include?("--model opus") && toml.include?("--effort max"), true)
+# Without this the box refuses rspec, psql and ruby, and every finding comes
+# back read-only -- the harness cannot verify anything.
+check("both may actually run things",
+      toml.scan("--dangerously-skip-permissions").size, 2)
 check("so is the follow-up",
       toml.scan("--model opus").size == 2 && toml.scan("--effort max").size == 2, true)
 check("the review reads the harness prompt", toml.include?(".rq/review-prompt.md"), true)

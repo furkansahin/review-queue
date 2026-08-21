@@ -189,8 +189,19 @@ module Runner
   # Both read their text from a file in the worktree rather than a command
   # line: free text never gets parsed by a shell, and the path is relative
   # because bay starts a command in the box's own worktree.
-  REVIEW_CMD = 'claude -p --model opus --effort max -- "$(cat .rq/review-prompt.md)" 2>&1'
-  ASK_CMD = 'claude -p --continue --model opus --effort max -- "$(cat .rq/followup.txt)" 2>&1'
+  # --dangerously-skip-permissions, deliberately. A review runs unattended, and
+  # claude -p cannot ask for permission, so without this it is denied anything
+  # beyond read-only shell: the first real review reported "no test result in
+  # this review is verified" because rspec, psql and ruby were all refused.
+  # Running the specs is the whole point of the harness.
+  #
+  # What it is allowed to touch is a throwaway container on the user's own
+  # machine, holding a worktree of one pull request and its own database. It is
+  # torn down afterwards. The box's GitHub token is the real exposure, and it is
+  # the same token that developer already uses there.
+  PERMS = "--dangerously-skip-permissions"
+  REVIEW_CMD = %(claude -p --model opus --effort max #{PERMS} -- "$(cat .rq/review-prompt.md)" 2>&1)
+  ASK_CMD = %(claude -p --continue --model opus --effort max #{PERMS} -- "$(cat .rq/followup.txt)" 2>&1)
 
   def local_toml(box_row)
     lines = ["# Written by review-queue. Edits here are overwritten.",
