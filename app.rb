@@ -54,6 +54,26 @@ REGISTRY = ServiceRegistry.new(
 
 SNOOZE_SECONDS = ENV.fetch("RQ_SNOOZE_DAYS", "7").to_i * 86_400
 
+# Live log limits. Puma serves on RQ_PUMA_THREADS threads and a stream occupies
+# one for its whole life, so this must leave enough to serve pages. A stream
+# ends itself after RQ_STREAM_SECONDS; the browser's EventSource reconnects on
+# its own, which also frees the slot for anyone who was refused.
+MAX_STREAMS = ENV.fetch("RQ_MAX_STREAMS", "6").to_i
+STREAM_SECONDS = ENV.fetch("RQ_STREAM_SECONDS", "110").to_i
+STREAMS = {n: 0, lock: Mutex.new}
+
+def stream_slot
+  STREAMS[:lock].synchronize do
+    return false if STREAMS[:n] >= MAX_STREAMS
+    STREAMS[:n] += 1
+  end
+  true
+end
+
+def release_stream_slot
+  STREAMS[:lock].synchronize { STREAMS[:n] -= 1 if STREAMS[:n].positive? }
+end
+
 # How recently signed in a user has to be for the page to stop trying to fix a
 # 401 by signing them in again. Long enough to cover the redirect back from
 # GitHub, short enough that a genuinely expired token still refreshes itself.
@@ -89,6 +109,10 @@ class ReviewQueue < Roda
     cookie_options: {same_site: :lax, http_only: true, secure: ENV["RQ_INSECURE_COOKIES"] != "1"}
   # Default is :raise, which would surface a stack trace on a stale form.
   plugin :route_csrf, csrf_failure: :empty_403
+  # For the live log. A streaming response holds its Puma thread for as long as
+  # it runs, so /sessions/stream bounds both how many may run at once and how
+  # long each one lives.
+  plugin :streaming
   # Defence in depth: an unhandled exception should not reach a user as a bare
   # 500 with nothing to act on, and should leave something in the log.
   plugin :error_handler do |e|
@@ -431,6 +455,75 @@ class ReviewQueue < Roda
       # capped at 200 KB, so selecting the column and cutting it in Ruby shipped
       # the whole log across the network on every poll -- usually to answer
       # "nothing new yet".
+      # The live log, streamed.
+      #
+      # bay runs here now, so a review writes its output to a file on this host.
+      # The page reads that file as it grows, instead of waiting for the worker
+      # to notice (up to 3s) and then the browser to poll (2s). Text arrives as
+      # claude writes it.
+      #
+      # Bounded on both axes: MAX_STREAMS at once, and each ends after
+      # STREAM_SECONDS. EventSource reconnects on its own, so an ending stream
+      # is invisible to the reader and a refused browser simply retries.
+      r.get "stream" do
+        id = param_id(r.params["id"])
+        job = id && DB.row("SELECT box_name FROM review_jobs WHERE login = $1 AND id = $2",
+                           [current_login, id])
+        # 204 means "not available": the client falls back to polling rather
+        # than retrying a stream that will never exist. The body must be a
+        # string -- returning the status number makes Roda answer 500.
+        nothing = lambda do |code|
+          response.status = code
+          ""
+        end
+        next nothing.call(204) unless job && BOX.respond_to?(:log_path)
+        path = BOX.log_path(current_login, job["box_name"])
+        next nothing.call(204) unless path
+        # 503 means "busy, try again": every stream slot is taken.
+        next nothing.call(503) unless stream_slot
+
+        response["Content-Type"] = "text/event-stream"
+        response["Cache-Control"] = "no-store"
+        # nginx buffers a proxied response by default, which would hold every
+        # line back until the stream ended -- the opposite of the point.
+        response["X-Accel-Buffering"] = "no"
+        offset = r.params["offset"].to_s.to_i
+        offset = 0 if offset.negative?
+        box_name = job["box_name"]
+        login = current_login
+
+        stream(loop: false) do |out|
+          deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + STREAM_SECONDS
+          begin
+            File.open(path, "rb") do |f|
+              # An offset past the end means the log was replaced by a shorter
+              # one, so send it whole rather than sending nothing for ever.
+              offset = 0 if offset > f.size
+              f.seek(offset)
+              loop do
+                chunk = f.read
+                if chunk && !chunk.empty?
+                  offset += chunk.bytesize
+                  text = chunk.force_encoding(Encoding::UTF_8).scrub("")
+                  out << "event: log\ndata: #{JSON.generate(offset: offset, text: text)}\n\n"
+                end
+                state = BOX.state_word(login, box_name)
+                if %w[done failed].include?(state)
+                  out << "event: end\ndata: #{JSON.generate(state: state, offset: offset)}\n\n"
+                  break
+                end
+                break if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+                sleep 0.4
+              end
+            end
+          rescue IOError, Errno::EPIPE, Errno::ECONNRESET
+            # The reader navigated away. Not an error.
+          ensure
+            release_stream_slot
+          end
+        end
+      end
+
       r.get "tail" do
         response["Content-Type"] = "application/json"
         response["Cache-Control"] = "no-store"

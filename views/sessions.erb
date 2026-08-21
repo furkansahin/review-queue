@@ -324,6 +324,51 @@
       return pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
     }
 
+    // The review writes its log to a file on this server now, so the page can
+    // be sent each line as it is written instead of asking every two seconds.
+    // Polling stays as the fallback: an old browser, a proxy that will not do
+    // event streams, or a job whose log file is not on this host.
+    function append(text) {
+      var stick = atBottom();
+      pre.textContent += text;
+      if (stick) { pre.scrollTop = pre.scrollHeight; }
+    }
+
+    function live() {
+      if (!window.EventSource) { return tick(); }
+      var es = new EventSource("/sessions/stream?id=" + encodeURIComponent(id) + "&offset=" + offset);
+      var got = false;
+
+      es.addEventListener("log", function (e) {
+        got = true;
+        var d = JSON.parse(e.data);
+        offset = d.offset;
+        append(d.text);
+        if (status) { status.textContent = "live"; }
+      });
+
+      es.addEventListener("end", function (e) {
+        got = true;
+        var d = JSON.parse(e.data);
+        offset = d.offset;
+        stopped = true;
+        if (status) { status.textContent = d.state; }
+        es.close();
+      });
+
+      // EventSource reconnects on its own when the server closes a stream at
+      // its time limit, which is what should happen. It also fires onerror
+      // when the endpoint answered 204 or 503 -- there is no stream to have,
+      // so fall back rather than reconnecting for ever.
+      es.onerror = function () {
+        es.close();
+        if (stopped) { return; }
+        if (got) { setTimeout(live, 500); return; }
+        if (status) { status.textContent = "live (polling)"; }
+        tick();
+      };
+    }
+
     function tick() {
       if (stopped) return;
       fetch("/sessions/tail?id=" + encodeURIComponent(id) + "&offset=" + offset,
@@ -349,7 +394,7 @@
           setTimeout(tick, POLL * 3);
         });
     }
-    tick();
+    live();
   });
 })();
 </script>

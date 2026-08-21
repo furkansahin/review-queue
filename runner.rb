@@ -514,16 +514,32 @@ module Runner
     false
   end
 
-  def read_state(box_row, box)
-    return bad_box unless box.to_s.match?(BOX_RE)
-    dir = state_dir(box_row["login"], box)
+  # The state word from disk. Takes a login rather than the whole row, so the
+  # live stream can ask without loading a dev box.
+  def state_word(login, box)
+    return nil unless box.to_s.match?(BOX_RE)
+    dir = state_dir(login, box)
     state = File.read(File.join(dir, "state")).to_s.strip
     # A detached run that died -- a redeploy, an OOM -- leaves the state word it
     # last wrote. Saying so is better than reporting work that is not happening.
-    state = "failed" if %w[building reviewing].include?(state) && !alive?(dir)
-    {ok: true, output: state.empty? ? "unknown" : state, exit_code: 0}
+    return "failed" if %w[building reviewing].include?(state) && !alive?(dir)
+    state.empty? ? nil : state
   rescue Errno::ENOENT
-    {ok: true, output: "unknown", exit_code: 0}
+    nil
+  end
+
+  def read_state(box_row, box)
+    return bad_box unless box.to_s.match?(BOX_RE)
+    {ok: true, output: state_word(box_row["login"], box) || "unknown", exit_code: 0}
+  end
+
+  # The live log, as a path. With bay running here the review writes straight to
+  # this host, so a page can read it directly instead of waiting for the worker
+  # to notice and copy it into the database.
+  def log_path(login, box)
+    return nil unless box.to_s.match?(BOX_RE)
+    path = File.join(state_dir(login, box), "log")
+    File.exist?(path) ? path : nil
   end
 
   def read_log(box_row, box, name, limit)
