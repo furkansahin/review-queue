@@ -4,6 +4,8 @@
 # Each tick does two independent things, so a restart never loses work:
 #   1. start queued jobs   — bay up + bay run, against the user's own machine
 #   2. poll running jobs   — status, then result when it is finished
+#   3. adopt orphans       — a review this host started but lost, which is
+#                            still running in the box
 #
 # The review runs detached here, so neither step waits out the minutes a review
 # takes. bay drives the user's Docker over ssh; the containers are still theirs.
@@ -71,6 +73,25 @@ def poll_running
     end
 
     case state
+    when "orphaned"
+      # This host lost track of the run -- a deploy, a restart. The box kept
+      # going (a docker exec outlives its client), so take it back rather than
+      # calling a review failed that is still being written.
+      taken = BOX.adopt(box, job["box_name"])
+      unless taken[:ok]
+        log("could not adopt #{job["box_name"]}: #{taken[:error]}")
+        Jobs.finish(job["id"], "failed", error: "lost the run and could not reach the box") if Jobs.stale?(job)
+        next
+      end
+      if taken[:finished]
+        Jobs.finish(job["id"], taken[:exit_code].to_i.zero? ? "done" : "failed",
+          output: taken[:output],
+          error: taken[:exit_code].to_i.zero? ? nil : "the run failed on the dev box")
+        log("adopted #{job["box_name"]} and it was finished: #{taken[:exit_code]}")
+      else
+        Jobs.progress(job["id"], taken[:output], "reviewing")
+        log("adopted #{job["box_name"]}, still running in the box")
+      end
     when "done", "failed"
       # A failed build leaves no review text, so fall back to bay's log for the
       # error message only -- it is never shown as review output.

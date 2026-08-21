@@ -200,8 +200,30 @@ module Runner
   # torn down afterwards. The box's GitHub token is the real exposure, and it is
   # the same token that developer already uses there.
   PERMS = "--dangerously-skip-permissions"
-  REVIEW_CMD = %(claude -p --model opus --effort max #{PERMS} -- "$(cat .rq/review-prompt.md)" 2>&1)
-  ASK_CMD = %(claude -p --continue --model opus --effort max #{PERMS} -- "$(cat .rq/followup.txt)" 2>&1)
+
+  # Every run also writes its output to a file inside the box, and stamps the
+  # exit code at the end.
+  #
+  # Measured: a command started with docker exec keeps running when its client
+  # dies -- killed the client, the process carried on writing. So a deploy here
+  # never killed a review, it only stopped anyone listening to it. The work went
+  # on inside the box while the job was marked failed.
+  #
+  # This file is what makes that recoverable: the box holds the output, and the
+  # stamp says whether the run finished and how. tee keeps the live stream
+  # working exactly as before -- the same bytes still come back over bay.
+  BOX_LOG = ".rq/run.log"
+  EXIT_MARK = "__RQ_EXIT:"
+
+  def self.wrapped(command, truncate:)
+    reset = truncate ? " && : > #{BOX_LOG}" : ""
+    %(mkdir -p .rq#{reset} && { #{command}; echo "#{EXIT_MARK}$?"; } 2>&1 | tee -a #{BOX_LOG})
+  end
+
+  REVIEW_CMD = wrapped(%(claude -p --model opus --effort max #{PERMS} -- "$(cat .rq/review-prompt.md)"),
+    truncate: true)
+  ASK_CMD = wrapped(%(claude -p --continue --model opus --effort max #{PERMS} -- "$(cat .rq/followup.txt)"),
+    truncate: false)
 
   def local_toml(box_row)
     lines = ["# Written by review-queue. Edits here are overwritten.",
@@ -448,6 +470,35 @@ module Runner
     {ok: false, output: "", exit_code: nil, error: e.message}
   end
 
+  # Takes back a run this host lost track of -- a deploy, a restart, an OOM.
+  # The box kept writing, so its copy is the truth: pull it, and read the stamp
+  # at the end to know whether it is finished.
+  def adopt(box_row, box)
+    return bad_box unless box.to_s.match?(BOX_RE)
+    path = "#{worktree(box_row, box)}/#{BOX_LOG}"
+    res = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
+                   "cat #{DevBox.sh_quote(path)} 2>/dev/null || true"],
+                  env_for(box_row), timeout: 60)
+    return res.merge(finished: false) unless res[:ok]
+
+    text = res[:output].to_s
+    mark = text.rindex(EXIT_MARK)
+    finished = !mark.nil?
+    code = finished ? text[(mark + EXIT_MARK.length)..].to_i : nil
+    body = finished ? text[0...mark] : text
+
+    # Keep this host in step, so the page and the worker read the same thing
+    # and the live log carries on from where it stopped.
+    dir = state_dir(box_row["login"], box)
+    FileUtils.mkdir_p(dir)
+    File.write(File.join(dir, "log"), body)
+    File.write(File.join(dir, "state"),
+      finished ? (code.to_i.zero? ? "done\n" : "failed\n") : "reviewing\n")
+    {ok: true, finished: finished, exit_code: code, output: body}
+  rescue Error, Crypto::Error => e
+    {ok: false, output: "", exit_code: nil, error: e.message, finished: false}
+  end
+
   # --- helpers ---------------------------------------------------------------
   def worktree(box_row, box)
     repo = (box_row["repo_path"] || "ubicloud").to_s
@@ -536,7 +587,9 @@ module Runner
     return bad_box unless box.to_s.match?(BOX_RE)
     dir = state_dir(box_row["login"], box)
     state = state_word(box_row["login"], box)
-    state = "failed" if %w[building reviewing].include?(state) && !alive?(dir)
+    # Not "failed": the run itself never said so, and it may well still be
+    # going inside the box. The worker adopts it rather than giving up on it.
+    state = "orphaned" if %w[building reviewing].include?(state) && !alive?(dir)
     {ok: true, output: state || "unknown", exit_code: 0}
   end
 

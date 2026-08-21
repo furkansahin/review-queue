@@ -181,7 +181,7 @@ check("an unknown box is unknown", Runner.run(BOXROW, "status rq-nope")[:output]
 # A detached run that died must not still claim to be working: the worker would
 # poll it until the staleness timeout instead of failing it now.
 File.write(File.join(sd, "pid"), "999999\n")
-check("a dead run reports failed, not reviewing", Runner.run(BOXROW, "status rq-x-2")[:output], "failed")
+check("a dead run no longer reports reviewing", Runner.run(BOXROW, "status rq-x-2")[:output] != "reviewing", true)
 
 # ...but only the process that spawned it may judge that. web and worker are
 # separate containers with separate pid namespaces, so the web container sees
@@ -190,6 +190,10 @@ check("a dead run reports failed, not reviewing", Runner.run(BOXROW, "status rq-
 # review failed and ended the stream on it.
 check("the state word itself ignores the pid",
       Runner.state_word("furkansahin", "rq-x-2"), "reviewing")
+# A run this host lost is not a failed run. The box carries on -- a docker exec
+# outlives its client -- so the worker must be told to take it back.
+check("a vanished run reads as orphaned, not failed",
+      Runner.run(BOXROW, "status rq-x-2")[:output], "orphaned")
 File.write(File.join(sd, "state"), "done\n")
 check("and still reports a finished run", Runner.state_word("furkansahin", "rq-x-2"), "done")
 File.write(File.join(sd, "state"), "reviewing\n")
@@ -232,6 +236,46 @@ check("without ever running the review",
 File.rename(File.join(ROOT, "bin", "ssh.off"), File.join(ROOT, "bin", "ssh"))
 check("a bad repo never reaches bay",
       Runner.run(BOXROW, "review notarepo 1 rq-x-1")[:ok], false)
+
+puts "-- a lost run is taken back from the box --"
+# The fake ssh answers `cat` with whatever is queued for it, so adopt sees the
+# box's own copy of the output.
+File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
+  #!/usr/bin/env bash
+  cat "#{ROOT}/boxlog"
+  exit 0
+SH
+File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
+
+File.write("#{ROOT}/boxlog", "half a review so far\n")
+a = Runner.adopt(BOXROW, "rq-x-9")
+check("an unfinished run is not called finished", a[:finished], false)
+check("but its output is brought over", a[:output], "half a review so far\n")
+check("and this host says it is still going",
+      Runner.state_word("furkansahin", "rq-x-9"), "reviewing")
+
+File.write("#{ROOT}/boxlog", "the whole review\n#{Runner::EXIT_MARK}0\n")
+a = Runner.adopt(BOXROW, "rq-x-9")
+check("a finished run is recognised", a[:finished], true)
+check("with its exit code", a[:exit_code], 0)
+check("the stamp is not part of the review", a[:output].include?(Runner::EXIT_MARK), false)
+check("and this host agrees it is done",
+      Runner.state_word("furkansahin", "rq-x-9"), "done")
+
+File.write("#{ROOT}/boxlog", "it went wrong\n#{Runner::EXIT_MARK}1\n")
+a = Runner.adopt(BOXROW, "rq-x-9")
+check("a non-zero exit is a failure", Runner.state_word("furkansahin", "rq-x-9"), "failed")
+check("and the output is still kept", a[:output].include?("it went wrong"), true)
+
+# Restore the recording ssh for the checks below.
+File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
+  #!/usr/bin/env bash
+  args=("$@"); remote="${args[${#args[@]}-1]}"
+  echo "$remote" >> "#{ROOT}/ssh.cmds"
+  cat >> "#{ROOT}/ssh.stdin"
+  exit 0
+SH
+File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
 
 puts "-- a follow-up needs a finished review --"
 STDIN_TEXT = "why is finding 1 exploitable?"
