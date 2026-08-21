@@ -81,15 +81,21 @@ module Runner
     FileUtils.mkdir_p([dir, ssh_dir(login), File.join(user_dir(login), "state")])
     File.chmod(0o700, ssh_dir(login))
 
-    # The shared config is symlinked, not copied: it is the repo's tooling and
-    # it is identical for everyone. Only bay.local.toml is this user's.
+    # Real copies, not symlinks. bay rsyncs part of this folder into the box
+    # (box.sync), and rsync will not replace a directory on the far side with a
+    # symlink -- it stops with "could not make way for new symlink: bin" and the
+    # box never builds. Copying costs a few dozen small files per user.
+    #
+    # Only bay.local.toml is this user's own, so it is never overwritten here.
     Dir.children(SHARED_CONFIG).each do |entry|
       next if entry == "bay.local.toml" || entry == "cache"
-      link = File.join(dir, entry)
-      target = File.join(SHARED_CONFIG, entry)
-      next if File.symlink?(link) && File.readlink(link) == target
-      FileUtils.rm_rf(link)
-      FileUtils.ln_s(target, link)
+      src = File.join(SHARED_CONFIG, entry)
+      dst = File.join(dir, entry)
+      # A symlink means this user was prepared by an older version. Replace it.
+      stale = File.symlink?(dst) || !File.exist?(dst) || File.mtime(src) > File.mtime(dst)
+      next unless stale
+      FileUtils.rm_rf(dst)
+      FileUtils.cp_r(src, dst, remove_destination: true)
     end
 
     write_private(key_path(login), Crypto.decrypt(box_row["private_key_enc"]))

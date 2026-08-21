@@ -38,6 +38,8 @@ FileUtils.mkdir_p(File.join(ROOT, "bin", "cli-plugins"))
 File.write(File.join(ROOT, "bin", "cli-plugins", "docker-compose"), "#!/bin/sh\nexit 0\n")
 File.chmod(0o755, File.join(ROOT, "bin", "cli-plugins", "docker-compose"))
 %w[bay.toml db.compose.yml post-create.sh].each { |f| File.write(File.join(ROOT, "config", f), "# #{f}\n") }
+FileUtils.mkdir_p(File.join(ROOT, "config", "bin"))
+File.write(File.join(ROOT, "config", "bin", "helper"), "#!/bin/sh\n")
 prompt = File.join(ROOT, "prompt.md")
 File.write(prompt, "run the specs\n")
 ENV["RQ_REVIEW_PROMPT"] = prompt
@@ -79,7 +81,14 @@ check("nor with a slash",
 puts "-- prepare! writes what bay needs --"
 Runner.prepare!(BOXROW)
 dir = Runner.config_dir("furkansahin")
-check("the shared config is linked in", File.symlink?(File.join(dir, "db.compose.yml")), true)
+# Real copies: bay rsyncs part of this folder into the box, and rsync refuses
+# to replace a directory there with a symlink.
+check("the shared config is copied in", File.exist?(File.join(dir, "db.compose.yml")), true)
+check("as a real file, not a symlink", File.symlink?(File.join(dir, "db.compose.yml")), false)
+check("with the same contents", File.read(File.join(dir, "db.compose.yml")),
+      File.read(File.join(ROOT, "config", "db.compose.yml")))
+check("directories are copied as directories, not links",
+      File.directory?(File.join(dir, "bin")) && !File.symlink?(File.join(dir, "bin")), true)
 check("bay.local.toml is this user's own", File.symlink?(File.join(dir, "bay.local.toml")), false)
 toml = File.read(File.join(dir, "bay.local.toml"))
 check("it names this user's alias", toml.include?('host = "rq-furkansahin"'), true)
