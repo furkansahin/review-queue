@@ -130,6 +130,16 @@ check("github token is passed", seen.include?("GITHUB_TOKEN=github_pat_TEST"), t
 check("docker is pointed at the machine", seen.include?("DOCKER_HOST=ssh://rq-furkansahin"), true)
 check("BAY_HOME is this user's", seen.include?("BAY_HOME=#{ROOT}/users/furkansahin/bay"), true)
 
+# The box reads $BAY_HOME/env, not bay's process environment. Without this file
+# the box builds and then gh says "please run gh auth login".
+envfile = File.join(Runner.bay_home("furkansahin"), "env")
+body = File.read(envfile)
+check("the env file bay injects exists", File.exist?(envfile), true)
+check("it carries the claude token", body.include?("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTTOKEN"), true)
+check("and the github token, under both names",
+      body.include?("GITHUB_TOKEN=github_pat_TEST") && body.include?("GH_TOKEN=github_pat_TEST"), true)
+check("readable only by this user", format("%o", File.stat(envfile).mode & 0o777), "600")
+
 puts "-- the verbs --"
 check("ping proves the chain", Runner.run(BOXROW, "ping")[:ok], true)
 boxes = Runner.box_list(BOXROW)

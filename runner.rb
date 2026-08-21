@@ -102,8 +102,36 @@ module Runner
     write_file(ssh_config_path(login), ssh_config(box_row), 0o600)
     link_ssh_config!
     write_file(File.join(dir, "bay.local.toml"), local_toml(box_row), 0o600)
+    write_env_file!(box_row)
     link_compose!(login)
     dir
+  end
+
+  # bay injects $BAY_HOME/env into the box -- that is where a developer's own
+  # tokens live in ~/.bay/env, and it is the only place bay looks. Passing them
+  # in this process's environment does nothing: a box built that way came up
+  # with gh saying "please run gh auth login".
+  #
+  # So the tokens are written out, for this user alone, 0600, inside the mount.
+  # That is the trade this migration made explicit: they are on this host now.
+  def write_env_file!(box_row)
+    lines = ["# Written by review-queue from the dashboard's stored tokens."]
+    {"CLAUDE_CODE_OAUTH_TOKEN" => "claude_token_enc",
+     "GITHUB_TOKEN" => "github_token_enc",
+     # gh reads GH_TOKEN first and GITHUB_TOKEN second, but only the latter is
+     # what bay's own docs name, so write both from the one stored value.
+     "GH_TOKEN" => "github_token_enc"}.each do |key, column|
+      value = decrypt_or_nil(box_row[column])
+      lines << "#{key}=#{value}" if value && !value.empty?
+    end
+    write_file(File.join(bay_home(box_row["login"]), "env"), lines.join("\n") + "\n", 0o600)
+  end
+
+  def decrypt_or_nil(stored)
+    return nil if stored.to_s.empty?
+    Crypto.decrypt(stored)
+  rescue Crypto::Error
+    nil
   end
 
   # bay drives docker compose, and docker finds a plugin only under
@@ -193,16 +221,10 @@ module Runner
       # GIT_SSH_COMMAND as well costs nothing and is explicit for git.
       "GIT_SSH_COMMAND" => ssh
     }
-    %w[claude_token_enc github_token_enc].each do |column|
-      value = box_row[column].to_s
-      next if value.empty?
-      key = column == "claude_token_enc" ? "CLAUDE_CODE_OAUTH_TOKEN" : "GITHUB_TOKEN"
-      env[key] = begin
-        Crypto.decrypt(value)
-      rescue Crypto::Error
-        nil
-      end
-    end
+    # Also in this process's environment, for bay's own git over https. The box
+    # gets them from $BAY_HOME/env instead -- see write_env_file!.
+    env["CLAUDE_CODE_OAUTH_TOKEN"] = decrypt_or_nil(box_row["claude_token_enc"])
+    env["GITHUB_TOKEN"] = decrypt_or_nil(box_row["github_token_enc"])
     env.compact
   end
 
