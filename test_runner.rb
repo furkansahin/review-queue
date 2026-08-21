@@ -190,6 +190,30 @@ puts "        (waited #{(Time.now - (deadline - 60)).round(1)}s)" if state_now !
 check("it reaches done", state_now, "done")
 check("bay was asked to bring the box up on the pr", calls.include?("up rq-ubicloud-6172 --pr 6172"), true)
 check("and then to run the review", calls.include?("run rq-ubicloud-6172 review"), true)
+
+# The prompt has to reach the worktree, or the review runs with no
+# instructions and claude answers "Input must be provided". This is checked by
+# what landed, not by how the script reads: the first version invoked ssh
+# through one variable holding "ssh -F <path>", which bash took as a single
+# command name, and `|| true` hid the failure.
+cmds = File.exist?("#{ROOT}/ssh.cmds") ? File.read("#{ROOT}/ssh.cmds") : ""
+check("the prompt was placed on the machine",
+      cmds.include?("ubicloud/.worktrees/rq-ubicloud-6172/.rq/review-prompt.md"), true)
+check("with the prompt's own text",
+      File.read("#{ROOT}/ssh.stdin").include?("run the specs"), true)
+
+# And when it cannot be placed, the review must fail rather than run blind.
+File.rename(File.join(ROOT, "bin", "ssh"), File.join(ROOT, "bin", "ssh.off"))
+res = Runner.run(BOXROW, "review ubicloud/ubicloud 6173 rq-ubicloud-6173")
+d6173 = Runner.state_dir("furkansahin", "rq-ubicloud-6173")
+deadline = Time.now + 60
+sleep 0.1 until File.read(File.join(d6173, "state")).strip != "building" || Time.now > deadline
+check("a prompt that cannot be placed fails the review",
+      Runner.run(BOXROW, "status rq-ubicloud-6173")[:output], "failed")
+check("and says why", File.read(File.join(d6173, "build.log")).include?("could not place the review prompt"), true)
+check("without ever running the review",
+      calls.include?("run rq-ubicloud-6173 review"), false)
+File.rename(File.join(ROOT, "bin", "ssh.off"), File.join(ROOT, "bin", "ssh"))
 check("a bad repo never reaches bay",
       Runner.run(BOXROW, "review notarepo 1 rq-x-1")[:ok], false)
 

@@ -378,6 +378,7 @@ module Runner
   # the same job.
   def review(box_row, repo:, pr_number:, box:)
     DevBox.validate!(repo: repo, pr_number: pr_number, box: box)
+    raise Error, "the review prompt is missing at #{PROMPT}" unless File.size?(PROMPT)
     login = box_row["login"]
     dir = state_dir(login, box)
     state = File.join(dir, "state")
@@ -444,12 +445,22 @@ module Runner
 
   # The review instructions travel with the app, so a box never has a stale
   # copy. They are placed after `bay up`, which is what creates the worktree.
+  #
+  # ssh is invoked as separate words. It used to be one "$SSH" variable holding
+  # "ssh -F <path>", which bash reads as a single command name -- the copy never
+  # ran, and `|| true` swallowed it, so the review started with no instructions
+  # and claude answered "Input must be provided". A missing prompt fails the
+  # review now, loudly, which is what the wrapper already did.
   def place_prompt(box_row, box)
-    return "" unless File.exist?(PROMPT)
     path = "#{worktree(box_row, box)}/.rq/review-prompt.md"
-    quoted = DevBox.sh_quote(path)
-    "\"$SSH\" #{host_alias(box_row["login"])} " \
-      "#{DevBox.sh_quote("mkdir -p #{File.dirname(path)} && cat > #{quoted}")} < \"$PROMPT_FILE\" || true"
+    remote = DevBox.sh_quote("mkdir -p #{DevBox.sh_quote(File.dirname(path))} && cat > #{DevBox.sh_quote(path)}")
+    <<~SH.strip
+      if ! ssh -F "$SSH_CFG" #{host_alias(box_row["login"])} #{remote} < "$PROMPT_FILE"; then
+        echo "could not place the review prompt on the machine" >> "$DIR/build.log"
+        echo failed > "$DIR/state"
+        exit 1
+      fi
+    SH
   end
 
   # A small file onto the machine, over the same ssh bay uses. The path is
@@ -463,7 +474,7 @@ module Runner
 
   def detach(box_row, dir, script)
     env = env_for(box_row).merge("DIR" => dir, "BAY" => BAY,
-      "SSH" => "ssh -F #{ssh_config_path(box_row["login"])}", "PROMPT_FILE" => PROMPT)
+      "SSH_CFG" => ssh_config_path(box_row["login"]), "PROMPT_FILE" => PROMPT)
     pid = Process.spawn(env, "bash", "-c", script,
                         pgroup: true, unsetenv_others: true,
                         in: "/dev/null", out: File.join(dir, "spawn.log"),
