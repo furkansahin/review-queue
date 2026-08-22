@@ -61,7 +61,7 @@ dir = Runner.state_dir("furkansahin", "rq-live-42")
 FileUtils.mkdir_p(dir)
 File.write(File.join(dir, "state"), "reviewing\n")
 File.write(File.join(dir, "pid"), "#{Process.pid}\n")
-File.write(File.join(dir, "log"), "first line\n")
+File.write(File.join(dir, "log"), %({"type":"system","subtype":"init","model":"first line"}\n))
 
 get "/auth/start"
 st = last_response.location[/state=([^&]+)/, 1]
@@ -76,13 +76,17 @@ body = last_response.body
 check("it answers as an event stream", last_response.headers["Content-Type"], "text/event-stream")
 check("nginx is told not to buffer it", last_response.headers["X-Accel-Buffering"], "no")
 check("the log arrives", body.include?("first line"), true)
+# The browser is sent readable text, never claude's raw events.
+check("rendered, not raw json", body.include?('"subtype"'), false)
 check("as a log event", body.include?("event: log"), true)
 check("and it says when the run ended", body.include?("event: end"), true)
 check("with the final state", body.include?('"state":"done"'), true)
 
 puts "-- an offset only sends what is new --"
-File.write(File.join(dir, "log"), "first line\nsecond line\n")
-get "/sessions/stream?id=#{JOB_ID}&offset=11"
+File.write(File.join(dir, "log"),
+  %({"type":"system","subtype":"init","model":"first line"}\n) +
+  %({"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"second line"}}]}}\n))
+get "/sessions/stream?id=#{JOB_ID}&offset=#{%({"type":"system","subtype":"init","model":"first line"}\n).bytesize}"
 check("the part already seen is not resent", last_response.body.include?("first line"), false)
 check("the new part is", last_response.body.include?("second line"), true)
 

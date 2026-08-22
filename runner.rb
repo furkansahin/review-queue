@@ -4,6 +4,7 @@ require "json"
 require_relative "crypto"
 require_relative "devbox"
 require_relative "queue_service"
+require_relative "stream_render"
 
 # Drives bay from this host instead of from the user's box.
 #
@@ -201,6 +202,11 @@ module Runner
   # torn down afterwards. The box's GitHub token is the real exposure, and it is
   # the same token that developer already uses there.
   PERMS = "--dangerously-skip-permissions"
+  # Without this claude prints its whole answer at the end and nothing before,
+  # so a twenty minute review showed nothing at all while it ran. stream-json
+  # emits an event per step; StreamRender turns those into the trace the page
+  # shows. --verbose is what makes it emit them one at a time.
+  FORMAT = "--output-format stream-json --verbose"
 
   # Every run also writes its output to a file inside the box, and stamps the
   # exit code at the end.
@@ -221,9 +227,11 @@ module Runner
     %(mkdir -p .rq#{reset} && { #{command}; echo "#{EXIT_MARK}$?"; } 2>&1 | tee -a #{BOX_LOG})
   end
 
-  REVIEW_CMD = wrapped(%(claude -p --model opus --effort max #{PERMS} -- "$(cat .rq/review-prompt.md)"),
+  REVIEW_CMD = wrapped(
+    %(claude -p --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/review-prompt.md)"),
     truncate: true)
-  ASK_CMD = wrapped(%(claude -p --continue --model opus --effort max #{PERMS} -- "$(cat .rq/followup.txt)"),
+  ASK_CMD = wrapped(
+    %(claude -p --continue --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/followup.txt)"),
     truncate: false)
 
   def local_toml(box_row)
@@ -487,13 +495,16 @@ module Runner
     mark = text.rindex(EXIT_MARK)
     finished = !mark.nil?
     code = finished ? text[(mark + EXIT_MARK.length)..].to_i : nil
-    body = finished ? text[0...mark] : text
+    raw = finished ? text[0...mark] : text
+    body = StreamRender.all(raw)
 
     # Keep this host in step, so the page and the worker read the same thing
     # and the live log carries on from where it stopped.
     dir = state_dir(box_row["login"], box)
     FileUtils.mkdir_p(dir)
-    File.write(File.join(dir, "log"), body)
+    # The events, not the rendering: this file is the raw record, and the live
+    # stream renders it as it reads.
+    File.write(File.join(dir, "log"), raw)
     File.write(File.join(dir, "state"),
       finished ? (code.to_i.zero? ? "done\n" : "failed\n") : "reviewing\n")
     {ok: true, finished: finished, exit_code: code, output: body}
@@ -665,6 +676,9 @@ module Runner
     return bad_box unless box.to_s.match?(BOX_RE)
     path = File.join(state_dir(box_row["login"], box), name)
     body = File.exist?(path) ? tail(path, limit) : ""
+    # The log holds claude's raw events. Rendering happens on the way out, so
+    # the stored events stay whole and can be read differently later.
+    body = StreamRender.all(body) if name == "log"
     {ok: true, output: body, exit_code: 0}
   end
 

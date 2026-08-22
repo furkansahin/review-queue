@@ -14,6 +14,7 @@ if REVIEWS_ENABLED
   require_relative "jobs"
   require_relative "devbox"
 require_relative "runner"
+require_relative "stream_render"
 
 # bay runs here now. RQ_TRANSPORT=ssh falls back to the wrapper on the box,
 # which is what every box ran before this change.
@@ -494,6 +495,10 @@ class ReviewQueue < Roda
 
         stream(loop: false) do |out|
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + STREAM_SECONDS
+          # The log holds claude's raw events, one JSON object per line. The
+          # cursor renders whole lines and keeps a partial one, because the
+          # file is read wherever it happens to have got to.
+          cursor = StreamRender::Cursor.new
           begin
             File.open(path, "rb") do |f|
               # An offset past the end means the log was replaced by a shorter
@@ -504,11 +509,16 @@ class ReviewQueue < Roda
                 chunk = f.read
                 if chunk && !chunk.empty?
                   offset += chunk.bytesize
-                  text = chunk.force_encoding(Encoding::UTF_8).scrub("")
-                  out << "event: log\ndata: #{JSON.generate(offset: offset, text: text)}\n\n"
+                  raw = chunk.force_encoding(Encoding::UTF_8).scrub("")
+                  text = cursor.push(raw)
+                  unless text.empty?
+                    out << "event: log\ndata: #{JSON.generate(offset: offset, text: text)}\n\n"
+                  end
                 end
                 state = BOX.state_word(login, box_name)
                 if %w[done failed].include?(state)
+                  rest = cursor.finish
+                  out << "event: log\ndata: #{JSON.generate(offset: offset, text: rest)}\n\n" unless rest.empty?
                   out << "event: end\ndata: #{JSON.generate(state: state, offset: offset)}\n\n"
                   break
                 end
