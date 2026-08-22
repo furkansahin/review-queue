@@ -260,6 +260,16 @@ check("and only when it has diverged",
 check("never while somebody has it checked out", sent.include?("worktreepath"), true)
 check("it moves the branch to the pull request head",
       sent.include?("git update-ref refs/heads/gcp-service-account-mode FETCH_HEAD"), true)
+# A branch lives in one worktree at a time. A previous review leaves the base
+# clone sitting on the pull request's branch, and then the review's own
+# worktree cannot have it: "refusing to fetch into branch ... checked out at
+# /workspace".
+check("it frees the branch from the base clone",
+      sent.include?("git symbolic-ref --quiet --short HEAD") && sent.include?("git checkout --quiet"), true)
+check("onto whatever the base branch is, not a guess",
+      sent.include?("refs/remotes/origin/HEAD"), true)
+check("and gives up rather than forcing it",
+      sent.include?("would not move"), true)
 
 # A branch name reaches a shell on the box, so it is checked rather than trusted.
 ["a;id", "../../etc", "a b", "$(id)", "", "a..b"].each do |bad|

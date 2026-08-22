@@ -529,6 +529,22 @@ module Runner
     path = (box_row["repo_path"] || "ubicloud").to_s
     script = <<~SH
       cd #{DevBox.sh_quote(path)} || exit 0
+
+      # A branch lives in one worktree at a time. If the base clone is sitting
+      # on the very branch this review needs, the review's own worktree cannot
+      # have it, and bay stops with:
+      #   refusing to fetch into branch '...' checked out at '/workspace'
+      # A previous review leaves it there, so put the base clone back on its
+      # base branch first. git carries uncommitted work across, and if it
+      # cannot, this gives up rather than forcing anything.
+      if [ "$(git symbolic-ref --quiet --short HEAD)" = #{DevBox.sh_quote(ref)} ]; then
+        base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+        base=${base#origin/}
+        git checkout --quiet "${base:-main}" 2>/dev/null \
+          && echo "moved the base clone off #{ref}" \
+          || echo "the base clone is on #{ref} and would not move"
+      fi
+
       git rev-parse --verify --quiet refs/heads/#{ref} >/dev/null || exit 0
       git fetch -q origin refs/pull/#{pr_number}/head || exit 0
       git merge-base --is-ancestor refs/heads/#{ref} FETCH_HEAD && exit 0
