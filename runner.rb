@@ -3,6 +3,7 @@ require "fileutils"
 require "json"
 require_relative "crypto"
 require_relative "devbox"
+require_relative "queue_service"
 
 # Drives bay from this host instead of from the user's box.
 #
@@ -424,6 +425,7 @@ module Runner
     File.write(File.join(dir, "build.log"), "")
 
     prepare!(box_row)
+    align_pr_branch(box_row, repo, pr_number)
     detach(box_row, dir, <<~SH)
       set -o pipefail
       "$BAY" up #{box} --pr #{pr_number} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
@@ -497,6 +499,47 @@ module Runner
     {ok: true, finished: finished, exit_code: code, output: body}
   rescue Error, Crypto::Error => e
     {ok: false, output: "", exit_code: nil, error: e.message, finished: false}
+  end
+
+  # bay checks a pull request out with `gh pr checkout`, which updates a local
+  # branch named after the pull request's own head branch. A previous review of
+  # the same pull request leaves that branch behind, so once the author force
+  # pushes, the update is no longer a fast forward and bay up stops dead:
+  #
+  #   ! [rejected] refs/pull/5886/head -> gcp-service-account-mode (non-fast-forward)
+  #
+  # Move the branch to where the pull request is now, before bay looks at it.
+  # Only when it has actually diverged, and never when it is checked out
+  # somewhere -- a branch someone is working on is left alone, and bay reports
+  # the real error rather than this quietly rewriting it.
+  #
+  # Best effort on purpose: a review whose branch needs no repair must not fail
+  # because GitHub was slow. If the repair was needed and did not happen, bay
+  # says so in its own words a moment later.
+  def align_pr_branch(box_row, repo, pr_number)
+    token = decrypt_or_nil(box_row["github_token_enc"])
+    return unless token
+    pull = GitHubClient.new(token).try("/repos/#{repo}/pulls/#{pr_number}")
+    ref = pull && pull.dig("head", "ref").to_s
+    # A branch name reaches a shell on the box, so it is checked, not quoted
+    # away: git's own rules are narrower than this and anything else is a sign
+    # something is wrong.
+    return if ref.to_s.empty? || !ref.match?(%r{\A[A-Za-z0-9._/-]{1,200}\z}) || ref.include?("..")
+
+    path = (box_row["repo_path"] || "ubicloud").to_s
+    script = <<~SH
+      cd #{DevBox.sh_quote(path)} || exit 0
+      git rev-parse --verify --quiet refs/heads/#{ref} >/dev/null || exit 0
+      git fetch -q origin refs/pull/#{pr_number}/head || exit 0
+      git merge-base --is-ancestor refs/heads/#{ref} FETCH_HEAD && exit 0
+      [ -n "$(git for-each-ref --format='%(worktreepath)' refs/heads/#{ref})" ] && exit 0
+      git update-ref refs/heads/#{ref} FETCH_HEAD
+      echo "moved #{ref} to the pull request head"
+    SH
+    capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), script],
+            env_for(box_row), timeout: 60)
+  rescue StandardError
+    nil
   end
 
   # --- helpers ---------------------------------------------------------------

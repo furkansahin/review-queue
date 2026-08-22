@@ -237,6 +237,42 @@ File.rename(File.join(ROOT, "bin", "ssh.off"), File.join(ROOT, "bin", "ssh"))
 check("a bad repo never reaches bay",
       Runner.run(BOXROW, "review notarepo 1 rq-x-1")[:ok], false)
 
+puts "-- a stale branch from a previous review is realigned --"
+# gh pr checkout updates a branch named after the pull request's head. A second
+# review of the same pull request, after a force push, is rejected as
+# non-fast-forward and bay up dies. The repair runs before bay is called.
+File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
+  #!/usr/bin/env bash
+  args=("$@"); printf '%s' "${args[${#args[@]}-1]}" >> "#{ROOT}/align.sh"
+  exit 0
+SH
+File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
+GitHubClient.class_eval { define_method(:try) { |_p| {"head" => {"ref" => "gcp-service-account-mode"}} } }
+
+File.delete("#{ROOT}/align.sh") if File.exist?("#{ROOT}/align.sh")
+Runner.align_pr_branch(BOXROW, "ubicloud/ubicloud", 5886)
+sent = File.read("#{ROOT}/align.sh")
+check("it works in the box's checkout", sent.include?("cd 'ubicloud'"), true)
+check("only when the branch is actually there",
+      sent.include?("git rev-parse --verify --quiet refs/heads/gcp-service-account-mode"), true)
+check("and only when it has diverged",
+      sent.include?("git merge-base --is-ancestor refs/heads/gcp-service-account-mode FETCH_HEAD && exit 0"), true)
+check("never while somebody has it checked out", sent.include?("worktreepath"), true)
+check("it moves the branch to the pull request head",
+      sent.include?("git update-ref refs/heads/gcp-service-account-mode FETCH_HEAD"), true)
+
+# A branch name reaches a shell on the box, so it is checked rather than trusted.
+["a;id", "../../etc", "a b", "$(id)", "", "a..b"].each do |bad|
+  GitHubClient.class_eval { define_method(:try) { |_p| {"head" => {"ref" => bad}} } }
+  File.delete("#{ROOT}/align.sh") if File.exist?("#{ROOT}/align.sh")
+  Runner.align_pr_branch(BOXROW, "ubicloud/ubicloud", 1)
+  check("refuses branch name #{bad.inspect}", File.exist?("#{ROOT}/align.sh"), false)
+end
+GitHubClient.class_eval { define_method(:try) { |_p| nil } }
+File.delete("#{ROOT}/align.sh") if File.exist?("#{ROOT}/align.sh")
+Runner.align_pr_branch(BOXROW, "ubicloud/ubicloud", 1)
+check("and does nothing when GitHub cannot be asked", File.exist?("#{ROOT}/align.sh"), false)
+
 puts "-- a lost run is taken back from the box --"
 # The fake ssh answers `cat` with whatever is queued for it, so adopt sees the
 # box's own copy of the output.
