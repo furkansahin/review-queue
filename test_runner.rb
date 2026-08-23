@@ -109,6 +109,8 @@ check("so is the follow-up",
       toml.scan("--model opus").size == 2 && toml.scan("--effort max").size == 2, true)
 check("the review reads the harness prompt", toml.include?(".rq/review-prompt.md"), true)
 check("the follow-up reads its question", toml.include?(".rq/followup.txt"), true)
+check("and says what was asked", toml.include?("== you asked"), true)
+check("each run stamps its own start", toml.scan(Runner::RUN_MARK).size, 2)
 check("both after --, so a leading dash is text",
       toml.scan(/ -- \\"\$\(cat/).size, 2)
 check("and by a relative path, never /workspace", toml.include?("/workspace"), false)
@@ -293,14 +295,14 @@ File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
 SH
 File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
 
-File.write("#{ROOT}/boxlog", "half a review so far\n")
+File.write("#{ROOT}/boxlog", "#{Runner::RUN_MARK}\nhalf a review so far\n")
 a = Runner.adopt(BOXROW, "rq-x-9")
 check("an unfinished run is not called finished", a[:finished], false)
 check("but its output is brought over", a[:output], "half a review so far\n")
 check("and this host says it is still going",
       Runner.state_word("furkansahin", "rq-x-9"), "reviewing")
 
-File.write("#{ROOT}/boxlog", "the whole review\n#{Runner::EXIT_MARK}0\n")
+File.write("#{ROOT}/boxlog", "#{Runner::RUN_MARK}\nthe whole review\n#{Runner::EXIT_MARK}0\n")
 a = Runner.adopt(BOXROW, "rq-x-9")
 check("a finished run is recognised", a[:finished], true)
 check("with its exit code", a[:exit_code], 0)
@@ -308,10 +310,31 @@ check("the stamp is not part of the review", a[:output].include?(Runner::EXIT_MA
 check("and this host agrees it is done",
       Runner.state_word("furkansahin", "rq-x-9"), "done")
 
-File.write("#{ROOT}/boxlog", "it went wrong\n#{Runner::EXIT_MARK}1\n")
+File.write("#{ROOT}/boxlog", "#{Runner::RUN_MARK}\nit went wrong\n#{Runner::EXIT_MARK}1\n")
 a = Runner.adopt(BOXROW, "rq-x-9")
 check("a non-zero exit is a failure", Runner.state_word("furkansahin", "rq-x-9"), "failed")
 check("and the output is still kept", a[:output].include?("it went wrong"), true)
+
+# A follow-up appends to the same file, so the previous run's exit stamp is
+# still in there when the new one starts. Reading that as "already finished"
+# is what made a follow-up report the review it followed and stop.
+File.write("#{ROOT}/boxlog",
+  "#{Runner::RUN_MARK}\nyesterday's review\n#{Runner::EXIT_MARK}0\n" \
+  "#{Runner::RUN_MARK}\n== you asked\nlist the repair items\n")
+a = Runner.adopt(BOXROW, "rq-x-9")
+check("a stale exit stamp does not finish the new run", a[:finished], false)
+check("the question is in the output", a[:output].include?("list the repair items"), true)
+check("and so is the review it follows", a[:output].include?("yesterday's review"), true)
+check("the stamps themselves are not shown",
+      a[:output].include?(Runner::RUN_MARK) || a[:output].include?(Runner::EXIT_MARK), false)
+
+File.write("#{ROOT}/boxlog",
+  "#{Runner::RUN_MARK}\nyesterday's review\n#{Runner::EXIT_MARK}0\n" \
+  "#{Runner::RUN_MARK}\nthe answer\n#{Runner::EXIT_MARK}0\n")
+a = Runner.adopt(BOXROW, "rq-x-9")
+check("and once the new run ends, it is finished", a[:finished], true)
+check("with both runs kept",
+      a[:output].include?("yesterday's review") && a[:output].include?("the answer"), true)
 
 # Restore the recording ssh for the checks below.
 File.write(File.join(ROOT, "bin", "ssh"), <<~SH)

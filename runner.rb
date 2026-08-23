@@ -221,18 +221,33 @@ module Runner
   # working exactly as before -- the same bytes still come back over bay.
   BOX_LOG = ".rq/run.log"
   EXIT_MARK = "__RQ_EXIT:"
+  # Each run stamps its own beginning as well as its end.
+  #
+  # A follow-up appends to the same file, so yesterday's exit stamp was still
+  # the last one in there when today's question started. The worker read it,
+  # decided the run had already finished, and wrote back the review on its own
+  # -- while the answer was still being written. An exit stamp only counts if
+  # it comes after the newest start stamp.
+  RUN_MARK = "__RQ_RUN__"
 
-  def self.wrapped(command, truncate:)
+  def self.wrapped(command, truncate:, preamble: nil)
     reset = truncate ? " && : > #{BOX_LOG}" : ""
-    %(mkdir -p .rq#{reset} && { #{command}; echo "#{EXIT_MARK}$?"; } 2>&1 | tee -a #{BOX_LOG})
+    say = preamble ? "#{preamble}; " : ""
+    %(mkdir -p .rq#{reset} && echo "#{RUN_MARK}" >> #{BOX_LOG} && ) +
+      %({ #{say}#{command}; echo "#{EXIT_MARK}$?"; } 2>&1 | tee -a #{BOX_LOG})
   end
 
   REVIEW_CMD = wrapped(
     %(claude -p --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/review-prompt.md)"),
     truncate: true)
+  # The question is echoed into the run, so the trace says what was asked. It
+  # used to be written only to this host's copy of the log, which adopting then
+  # replaced with the box's -- so the question vanished from the page while the
+  # answer to it stayed.
   ASK_CMD = wrapped(
     %(claude -p --continue --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/followup.txt)"),
-    truncate: false)
+    truncate: false,
+    preamble: %(printf '\\n== you asked\\n%s\\n\\n' "$(cat .rq/followup.txt)"))
 
   def local_toml(box_row)
     lines = ["# Written by review-queue. Edits here are overwritten.",
@@ -467,7 +482,6 @@ module Runner
     return placed unless placed[:ok]
 
     File.write(File.join(dir, "state"), "reviewing\n")
-    File.open(File.join(dir, "log"), "a") { |f| f.write("\n--- follow-up ---\n#{prompt}\n") }
     detach(box_row, dir, <<~SH)
       if "$BAY" run #{box} ask >> "$DIR/log" 2>&1; then
         echo done > "$DIR/state"
@@ -492,10 +506,15 @@ module Runner
     return res.merge(finished: false) unless res[:ok]
 
     text = res[:output].to_s
-    mark = text.rindex(EXIT_MARK)
+    # Only this run's stamps count. The file holds every run for this box.
+    started = text.rindex(RUN_MARK)
+    scope = started ? text[(started + RUN_MARK.length)..] : text
+    mark = scope.rindex(EXIT_MARK)
     finished = !mark.nil?
-    code = finished ? text[(mark + EXIT_MARK.length)..].to_i : nil
-    raw = finished ? text[0...mark] : text
+    code = finished ? scope[(mark + EXIT_MARK.length)..].to_i : nil
+    # The body is the whole file, not just this run: a follow-up is read
+    # together with the review it follows.
+    raw = strip_marks(text)
     body = StreamRender.all(raw)
 
     # Keep this host in step, so the page and the worker read the same thing
@@ -637,6 +656,12 @@ module Runner
 
   # The state word, exactly as the run itself wrote it. No liveness check: see
   # read_state for why that cannot be done from just anywhere.
+  # The stamps are bookkeeping, not something to read.
+  def strip_marks(text)
+    text.to_s.gsub(/^#{Regexp.escape(RUN_MARK)}\s*$\n?/, "")
+      .gsub(/^#{Regexp.escape(EXIT_MARK)}\d+\s*$\n?/, "")
+  end
+
   def state_word(login, box)
     return nil unless box.to_s.match?(BOX_RE)
     state = File.read(File.join(state_dir(login, box), "state")).to_s.strip
