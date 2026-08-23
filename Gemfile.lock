@@ -16,6 +16,7 @@ GEM
       rack (>= 1.3)
     roda (3.107.0)
       rack
+    rouge (4.7.0)
     tilt (2.9.0)
 
 PLATFORMS
@@ -32,6 +33,7 @@ DEPENDENCIES
   puma (~> 6.4)
   rack-test (~> 2.2)
   roda (~> 3.86)
+  rouge (~> 4.5)
   tilt (~> 2.4)
 
 CHECKSUMS
@@ -47,6 +49,7 @@ CHECKSUMS
   rack (3.2.7) sha256=93e13e1c24f93556671d85d2d79fa228c3485815c50d7e2f265b5330c6528fb7
   rack-test (2.2.0) sha256=005a36692c306ac0b4a9350355ee080fd09ddef1148a5f8b2ac636c720f5c463
   roda (3.107.0) sha256=bf40c7a0f1fcd037ec10589a1dc98fc52ced1aece803670194ec7af0f0c77c06
+  rouge (4.7.0) sha256=dba5896715c0325c362e895460a6d350803dbf6427454f49a47500f3193ea739
   tilt (2.9.0) sha256=da5735d0280bba96e9a91041bb14aee435ccad5c17b0fa519249ae543d9aa3a5
 
 RUBY VERSION

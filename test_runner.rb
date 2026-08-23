@@ -298,7 +298,8 @@ File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
 File.write("#{ROOT}/boxlog", "#{Runner::RUN_MARK}\nhalf a review so far\n")
 a = Runner.adopt(BOXROW, "rq-x-9")
 check("an unfinished run is not called finished", a[:finished], false)
-check("but its output is brought over", a[:output], "half a review so far\n")
+# The run boundary survives rendering: it is what the page splits panels on.
+check("but its output is brought over", a[:output].include?("half a review so far"), true)
 check("and this host says it is still going",
       Runner.state_word("furkansahin", "rq-x-9"), "reviewing")
 

@@ -513,8 +513,9 @@ module Runner
     finished = !mark.nil?
     code = finished ? scope[(mark + EXIT_MARK.length)..].to_i : nil
     # The body is the whole file, not just this run: a follow-up is read
-    # together with the review it follows.
-    raw = strip_marks(text)
+    # together with the review it follows. The renderer knows the stamps and
+    # turns them into boundaries the page can split on.
+    raw = text
     body = StreamRender.all(raw)
 
     # Keep this host in step, so the page and the worker read the same thing
@@ -656,12 +657,6 @@ module Runner
 
   # The state word, exactly as the run itself wrote it. No liveness check: see
   # read_state for why that cannot be done from just anywhere.
-  # The stamps are bookkeeping, not something to read.
-  def strip_marks(text)
-    text.to_s.gsub(/^#{Regexp.escape(RUN_MARK)}\s*$\n?/, "")
-      .gsub(/^#{Regexp.escape(EXIT_MARK)}\d+\s*$\n?/, "")
-  end
-
   def state_word(login, box)
     return nil unless box.to_s.match?(BOX_RE)
     state = File.read(File.join(state_dir(login, box), "state")).to_s.strip

@@ -18,6 +18,16 @@ module StreamRender
   # collapsed panel. Everything after is the review itself.
   MARKER = "== review"
 
+  # A box runs more than once: the review, then a follow-up, then another. Each
+  # run stamps its own start and end in the log, so a stale end cannot be read
+  # as this run's, and so the page can show each run as its own panel.
+  RUN_MARK = "__RQ_RUN__"
+  EXIT_MARK = "__RQ_EXIT:"
+  # What a run boundary looks like once rendered.
+  RUN = "== run"
+  # What the person asked, written by the follow-up command before it starts.
+  ASKED = "== you asked"
+
   # A tool call's arguments and a tool's output are both unbounded, and a
   # review makes hundreds of them. These caps are what keep a twenty minute
   # trace readable, and the page under its size budget.
@@ -61,6 +71,10 @@ module StreamRender
   def line(raw)
     text = raw.to_s.strip
     return nil if text.empty?
+    # The stamps are bookkeeping. A start becomes a boundary the page can
+    # split on; an end says nothing a reader needs.
+    return "#{RUN}\n" if text == RUN_MARK
+    return "" if text.start_with?(EXIT_MARK)
     # bay prints its own lines around the command it runs. They are already
     # readable, so they pass through untouched.
     return raw unless text.start_with?("{")

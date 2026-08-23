@@ -183,14 +183,18 @@ mixed = (["docker build noise"] * 500).join("\n") + "\n== review\n## Review summ
 DB.exec("UPDATE review_jobs SET output=$1 WHERE state='done'", [mixed])
 get "/sessions"
 b = last_response.body
-check("old mixed log: review is split out", b.include?("claude&#39;s review") || b.include?("claude's review"), true)
-check("old mixed log: build noise is behind its own toggle", b.include?("not the review"), true)
+check("old mixed log: the review has its own panel", b.include?(">the review "), true)
+check("old mixed log: the noise has a separate one", b.include?(">what the review ran "), true)
 check("old mixed log: the finding is present", b.include?("the actual finding"), true)
 check("old mixed log: noise is truncated", b.scan("docker build noise").size <= 200, true)
+check("old mixed log: and it says how much was dropped", b.include?("earlier lines not shown"), true)
+# The review is what a reader came for, so it is the panel left open.
+check("old mixed log: the review is the open panel",
+      b[/<details[^>]*>\s*<summary[^>]*>the review /m].to_s.include?("open"), true)
 
 # panels must be keyed so their open/closed state can survive a refresh
 get "/sessions"
-check("review panel is keyed", last_response.body.include?('data-keep="review-'), true)
+check("panels are keyed", last_response.body.include?('data-keep="sec-'), true)
 check("no forced reload on completion", last_response.body.include?("location.reload"), false)
 # the live panel only exists while a job is running
 DB.exec("UPDATE review_jobs SET state='running' WHERE id=$1", [job_id])

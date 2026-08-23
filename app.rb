@@ -15,6 +15,8 @@ if REVIEWS_ENABLED
   require_relative "devbox"
 require_relative "runner"
 require_relative "stream_render"
+require_relative "transcript"
+require_relative "markdown"
 
 # bay runs here now. RQ_TRANSPORT=ssh falls back to the wrapper on the box,
 # which is what every box ran before this change.

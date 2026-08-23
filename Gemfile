@@ -10,6 +10,9 @@ gem "pg", "~> 1.5"
 # net-ssh requires logger, which stopped being a default gem in Ruby 4.0
 gem "net-ssh", "~> 7.2"
 gem "logger", "~> 1.6"
+# Syntax highlighting for the code blocks in a review. Pure Ruby, no native
+# extension, so it costs the deploy nothing but a gem.
+gem "rouge", "~> 4.5"
 
 group :test do
   gem "rack-test", "~> 2.2"

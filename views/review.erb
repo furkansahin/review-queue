@@ -29,10 +29,10 @@
 </div>
 <div class="wrap">
   <% if found %>
-    <pre><%= review %></pre>
+    <div class="md"><%== Markdown.render(review) %></div>
     <% if noise && !noise.strip.empty? %>
       <details>
-        <summary style="color: var(--muted-2);">build log from bay (<%= noise.lines.count %> lines) — not the review</summary>
+        <summary style="color: var(--muted-2);">what it ran (<%= noise.lines.count %> lines)</summary>
         <pre><%= noise.lines.last(200).join %></pre>
       </details>
     <% end %>

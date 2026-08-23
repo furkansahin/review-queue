@@ -66,16 +66,16 @@ check("every job still has a card", JOBS.times.all? { |i| body.include?("rq-ubic
 
 # The newest review is the one you just ran, so it is printed with the page.
 newest = ids.last
-check("the newest review is printed inline", body.include?("## Finding #{JOBS - 1}"), true)
+check("the newest review is printed inline", body.include?(">Finding #{JOBS - 1}<"), true)
 # The oldest is not, but it is offered.
-check("an older one is not printed", body.include?("## Finding 0\n"), false)
+check("an older one is not printed", body.include?(">Finding 0<"), false)
 check("it is offered as a panel that loads", body.include?(%(data-review="#{ids.first}")), true)
 check("with a plain link for a browser without scripting",
       body.include?("/sessions/review?id=#{ids.first}"), true)
 
 # ...and that link really produces the review.
 get "/sessions/review?id=#{ids.first}"
-check("the link renders the review", last_response.body.include?("## Finding 0"), true)
+check("the link renders the review", last_response.body.include?(">Finding 0<"), true)
 get "/sessions/review?format=json&id=#{ids.first}"
 loaded = JSON.parse(last_response.body)
 check("and the script gets the same text as JSON", loaded["review"].include?("## Finding 0"), true)
