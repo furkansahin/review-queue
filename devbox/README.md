@@ -1,118 +1,102 @@
 # Dev box setup
 
+A dev box is a machine of your own that runs the review containers. The
+dashboard drives it: bay runs on the dashboard and points at this machine's
+Docker over ssh, so the box itself needs very little.
+
+**Three things, and no more:**
+
+1. the dashboard's key in `~/.ssh/authorized_keys`
+2. docker, with your ssh user able to use it
+3. a checkout of the repository
+
+The box does *not* need bay, a wrapper, a bay config, or a token file. Those
+all lived here before the dashboard took bay over. If your box still has them,
+they are inert; you can delete `~/go/bin/bay`, `/usr/local/bin/rq-review` and
+`~/.bay/` whenever you like.
+
 ## From a fresh Ubuntu 24.04 VM
 
-**1. Put your two tokens on the box.** These stay there and never reach the
-dashboard. Everything else needs them, because bay and its config are both
-private repositories.
+**1. Register the box** on the dashboard's Dev box page: its address, your ssh
+user, and where the checkout should live. Paste in your Claude token (from
+`claude setup-token` on your own machine) and a GitHub PAT that can read the
+repository. Both are encrypted with the same key as your ssh key and are never
+shown back.
 
-```sh
-mkdir -p ~/.bay && cat > ~/.bay/env <<'EOF'
-CLAUDE_CODE_OAUTH_TOKEN=...   # from: claude setup-token
-GITHUB_TOKEN=...              # see the scope note below
-EOF
-chmod 600 ~/.bay/env
-```
+**2. Paste the key line** the page shows into `~/.ssh/authorized_keys` on the
+box. This is the only step that cannot be automated — it is what grants the
+access everything else uses.
 
-**2. Run the setup script.**
+**3. Press "Prepare this box".** It installs docker, adds your ssh user to the
+docker group, and clones the repository. A few minutes the first time. It is
+idempotent: pressing it twice is pressing it once.
+
+Then press **Test connection**. It should answer `pong <address>`.
+
+### Doing step 3 by hand instead
+
+If you are already sitting on the machine:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/setup.sh -o setup.sh
-bash setup.sh            # or: bash setup.sh --check  to look first
+bash setup.sh --check    # look first
+bash setup.sh            # then do it
 ```
 
-It installs docker, clones and builds bay, clones the bay config and the
-ubicloud checkout, points bay at this box over loopback ssh, and installs the
-wrapper.
+Same work, same checks. It refuses to run on anything that is not Linux unless
+`RQ_FORCE_HOST=1`, because it changes the machine it runs on.
 
-**3. Paste the key line** from the dashboard's Dev box page into
-`~/.ssh/authorized_keys`, then press **Test connection**. It should answer
-`pong <hostname>`.
+Installing docker needs `sudo` without a password. Both the button and the
+script check that first and say so, rather than stopping half way through an
+apt run.
 
-That is the whole setup: two tokens, one script, one paste.
+## The docker group
 
-The script also installs the two bay commands the dashboard calls (`review` and
-`ask`). They go into `bay.local.toml`, not the shared `bay.toml`: bay layers its
-config files and merges the commands map across them, so the untracked
-per-machine file can add commands without touching a tracked file or fighting a
-later `git pull`. Re-running `setup.sh` updates them in place.
+This is the step that is easy to miss by hand. Installing docker is not enough:
+without being in the `docker` group your user cannot reach the daemon, and the
+dashboard does not use `sudo`. The failure reads as though the daemon is down
+when it is not:
 
-## The GITHUB_TOKEN needs three repositories
+```
+Cannot connect to the Docker daemon at http://docker.example.com.
+```
 
-A fine-grained PAT lists repositories **explicitly**, so one that works for the
-queue can still fail to fetch bay. Give it **Contents: Read** on all three:
+Group membership is picked up at login, so the next connection has it.
 
-| Repository | Needed for |
+## Tokens
+
+Both live on the dashboard now, per user, encrypted at rest.
+
+- **Claude** — `claude setup-token` on your own machine, then paste it in. bay
+  writes it into each box as it builds one.
+- **GitHub** — a PAT with `Contents: Read` on the repository you review. The
+  clone itself is over https on a public repository and needs nothing, but the
+  box uses the token for `gh pr checkout` and for pushing from a review.
+
+## Skills
+
+Set a skills repository on the Dev box page and bay clones it into every new
+box's `~/.claude/skills`, pulling it on later starts. It is cloned inside the
+box with that box's own GitHub token, so a private repository works and the
+dashboard never reads it.
+
+## Capacity
+
+A box costs about 7G once its images and database are there. `setup.sh` reports
+free space and how many boxes that is.
+
+## What is in this directory
+
+| file | what it is |
 | --- | --- |
-| `ubicloud/ubicloud` | the checkout, and `gh pr checkout` for `--pr` |
-| `ubicloud/bay` | building the bay binary |
-| `ubicloud/bay-ubicloud` | the bay config |
+| `setup.sh` | prepares a dev box by hand; `--check` reports without changing anything |
+| `review-prompt.md` | the review instructions, copied into a box at review time |
+| `install-host.sh` | installs bay and its config on the **dashboard** host, not here |
+| `base-image` | an optional prebaked box image; see below |
+| `rq-review`, `test_wrapper.sh`, `bay-review-command.toml`, `install-skills.sh` | from before the dashboard ran bay. Kept for `RQ_TRANSPORT=ssh`, unused otherwise |
 
-`setup.sh` checks all three before it does anything and names the one that is
-missing. A missing `ubicloud/bay` is what produces:
+### The base image
 
-```
-rq-review: bay not found. Looked in: ...
-```
-
-## Why bay has to be built rather than installed
-
-`go install github.com/ubicloud/bay@latest`, the command in bay's own README,
-fails on a clean machine: bay is a private repository and go has no
-credentials. The script clones it with your `GITHUB_TOKEN` and builds from the
-vendored dependencies, which needs no further network access.
-
-## Why bay is pointed at this box over loopback ssh
-
-bay's `syncToHost` is a no-op unless `[remote] host` is set — it assumes a local
-setup keeps its config in the repo. Ours is out of tree, so without a host the
-tooling never reaches the box and setup dies on
-
-```
-bash: /workspace/.bay/post-create.sh: No such file or directory
-```
-
-Pointing bay at this same machine over `127.0.0.1` puts it back on its supported
-path. `bay doctor` then runs 8 checks instead of 4.
-
-## Making boxes fast
-
-Out of the box a box takes about 330s. See `base-image/README.md`: one setting
-takes it to 144s, and a prebaked image takes it to **66s**.
-
-```sh
-bash setup.sh --build-base-image
-```
-
-## Do not copy bay.local.toml between machines
-
-It is per-machine and gitignored for a reason. Copying one carries settings that
-do not apply, and a `baseImage` naming an image the new box has never built
-fails at `bay up` with:
-
-```
-pull access denied, repository does not exist or may require authorization
-```
-
-because bay asks Docker to pull a local-only tag from Docker Hub. `setup.sh`
-now checks for exactly this and offers to build the image or tells you to drop
-the line.
-
-## What the dashboard's key can do
-
-The wrapper is the only thing it may run, pinned by `command=` in
-`authorized_keys` with `restrict`. It accepts seven verbs — `ping`, `review`,
-`status`, `result`, `build`, `list`, `teardown` — validates every field against
-a strict pattern, and never passes anything to `eval`. A stolen key can start
-reviews on this box and nothing else.
-
-## Files here
-
-| File | Role |
-| --- | --- |
-| `setup.sh` | prepares a dev box; `--check` reports without changing anything |
-| `rq-review` | the forced-command wrapper the dashboard talks to |
-| `test_wrapper.sh` | 18 injection cases against the wrapper |
-| `bay-review-command.toml` | the `[commands] review` entry for bay-ubicloud |
-| `install-skills.sh` | carries a developer's own Claude skills into a box |
-| `base-image/` | prebaked image, and the measurements behind it |
+A cold box builds in about five minutes; one built from a prebaked image takes
+about one. The image is built on the box and named by `RQ_BOX_BASE_IMAGE`,
+which the dashboard writes into each user's bay config. See `base-image/`.

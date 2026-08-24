@@ -232,9 +232,19 @@ check("relative, like the follow-up", review_cmd.include?("/workspace"), false)
 check("and after --", review_cmd.include?(" -- "), true)
 check("the wrapper copies the prompt in", wrapper.include?("$wt/.rq/review-prompt.md"), true)
 check("it refuses when the prompt is missing", wrapper.include?("review prompt missing"), true)
-check("setup.sh installs it where the wrapper looks",
-      setup.include?("$HOME/.rq/review-prompt.md"), true)
-check("and hides .rq from git status", setup.include?("info/exclude"), true)
+# setup.sh no longer installs any of this: the dashboard runs bay, so a box
+# needs docker, the docker group and a checkout, and nothing else. It is the
+# same work the Prepare button does, for a machine you are already sitting on.
+check("setup.sh installs docker", setup.include?("docker-ce"), true)
+check("and puts the user in the docker group", setup.include?("usermod -aG docker"), true)
+check("and clones the repository", setup.include?("git clone"), true)
+check("over https, so a box needs no key of its own", setup.include?("https://github.com/"), true)
+check("it no longer installs bay", setup.include?("go build"), false)
+check("nor the wrapper", setup.include?("rq-review"), false)
+check("nor a token file", setup.include?("CLAUDE_CODE_OAUTH_TOKEN"), false)
+# It rewrote an ssh config on a laptop once, by being run in the wrong place.
+check("and it still refuses a machine that is not a dev box",
+      setup.include?("RQ_FORCE_HOST"), true)
 
 # The point of the harness is that the review runs things. If someone trims the
 # prompt back to reading only, these fail rather than the tab quietly reverting.

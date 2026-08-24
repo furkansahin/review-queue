@@ -1,10 +1,31 @@
 #!/usr/bin/env bash
-SP="$1"; W="$2"
+# Injection tests for the forced-command wrapper.
+#
+#   bash devbox/test_wrapper.sh [wrapper-path]
+#
+# The wrapper is only reached by RQ_TRANSPORT=ssh now; the dashboard runs bay
+# itself. It is still worth holding, because it is the thing a key could reach.
+#
+# It builds its own fixtures. They used to live in a scratchpad outside the
+# repository, so when that was cleaned the test stopped running -- and the
+# failure looked like the wrapper, not the fixtures.
+W="${1:-$(cd "$(dirname "$0")" && pwd)/rq-review}"
+SP="$(mktemp -d)"
+trap 'rm -rf "$SP"' EXIT
+
+mkdir -p "$SP/fakebay" "$SP/fakerepo" "$SP/rqstate" "$SP/fakecfg"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SP/fakebay/bay"
+chmod +x "$SP/fakebay/bay"
+# ping checks for bay.toml specifically, so the fixture needs both.
+printf '[commands]\nreview = "x"\n' > "$SP/fakecfg/bay.toml"
+printf '[commands]\nreview = "x"\n\n[box]\nbaseImage = "y"\n' > "$SP/fakecfg/bay.local.toml"
+: > "$SP/empty.md"
+# The wrapper refuses to review without its prompt, so give it one.
+printf 'run the specs that cover the change\n' > "$SP/prompt.md"
+
 export RQ_BAY="$SP/fakebay/bay" RQ_REPO_PATH="$SP/fakerepo" RQ_STATE_DIR="$SP/rqstate"
 export RQ_ALLOWED_REPOS="ubicloud/ubicloud"
 export RQ_BAY_CONFIG="$SP/fakecfg"
-# The wrapper refuses to review without its prompt, so give it one.
-printf 'run the specs that cover the change\n' > "$SP/prompt.md"
 export RQ_REVIEW_PROMPT="$SP/prompt.md"
 fail=0
 try() { # name, command, expect: allow|refuse
