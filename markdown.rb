@@ -101,6 +101,9 @@ module Markdown
     safe = CGI.escapeHTML(text.to_s.strip)
     safe = safe.gsub(/`([^`]+)`/) { "<code>#{Regexp.last_match(1)}</code>" }
     safe = safe.gsub(/\*\*([^*]+)\*\*/) { "<strong>#{Regexp.last_match(1)}</strong>" }
+    # Single asterisks, after the double ones, so **bold** is not eaten a star
+    # at a time. A review leans on these for the word that carries the point.
+    safe = safe.gsub(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/) { "<em>#{Regexp.last_match(1)}</em>" }
     safe.gsub("\n", "<br />\n")
   end
 end

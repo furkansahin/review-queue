@@ -35,26 +35,38 @@
                       font-family: 'IBM Plex Mono', monospace; }
   pre.tail { max-height: 340px; overflow-y: auto; }
 
-  /* A review is prose with code in it, and it used to be one wall of
-     monospace. Headings, inline code and blocks now carry different weight. */
-  .md { font-size: 13.5px; line-height: 1.62; }
-  .md h3, .md h4, .md h5, .md h6 { margin: 20px 0 8px; line-height: 1.35; }
-  .md h3 { font-size: 16px; }
-  .md h4 { font-size: 14.5px; }
-  .md h5, .md h6 { font-size: 13px; color: var(--muted); }
-  .md p { margin: 9px 0; }
-  .md ul { margin: 9px 0; padding-left: 22px; }
-  .md li { margin: 4px 0; }
-  .md code { font-family: 'IBM Plex Mono', monospace; font-size: 0.9em;
-             background: var(--code-bg); border: 1px solid var(--border-soft);
-             border-radius: 4px; padding: 1px 4px; }
-  .md pre.code { margin: 12px 0; padding: 12px 14px; overflow-x: auto; }
-  /* The block already has a border and a background; the code inside it must
-     not draw a second one around every line. */
-  .md pre.code code { background: none; border: 0; padding: 0; font-size: 12px; }
+  /* A review reads like terminal output, because that is what it is: an agent
+     talking through what it found. It is not a document, so nothing here
+     changes size -- a heading is bold and coloured at the same size as the
+     text under it. What earns colour is the part you scan for: a file path, a
+     command, a block of code. */
+  .md { font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; line-height: 1.6;
+        white-space: normal; }
+  .md h3, .md h4, .md h5, .md h6 {
+    font-size: 12.5px; font-weight: 600; color: var(--md-head);
+    margin: 16px 0 6px; line-height: 1.5; }
+  /* The hashes are how it was written, and seeing them keeps the level
+     legible without a type scale doing the work. */
+  .md h3::before { content: "# "; color: var(--muted-3); }
+  .md h4::before { content: "## "; color: var(--muted-3); }
+  .md h5::before { content: "### "; color: var(--muted-3); }
+  .md h6::before { content: "#### "; color: var(--muted-3); }
+  .md p { margin: 8px 0; }
+  .md ul { margin: 8px 0; padding-left: 18px; list-style: none; }
+  .md li { margin: 3px 0; position: relative; }
+  .md li::before { content: "· "; color: var(--muted-3); margin-left: -12px; }
+  .md strong { font-weight: 600; color: var(--fg); }
+  .md em { font-style: italic; color: var(--muted); }
+  /* Inline code is a file path or a symbol nine times in ten. A colour marks
+     it; a box around every one of them would fence the prose into squares. */
+  .md code { color: var(--tok-lit); }
+  .md pre.code { margin: 10px 0; padding: 10px 12px; overflow-x: auto;
+                 background: var(--code-bg); border: 1px solid var(--border-soft);
+                 border-radius: 6px; }
+  .md pre.code code { color: inherit; font-size: 12px; line-height: 1.5; }
 
-  /* Rouge's token classes, mapped onto this page's palette rather than a
-     theme of its own, so a code block belongs to the page in both schemes. */
+  /* Rouge's token classes, mapped onto this page's palette rather than a theme
+     of its own, so a code block belongs to the page in both schemes. */
   .md .k, .md .kd, .md .kn, .md .kp, .md .kr, .md .kt { color: var(--tok-key); }
   .md .s, .md .s1, .md .s2, .md .sb, .md .sd, .md .se, .md .si, .md .sx { color: var(--tok-str); }
   .md .c, .md .c1, .md .cm, .md .cs { color: var(--tok-com); font-style: italic; }
