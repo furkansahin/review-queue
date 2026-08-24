@@ -44,13 +44,13 @@ own `mise.toml` sets `ruby.compile = true` under `[settings]`, and that wins ove
 
 **1. Stop compiling Ruby.** Measured on the same machine: **329s -> 144s**, from
 one line. Either drop `ruby.compile = true` from the repo's `mise.toml`, or set
-`MISE_RUBY_COMPILE=0` in `box.env` to keep it local to dev boxes.
+`MISE_RUBY_COMPILE=0` in `box.env` to keep it local to bayboxes.
 
 **2. Bake the toolchain and gems into a base image** — the `Dockerfile` here.
 Measured on the same VM: **66s**, against 329s originally.
 
 ```sh
-docker build -t ubicloud-bay-base:latest devbox/base-image
+docker build -t ubicloud-bay-base:latest baybox/base-image
 ```
 
 ```toml

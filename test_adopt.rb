@@ -8,7 +8,7 @@ ENV["DATABASE_URL"] ||= "postgres://postgres@127.0.0.1:55432/rq_test"
 ENV["RQ_ENCRYPTION_KEY"] = "0" * 64
 require_relative "db"
 require_relative "jobs"
-require_relative "devbox"
+require_relative "baybox"
 require_relative "runner"
 
 $fail = 0
@@ -18,14 +18,14 @@ def check(name, got, want)
   puts format("  %s  %-54s got=%-26s want=%s", ok ? "ok  " : "FAIL", name, got.inspect[0, 26], want.inspect[0, 26])
 end
 
-DB.exec("TRUNCATE review_jobs, dev_boxes RESTART IDENTITY CASCADE")
-priv, pub = DevBox.generate_keypair
+DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
+priv, pub = BayBox.generate_keypair
 box = DB.row(<<~SQL, ["furkansahin", "10.0.0.5", "ubi", 22, Crypto.encrypt(priv), pub])
-  INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key)
+  INSERT INTO bayboxes (login, host, ssh_user, port, private_key_enc, public_key)
   VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
 SQL
 job = DB.row(<<~SQL, ["furkansahin", box["id"], "ubicloud/ubicloud", 77, "rq-x-77"])
-  INSERT INTO review_jobs (login, dev_box_id, repo, pr_number, box_name, state, started_at)
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, started_at)
   VALUES ($1,$2,$3,$4,$5,'running', now()) RETURNING *
 SQL
 
@@ -75,7 +75,7 @@ poll_running
 row = DB.row("SELECT * FROM review_jobs WHERE id = $1", [job["id"]])
 check("the job failed", row["state"], "failed")
 check("keeping what the box wrote", row["output"], "it broke\n")
-check("and saying so", row["error"].to_s.include?("failed on the dev box"), true)
+check("and saying so", row["error"].to_s.include?("failed on the baybox"), true)
 
 puts "-- a question just asked is not answered by the last answer --"
 # The box's log still ends with the previous run's exit stamp for the second

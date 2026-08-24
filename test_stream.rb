@@ -43,15 +43,15 @@ end
 include Rack::Test::Methods
 def app = ReviewQueue.app
 
-DB.exec("TRUNCATE review_jobs, dev_boxes RESTART IDENTITY CASCADE")
-priv, pub = DevBox.generate_keypair
+DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
+priv, pub = BayBox.generate_keypair
 DB.exec(<<~SQL, ["furkansahin", "10.0.0.5", "ubi", 22, Crypto.encrypt(priv), pub])
-  INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key)
+  INSERT INTO bayboxes (login, host, ssh_user, port, private_key_enc, public_key)
   VALUES ($1,$2,$3,$4,$5,$6)
 SQL
-box_id = DB.row("SELECT id FROM dev_boxes")["id"]
+box_id = DB.row("SELECT id FROM bayboxes")["id"]
 job = DB.row(<<~SQL, ["furkansahin", box_id, "ubicloud/ubicloud", 42, "rq-live-42"])
-  INSERT INTO review_jobs (login, dev_box_id, repo, pr_number, box_name, state)
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state)
   VALUES ($1,$2,$3,$4,$5,'running') RETURNING *
 SQL
 JOB_ID = job["id"]
@@ -106,7 +106,7 @@ WHO[:login] = "furkansahin"
 
 puts "-- a job with no log falls back rather than hanging --"
 job2 = DB.row(<<~SQL, ["furkansahin", box_id, "ubicloud/ubicloud", 43, "rq-live-43"])
-  INSERT INTO review_jobs (login, dev_box_id, repo, pr_number, box_name, state)
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state)
   VALUES ($1,$2,$3,$4,$5,'running') RETURNING *
 SQL
 get "/sessions/stream?id=#{job2["id"]}&offset=0"

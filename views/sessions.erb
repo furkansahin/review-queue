@@ -119,7 +119,7 @@
   <a class="mono" style="font-size: 12px;" href="/">← back to the queue</a>
   <div style="flex: 1;"></div>
   <div class="mono" style="font-size: 11px; color: var(--muted-2);">
-    @<%= login %><%= dev_box ? " · dev box #{dev_box["host"]}" : " · no dev box registered" %>
+    @<%= login %><%= baybox ? " · baybox #{baybox["host"]}" : " · no baybox registered" %>
   </div>
 </div>
 
@@ -136,10 +136,10 @@
       <%= error %>
     </div>
   <% end %>
-  <% unless dev_box %>
+  <% unless baybox %>
     <div class="card">
-      <strong>No dev box registered.</strong>
-      <div class="sub">A review runs on your own dev box. Register one before starting a session.</div>
+      <strong>No baybox registered.</strong>
+      <div class="sub">A review runs on your own baybox. Register one before starting a session.</div>
     </div>
   <% end %>
 
@@ -277,7 +277,7 @@
     </details>
   <% end %>
 
-  <h2>Boxes on your dev box<%= boxes.empty? ? "" : " (#{boxes.size})" %></h2>
+  <h2>Boxes on your baybox<%= boxes.empty? ? "" : " (#{boxes.size})" %></h2>
   <div class="sub" style="margin-bottom: 10px;">
     What bay actually has. A box outlives its review and keeps its disk until you tear it down.
   </div>

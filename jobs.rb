@@ -1,28 +1,28 @@
 require_relative "db"
-require_relative "devbox"
+require_relative "baybox"
 
 # The review job queue. A job moves queued -> running -> done|failed.
 #
-# The work happens on the user's dev box and takes minutes, so the worker does
+# The work happens on the user's baybox and takes minutes, so the worker does
 # not hold it open: the run detaches, and the worker polls. That means a
 # worker restart loses nothing -- a running job is picked up again by its box
 # name on the next tick.
 module Jobs
-  # A job that has been running longer than this is treated as lost. The dev
-  # box may have rebooted, or the wrapper may have been killed.
+  # A job that has been running longer than this is treated as lost. The
+  # baybox may have rebooted, or the run may have been killed.
   STALE_AFTER = Integer(ENV.fetch("RQ_JOB_TIMEOUT", "3600"))
 
   module_function
 
   def enqueue(login:, repo:, pr_number:)
-    box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [login])
-    return {ok: false, error: "no dev box registered"} unless box
+    box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [login])
+    return {ok: false, error: "no baybox registered"} unless box
 
-    name = DevBox.box_name(repo, pr_number)
-    DevBox.validate!(repo: repo, pr_number: pr_number, box: name)
+    name = BayBox.box_name(repo, pr_number)
+    BayBox.validate!(repo: repo, pr_number: pr_number, box: name)
 
     row = DB.row(<<~SQL, [login, box["id"], repo, pr_number, name])
-      INSERT INTO review_jobs (login, dev_box_id, repo, pr_number, box_name)
+      INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name)
       VALUES ($1, $2, $3, $4, $5) RETURNING *
     SQL
     {ok: true, job: row}
@@ -30,7 +30,7 @@ module Jobs
     # The partial unique index already refuses a second live job for this pull
     # request, so a double click is harmless.
     {ok: false, error: "a review is already running for this pull request"}
-  rescue DevBox::Error => e
+  rescue BayBox::Error => e
     {ok: false, error: e.message}
   end
 
@@ -41,7 +41,7 @@ module Jobs
   # every load of a page that then prints a state word and a timestamp. The
   # size is still wanted (the panel summary shows it), and octet_length costs
   # no bandwidth.
-  LIST_COLUMNS = "id, login, dev_box_id, repo, pr_number, box_name, state, phase, " \
+  LIST_COLUMNS = "id, login, baybox_id, repo, pr_number, box_name, state, phase, " \
                  "torn_down_at, error, created_at, started_at, finished_at, " \
                  "octet_length(output) AS output_bytes"
 
@@ -65,10 +65,10 @@ module Jobs
       .each_with_object({}) { |r, h| h[r["id"]] = r["output"] }
   end
 
-  # An older wrapper wrote bay's build log and claude's review into one stream.
-  # Split on the marker it used, so an old job still reads well instead of
+  # Older runs wrote bay's build log and claude's review into one stream.
+  # Split on the marker they used, so an old job still reads well instead of
   # burying the review under thousands of build lines. Returns [noise, review];
-  # noise is nil for anything written by the current wrapper.
+  # noise is nil when there is no marker to split on.
   REVIEW_MARKER = "== review".freeze
 
   def split_output(text)
@@ -164,7 +164,7 @@ module Jobs
 
   def running = DB.rows("SELECT * FROM review_jobs WHERE state = 'running' ORDER BY started_at")
 
-  def dev_box(job) = DB.row("SELECT * FROM dev_boxes WHERE id = $1", [job["dev_box_id"]])
+  def baybox(job) = DB.row("SELECT * FROM bayboxes WHERE id = $1", [job["baybox_id"]])
 
   # Progress for a job that is still running. Only touches output, so it can
   # never move a job out of running by accident.

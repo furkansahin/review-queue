@@ -1,7 +1,7 @@
 require "openssl"
 
 # Encryption at rest for the one secret this application holds: the SSH private
-# key for a user's dev box, in dev_boxes.private_key_enc. The key stays in
+# key for a user's baybox, in bayboxes.private_key_enc. The key stays in
 # Postgres, so a database backup or a stolen dump must not reveal it.
 #
 # AES-256-GCM gives both secrecy and authentication: a modified ciphertext

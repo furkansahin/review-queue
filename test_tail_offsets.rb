@@ -31,16 +31,16 @@ def check(name, got, want)
 end
 
 DB.setup!
-DB.exec("TRUNCATE review_jobs, dev_boxes RESTART IDENTITY CASCADE")
-DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
+DB.exec("INSERT INTO bayboxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
         ["furkansahin", "box.example", "x", "ssh-rsa AAAA"])
-bid = DB.row("SELECT id FROM dev_boxes")["id"]
+bid = DB.row("SELECT id FROM bayboxes")["id"]
 
 # Accents and an emoji: 2- and 4-byte sequences, so byte offsets and character
 # offsets disagree and any confusion between them is visible.
 TEXT = "## Review\nnaïve reduce 🚀 raises on []\nsecond line café ✅\n"
 DB.exec(<<~SQL, [bid, TEXT])
-  INSERT INTO review_jobs (login, dev_box_id, repo, pr_number, box_name, state, output, phase)
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, output, phase)
   VALUES ('furkansahin', $1, 'ubicloud/ubicloud', 7, 'rq-ubicloud-7', 'running', $2, 'reviewing')
 SQL
 ID = DB.row("SELECT id FROM review_jobs")["id"]

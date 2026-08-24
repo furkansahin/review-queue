@@ -11,7 +11,7 @@
 # takes. bay drives the user's Docker over ssh; the containers are still theirs.
 require_relative "db"
 require_relative "jobs"
-require_relative "devbox"
+require_relative "baybox"
 require_relative "runner"
 
 TICK = Integer(ENV.fetch("RQ_WORKER_TICK", "10"))
@@ -33,8 +33,8 @@ def start_queued
 end
 
 def start_one(job)
-  box = Jobs.dev_box(job)
-  return Jobs.finish(job["id"], "failed", error: "the dev box was removed") unless box
+  box = Jobs.baybox(job)
+  return Jobs.finish(job["id"], "failed", error: "the baybox was removed") unless box
 
   # Runner validates each field before it reaches a command line, and answers
   # with the reason if one is wrong.
@@ -49,9 +49,9 @@ end
 
 def poll_running
   Jobs.running.each do |job|
-    box = Jobs.dev_box(job)
+    box = Jobs.baybox(job)
     unless box
-      Jobs.finish(job["id"], "failed", error: "the dev box was removed")
+      Jobs.finish(job["id"], "failed", error: "the baybox was removed")
       next
     end
 
@@ -66,7 +66,7 @@ def poll_running
     # A box that cannot be reached is not a failure yet: it may be rebooting.
     # The staleness check below is what eventually gives up.
     unless status[:ok]
-      Jobs.finish(job["id"], "failed", error: "dev box unreachable for too long") if Jobs.stale?(job)
+      Jobs.finish(job["id"], "failed", error: "baybox unreachable for too long") if Jobs.stale?(job)
       next
     end
 
@@ -84,7 +84,7 @@ def poll_running
       if taken[:finished]
         Jobs.finish(job["id"], taken[:exit_code].to_i.zero? ? "done" : "failed",
           output: taken[:output],
-          error: taken[:exit_code].to_i.zero? ? nil : "the run failed on the dev box")
+          error: taken[:exit_code].to_i.zero? ? nil : "the run failed on the baybox")
         log("adopted #{job["box_name"]} and it was finished: #{taken[:exit_code]}")
       else
         Jobs.progress(job["id"], taken[:output], "reviewing")
@@ -109,7 +109,7 @@ def poll_running
       end
       Jobs.finish(job["id"], state == "done" ? "done" : "failed",
         output: result[:output],
-        error: state == "failed" ? "the run failed on the dev box\n#{detail}" : nil)
+        error: state == "failed" ? "the run failed on the baybox\n#{detail}" : nil)
       log("#{job["box_name"]} finished: #{state}")
     when "building", "reviewing", "running"
       # result is claude's output only; bay's build noise stays in build.log and

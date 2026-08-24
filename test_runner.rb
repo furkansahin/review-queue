@@ -58,7 +58,7 @@ def check(name, got, want)
 end
 def calls = File.exist?("#{ROOT}/calls") ? File.read("#{ROOT}/calls") : ""
 
-priv, _pub = DevBox.generate_keypair
+priv, _pub = BayBox.generate_keypair
 BOXROW = {"id" => 1, "login" => "furkansahin", "host" => "10.0.0.5", "ssh_user" => "ubi",
           "port" => 22, "private_key_enc" => Crypto.encrypt(priv),
           "skills_repo" => "https://github.com/furkansahin/skills",

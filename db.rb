@@ -202,16 +202,48 @@ module DB
   end
 
   SCHEMA = <<~SQL
+    -- Renames first, and before any CREATE. A CREATE IF NOT EXISTS of the new
+    -- name would otherwise make an empty table, the rename would then find the
+    -- new name taken and skip, and every row would still be under the old one.
+    --
+    -- The old names are spelled with a break in them so that a search and
+    -- replace over this repository cannot rewrite the very migration that
+    -- moves away from them. One did, and turned this into a tautology that
+    -- never ran: "if bayboxes exists and bayboxes does not exist".
+    DO $$
+    DECLARE
+      old_table CONSTANT text := 'dev' || '_boxes';
+      old_index CONSTANT text := 'dev' || '_boxes_login_idx';
+      old_column CONSTANT text := 'dev' || '_box_id';
+    BEGIN
+      IF to_regclass('public.' || old_table) IS NOT NULL
+         AND to_regclass('public.bayboxes') IS NULL THEN
+        EXECUTE format('ALTER TABLE %I RENAME TO bayboxes', old_table);
+      END IF;
+      IF to_regclass('public.' || old_index) IS NOT NULL THEN
+        EXECUTE format('ALTER INDEX %I RENAME TO bayboxes_login_idx', old_index);
+      END IF;
+      IF EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name = 'review_jobs' AND column_name = old_column) THEN
+        EXECUTE format('ALTER TABLE review_jobs RENAME COLUMN %I TO baybox_id', old_column);
+      END IF;
+    END
+    $$;
+
     CREATE TABLE IF NOT EXISTS user_settings (
       login       text PRIMARY KEY,
       updated_at  timestamptz NOT NULL DEFAULT now()
     );
 
-    -- One remote dev box per user. The dashboard connects to it to start a bay
-    -- session, so it holds a private key -- generated here, never uploaded by
-    -- the user, encrypted at rest, and usable only for the forced command that
-    -- the user installs on their box.
-    CREATE TABLE IF NOT EXISTS dev_boxes (
+    -- One baybox per user: the machine their reviews run on. The dashboard
+    -- reaches it over ssh, so the row holds a private key -- generated here,
+    -- never uploaded by the user, encrypted at rest. Deleting the row is a
+    -- real revocation, because the key exists nowhere else.
+    --
+    -- It also holds that user's Claude and GitHub tokens, encrypted the same
+    -- way. bay runs on the dashboard now and hands them to each box it builds,
+    -- so they have to live here rather than on the machine.
+    CREATE TABLE IF NOT EXISTS bayboxes (
       id              bigserial PRIMARY KEY,
       login           text        NOT NULL,
       host            text        NOT NULL,
@@ -228,12 +260,12 @@ module DB
       created_at      timestamptz NOT NULL DEFAULT now()
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS dev_boxes_login_idx ON dev_boxes (login);
+    CREATE UNIQUE INDEX IF NOT EXISTS bayboxes_login_idx ON bayboxes (login);
 
     CREATE TABLE IF NOT EXISTS review_jobs (
       id          bigserial   PRIMARY KEY,
       login       text        NOT NULL,
-      dev_box_id  bigint      REFERENCES dev_boxes (id) ON DELETE SET NULL,
+      baybox_id  bigint      REFERENCES bayboxes (id) ON DELETE SET NULL,
       repo        text        NOT NULL,
       pr_number   integer     NOT NULL,
       box_name    text        NOT NULL,
@@ -261,14 +293,14 @@ module DB
     -- PG::UndefinedColumn. Every column added from now on belongs here too.
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS phase        text;
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS torn_down_at timestamptz;
-    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_ok_at   timestamptz;
-    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS last_error   text;
-    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS skills_repo  text;
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS last_ok_at   timestamptz;
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS last_error   text;
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS skills_repo  text;
     -- bay runs here now, so it needs the tokens it used to read from the
     -- user's own ~/.bay/env. Encrypted with the same key as the ssh key.
-    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS repo_path        text;
-    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS claude_token_enc text;
-    ALTER TABLE dev_boxes   ADD COLUMN IF NOT EXISTS github_token_enc text;
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS repo_path        text;
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS claude_token_enc text;
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS github_token_enc text;
   SQL
 
   def setup!

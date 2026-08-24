@@ -31,7 +31,7 @@ ENCRYPTION_KEY=$(dokku config:get "$APP" RQ_ENCRYPTION_KEY 2>/dev/null || true)
 if [ -z "$ENCRYPTION_KEY" ]; then
   ENCRYPTION_KEY=$(openssl rand -hex 32)
   echo "generated a new encryption key -- SAVE IT: losing it makes every stored"
-  echo "dev box key and token permanently unreadable."
+  echo "baybox key and token permanently unreadable."
   echo "  RQ_ENCRYPTION_KEY=$ENCRYPTION_KEY"
 else
   echo "keeping the existing encryption key"

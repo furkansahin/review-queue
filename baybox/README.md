@@ -1,6 +1,6 @@
-# Dev box setup
+# Baybox setup
 
-A dev box is a machine of your own that runs the review containers. The
+A baybox is a machine of your own that runs the review containers. The
 dashboard drives it: bay runs on the dashboard and points at this machine's
 Docker over ssh, so the box itself needs very little.
 
@@ -17,7 +17,7 @@ is gone. If your box still has them they are inert: delete `~/go/bin/bay`,
 
 ## From a fresh Ubuntu 24.04 VM
 
-**1. Register the box** on the dashboard's Dev box page: its address, your ssh
+**1. Register the box** on the dashboard's Baybox page: its address, your ssh
 user, and where the checkout should live. Paste in your Claude token (from
 `claude setup-token` on your own machine) and a GitHub PAT that can read the
 repository. Both are encrypted with the same key as your ssh key and are never
@@ -38,7 +38,7 @@ Then press **Test connection**. It should answer `pong <address>`.
 If you are already sitting on the machine:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/setup.sh -o setup.sh
+curl -fsSL https://raw.githubusercontent.com/furkansahin/review-queue/main/baybox/setup.sh -o setup.sh
 bash setup.sh --check    # look first
 bash setup.sh            # then do it
 ```
@@ -75,7 +75,7 @@ Both live on the dashboard now, per user, encrypted at rest.
 
 ## Skills
 
-Set a skills repository on the Dev box page and bay clones it into every new
+Set a skills repository on the Baybox page and bay clones it into every new
 box's `~/.claude/skills`, pulling it on later starts. It is cloned inside the
 box with that box's own GitHub token, so a private repository works and the
 dashboard never reads it.
@@ -89,7 +89,7 @@ free space and how many boxes that is.
 
 | file | what it is |
 | --- | --- |
-| `setup.sh` | prepares a dev box by hand; `--check` reports without changing anything |
+| `setup.sh` | prepares a baybox by hand; `--check` reports without changing anything |
 | `review-prompt.md` | the review instructions, copied into a box at review time |
 | `install-host.sh` | installs bay and its config on the **dashboard** host, not here |
 | `base-image` | an optional prebaked box image; see below |

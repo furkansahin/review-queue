@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
-# Dev box tests:  bundle exec ruby test_devbox.rb
+# Baybox tests:  bundle exec ruby test_baybox.rb
 ENV["RQ_ENCRYPTION_KEY"] = "0" * 64
-require_relative "devbox"
+require_relative "baybox"
 require "tempfile"
 
 $fail = 0
@@ -17,7 +17,7 @@ rescue klass => e
   e.message
 end
 
-priv, pub = DevBox.generate_keypair(comment: "review-queue")
+priv, pub = BayBox.generate_keypair(comment: "review-queue")
 check("private key is a PEM", priv.start_with?("-----BEGIN"), true)
 check("public key is ssh-rsa", pub.start_with?("ssh-rsa "), true)
 
@@ -36,15 +36,15 @@ Tempfile.create("id") do |f|
   check("public half matches the private half", derived.split[1], pub.split[1])
 end
 
-line = DevBox.authorized_keys_line(pub)
+line = BayBox.authorized_keys_line(pub)
 check("the key is restricted", line.start_with?("restrict "), true)
 check("the key is in the line", line.include?(pub), true)
 
-check("box name carries owner and repo", DevBox.box_name("ubicloud/ubicloud", 6172), "rq-ubicloud-ubicloud-6172")
+check("box name carries owner and repo", BayBox.box_name("ubicloud/ubicloud", 6172), "rq-ubicloud-ubicloud-6172")
 
-bad = ->(**kw) { raises(DevBox::Error) { DevBox.validate!(**kw) } }
+bad = ->(**kw) { raises(BayBox::Error) { BayBox.validate!(**kw) } }
 fields = {repo: "o.r-1/re_po", pr_number: 9, box: "rq-x-9"}
-check("accepts a normal repo", DevBox.validate!(**fields), true)
+check("accepts a normal repo", BayBox.validate!(**fields), true)
 check("rejects shell metacharacters in repo",
       bad.(**fields.merge(repo: "o/r; rm -rf /")).start_with?("bad repo"), true)
 check("rejects a non-numeric pull request",
@@ -62,18 +62,18 @@ check("rejects a bare repo name (the 'bad repo' bug)",
 # ubicloud/ubicloud and furkansahin/ubicloud shared rq-ubicloud-5, so each
 # published the other's review and tearing one down removed the other's box.
 check("different owners get different names",
-      DevBox.box_name("ubicloud/ubicloud", 5) == DevBox.box_name("furkansahin/ubicloud", 5), false)
-check("the owner is in the name", DevBox.box_name("ubicloud/ubicloud", 5), "rq-ubicloud-ubicloud-5")
-check("an uppercase repo is usable", DevBox.box_name("ubicloud/Bay", 42), "rq-ubicloud-bay-42")
-check("a dotted repo is usable", DevBox.box_name("o/r.rb", 7), "rq-o-r-rb-7")
-long = DevBox.box_name("a" * 80 + "/" + "b" * 80, 6172)
-check("a long repo still fits BOX_RE", long.match?(DevBox::BOX_RE), true)
+      BayBox.box_name("ubicloud/ubicloud", 5) == BayBox.box_name("furkansahin/ubicloud", 5), false)
+check("the owner is in the name", BayBox.box_name("ubicloud/ubicloud", 5), "rq-ubicloud-ubicloud-5")
+check("an uppercase repo is usable", BayBox.box_name("ubicloud/Bay", 42), "rq-ubicloud-bay-42")
+check("a dotted repo is usable", BayBox.box_name("o/r.rb", 7), "rq-o-r-rb-7")
+long = BayBox.box_name("a" * 80 + "/" + "b" * 80, 6172)
+check("a long repo still fits BOX_RE", long.match?(BayBox::BOX_RE), true)
 check("and keeps the pull request number", long.end_with?("-6172"), true)
 
 # --- the key line -----------------------------------------------------------
 # bay needs git and docker over this connection, so the key cannot be pinned to
 # one program. restrict is what survives that.
-open_line = DevBox.authorized_keys_line("ssh-rsa AAAA")
+open_line = BayBox.authorized_keys_line("ssh-rsa AAAA")
 check("the key is not pinned to a program", open_line.include?("command="), false)
 check("but it keeps restrict", open_line.start_with?("restrict "), true)
 check("and it is still the same key", open_line.end_with?("ssh-rsa AAAA"), true)
@@ -89,10 +89,10 @@ ok_skills = {
   "https://github.com/a/b/"               => "https://github.com/a/b"
 }
 ok_skills.each do |input, want|
-  check("accepts #{input.strip[0, 34]}", DevBox.check_skills_repo!(input), want)
+  check("accepts #{input.strip[0, 34]}", BayBox.check_skills_repo!(input), want)
 end
-check("empty means no skills repository", DevBox.check_skills_repo!(""), nil)
-check("nil means the same", DevBox.check_skills_repo!(nil), nil)
+check("empty means no skills repository", BayBox.check_skills_repo!(""), nil)
+check("nil means the same", BayBox.check_skills_repo!(nil), nil)
 
 [
   "http://github.com/a/b",            # not https
@@ -105,9 +105,9 @@ check("nil means the same", DevBox.check_skills_repo!(nil), nil)
   "https://github.com/a/b/../../c"    # traversal
 ].each do |bad|
   refused = begin
-    DevBox.check_skills_repo!(bad)
+    BayBox.check_skills_repo!(bad)
     false
-  rescue DevBox::Error
+  rescue BayBox::Error
     true
   end
   check("refuses #{bad[0, 34]}", refused, true)

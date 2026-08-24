@@ -167,7 +167,7 @@
          border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
   /* nowrap and no shrink: these are flex items in a single-line bar, so without
      them an over-full bar squeezes the buttons until their labels break
-     mid-word -- "Dev box" rendered as "Dev" over "box". */
+     mid-word -- "Baybox" rendered as "Bay" over "box". */
   .btn { font: 500 13px 'IBM Plex Sans', sans-serif; padding: 6px 14px; border: 1px solid var(--btn-border);
          background: var(--btn-bg); border-radius: 6px; cursor: pointer; color: var(--btn-fg);
          white-space: nowrap; flex-shrink: 0; }
@@ -297,7 +297,7 @@
   </form>
   <% if reviews_enabled %>
     <a class="btn" href="/sessions" style="text-decoration: none;">Sessions</a>
-    <a class="btn" href="/devbox" style="text-decoration: none;">Dev box</a>
+    <a class="btn" href="/baybox" style="text-decoration: none;">Baybox</a>
   <% end %>
 
   <%# <details> is the disclosure this page can afford: it opens with no script,
@@ -361,8 +361,8 @@
   <div class="mono" style="margin: 14px 24px 0; padding: 10px 16px; border: 1px solid var(--err-border);
        background: var(--err-bg); border-radius: 8px; font-size: 12px; color: var(--err-fg);">
     Could not start the review: <%= review_error %><%
-      %><%= review_error.to_s.include?("dev box") ? " — " : "" %><%
-      %><% if review_error.to_s.include?("dev box") %><a href="/devbox">register one</a><% end %>
+      %><%= review_error.to_s.include?("baybox") ? " — " : "" %><%
+      %><% if review_error.to_s.include?("baybox") %><a href="/baybox">register one</a><% end %>
   </div>
 <% end %>
 
@@ -482,22 +482,22 @@
         <% if reviews_enabled && !r[:settled] %>
           <% job = jobs_by_key[r[:key]] %>
           <% if job && %w[queued running].include?(job["state"]) %>
-            <a class="mini" href="/sessions" title="a review is running on your dev box"
+            <a class="mini" href="/sessions" title="a review is running on your baybox"
                style="text-decoration: none;"><%= job["state"] %></a>
           <% elsif job && job["state"] == "done" %>
             <a class="mini" href="/sessions" title="the review is ready"
                style="text-decoration: none; color: var(--quick-fg);">review ✓</a>
           <% else %>
-            <% if has_dev_box %>
+            <% if has_baybox %>
               <form method="post" action="/review?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
                 <%== csrf_review %>
                 <input type="hidden" name="repo" value="<%= r[:repo_full] %>" />
                 <input type="hidden" name="pr" value="<%= r[:number] %>" />
-                <button class="mini" type="submit" title="start an adversarial review on your dev box">Review</button>
+                <button class="mini" type="submit" title="start an adversarial review on your baybox">Review</button>
               </form>
             <% else %>
-              <a class="mini" href="/devbox" style="text-decoration: none;"
-                 title="register a dev box before starting reviews">Set up</a>
+              <a class="mini" href="/baybox" style="text-decoration: none;"
+                 title="register a baybox before starting reviews">Set up</a>
             <% end %>
           <% end %>
         <% end %>

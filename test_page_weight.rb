@@ -18,8 +18,8 @@ require "rack/test"
 require "json"
 require_relative "app"
 
-# No dev box in a test, and the box list is not what is being measured.
-DevBox.singleton_class.prepend(Module.new do
+# No baybox in a test, and the box list is not what is being measured.
+BayBox.singleton_class.prepend(Module.new do
   def run_many(_box, commands, **) = commands.map { {ok: true, output: "", exit_code: 0} }
 end)
 
@@ -35,10 +35,10 @@ def check(name, got, want)
 end
 
 DB.setup!
-DB.exec("TRUNCATE review_jobs, dev_boxes RESTART IDENTITY CASCADE")
-DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
+DB.exec("INSERT INTO bayboxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
         ["furkansahin", "box.example", "x", "ssh-rsa AAAA"])
-bid = DB.row("SELECT id FROM dev_boxes")["id"]
+bid = DB.row("SELECT id FROM bayboxes")["id"]
 
 # 50 finished reviews at the size a review is actually capped to.
 JOBS = 50
@@ -47,7 +47,7 @@ ids = []
 JOBS.times do |i|
   body = "## Finding #{i}\n" + ("the reduce raises on an empty list\n" * 5000)
   DB.exec(<<~SQL, [bid, 6000 + i, "rq-ubicloud-#{6000 + i}", body[0, CAP]])
-    INSERT INTO review_jobs (login, dev_box_id, repo, pr_number, box_name, state, output, finished_at)
+    INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, output, finished_at)
     VALUES ('furkansahin', $1, 'ubicloud/ubicloud', $2, $3, 'done', $4, now())
   SQL
   ids << DB.row("SELECT id FROM review_jobs ORDER BY id DESC LIMIT 1")["id"]

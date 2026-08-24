@@ -100,7 +100,7 @@ size and load when their panel is opened. Each one also carries a plain link to
 The queue page shows no review text at all, so it no longer reads any: it asks for the state
 word per pull request and nothing else.
 
-`Boxes on your dev box` comes from an ssh round trip to `bay list`, which was the slowest
+`Boxes on your baybox` comes from an ssh round trip to `bay list`, which was the slowest
 thing on the page and was paid on every load. It caches for `RQ_BOX_LIST_TTL` seconds, and a
 teardown clears it, so the list is never stale at the moment you are looking at it.
 

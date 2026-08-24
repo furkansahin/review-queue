@@ -2,7 +2,7 @@ require "open3"
 require "fileutils"
 require "json"
 require_relative "crypto"
-require_relative "devbox"
+require_relative "baybox"
 require_relative "queue_service"
 require_relative "stream_render"
 
@@ -11,15 +11,15 @@ require_relative "stream_render"
 # bay already knows how to work a remote Docker host: DOCKER_HOST=ssh://<host>
 # for containers, ssh for git and worktrees. So the dashboard runs bay, points
 # it at the user's own machine, and the containers still live there. What used
-# to be a shell wrapper installed on every box (its own verbs, its
-# own state files) is this file instead -- one copy, deployed with the app.
+# to be a shell wrapper installed on every baybox, with its own verbs and its
+# own state files, is this file instead -- one copy, deployed with the app.
 #
 # Each user gets their own bay home, their own config, their own state. Nothing
 # is shared between two users except the read-only tooling in bin/ and the
 # repo's config folder, which is the same for everybody.
 #
-# The verbs are the same words the wrapper used, so jobs.rb, worker.rb and the
-# routes did not have to learn a new vocabulary.
+# The verbs kept their names through that move, so jobs.rb, worker.rb and the
+# routes never had to learn a new vocabulary.
 module Runner
   extend self
 
@@ -39,13 +39,13 @@ module Runner
   SHARED_CONFIG = File.join(ROOT, "config")
   # The review instructions, deployed with the app rather than installed on each
   # box. Overridable for tests.
-  PROMPT = ENV.fetch("RQ_REVIEW_PROMPT", File.join(__dir__, "devbox", "review-prompt.md"))
+  PROMPT = ENV.fetch("RQ_REVIEW_PROMPT", File.join(__dir__, "baybox", "review-prompt.md"))
 
   BOX_RE = /\A[a-z0-9][a-z0-9-]{0,48}\z/
 
   def enabled? = File.executable?(BAY) && File.directory?(SHARED_CONFIG) && File.exist?(COMPOSE)
 
-  # Why not, in a sentence, for the Dev box page to show.
+  # Why not, in a sentence, for the Baybox page to show.
   def unavailable_reason
     return nil if enabled?
     return "bay is not installed at #{BAY}" unless File.executable?(BAY)
@@ -343,7 +343,8 @@ module Runner
   end
 
   # --- the verbs -------------------------------------------------------------
-  # Same words the wrapper used, so the worker and the routes are unchanged.
+  # One word per thing a caller can ask for, so the worker and the routes read
+  # the same whatever is underneath.
   def run(box_row, command, timeout: 120, stdin: nil)
     verb, *rest = command.to_s.split(" ")
     case verb
@@ -437,7 +438,7 @@ module Runner
   # state lives: here, on a persistent mount, next to the database that records
   # the same job.
   def review(box_row, repo:, pr_number:, box:)
-    DevBox.validate!(repo: repo, pr_number: pr_number, box: box)
+    BayBox.validate!(repo: repo, pr_number: pr_number, box: box)
     raise Error, "the review prompt is missing at #{PROMPT}" unless File.size?(PROMPT)
     login = box_row["login"]
     dir = state_dir(login, box)
@@ -464,7 +465,7 @@ module Runner
       fi
     SH
     {ok: true, output: "started #{box}", exit_code: 0}
-  rescue DevBox::Error, Error, Crypto::Error => e
+  rescue BayBox::Error, Error, Crypto::Error => e
     {ok: false, output: "", exit_code: nil, error: e.message}
   end
 
@@ -517,7 +518,7 @@ module Runner
     return bad_box unless box.to_s.match?(BOX_RE)
     path = "#{worktree(box_row, box)}/#{BOX_LOG}"
     res = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
-                   "cat #{DevBox.sh_quote(path)} 2>/dev/null || true"],
+                   "cat #{BayBox.sh_quote(path)} 2>/dev/null || true"],
                   env_for(box_row), timeout: 60)
     return res.merge(finished: false) unless res[:ok]
 
@@ -575,7 +576,7 @@ module Runner
 
     path = (box_row["repo_path"] || "ubicloud").to_s
     script = <<~SH
-      cd #{DevBox.sh_quote(path)} || exit 0
+      cd #{BayBox.sh_quote(path)} || exit 0
 
       # A branch lives in one worktree at a time. If the base clone is sitting
       # on the very branch this review needs, the review's own worktree cannot
@@ -584,7 +585,7 @@ module Runner
       # A previous review leaves it there, so put the base clone back on its
       # base branch first. git carries uncommitted work across, and if it
       # cannot, this gives up rather than forcing anything.
-      if [ "$(git symbolic-ref --quiet --short HEAD)" = #{DevBox.sh_quote(ref)} ]; then
+      if [ "$(git symbolic-ref --quiet --short HEAD)" = #{BayBox.sh_quote(ref)} ]; then
         base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
         base=${base#origin/}
         git checkout --quiet "${base:-main}" 2>/dev/null \
@@ -618,10 +619,10 @@ module Runner
   # "ssh -F <path>", which bash reads as a single command name -- the copy never
   # ran, and `|| true` swallowed it, so the review started with no instructions
   # and claude answered "Input must be provided". A missing prompt fails the
-  # review now, loudly, which is what the wrapper already did.
+  # review now, loudly, rather than running it blind.
   def place_prompt(box_row, box)
     path = "#{worktree(box_row, box)}/.rq/review-prompt.md"
-    remote = DevBox.sh_quote("mkdir -p #{DevBox.sh_quote(File.dirname(path))} && cat > #{DevBox.sh_quote(path)}")
+    remote = BayBox.sh_quote("mkdir -p #{BayBox.sh_quote(File.dirname(path))} && cat > #{BayBox.sh_quote(path)}")
     <<~SH.strip
       if ! ssh -F "$SSH_CFG" #{host_alias(box_row["login"])} #{remote} < "$PROMPT_FILE"; then
         echo "could not place the review prompt on the machine" >> "$DIR/build.log"
@@ -686,11 +687,11 @@ module Runner
         exit 1
       fi
 
-      if [ -d #{DevBox.sh_quote(path)}/.git ]; then
+      if [ -d #{BayBox.sh_quote(path)}/.git ]; then
         say "checkout already at ~/#{path}"
       else
         say "cloning #{REPO_URL}"
-        git clone --quiet #{DevBox.sh_quote(REPO_URL)} #{DevBox.sh_quote(path)} \
+        git clone --quiet #{BayBox.sh_quote(REPO_URL)} #{BayBox.sh_quote(path)} \
           && say "cloned into ~/#{path}" || { echo "  clone failed"; exit 1; }
       fi
 
@@ -711,8 +712,8 @@ module Runner
   def mark_run(box_row, box)
     path = "#{worktree(box_row, box)}/#{BOX_LOG}"
     argv = ["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
-            "mkdir -p #{DevBox.sh_quote(File.dirname(path))} && " \
-            "echo #{DevBox.sh_quote(RUN_MARK)} >> #{DevBox.sh_quote(path)}"]
+            "mkdir -p #{BayBox.sh_quote(File.dirname(path))} && " \
+            "echo #{BayBox.sh_quote(RUN_MARK)} >> #{BayBox.sh_quote(path)}"]
     capture(argv, env_for(box_row), timeout: 30)
   end
 
@@ -721,7 +722,7 @@ module Runner
   # ever parsed by a shell.
   def put_file(box_row, path, body)
     argv = ["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
-            "mkdir -p #{DevBox.sh_quote(File.dirname(path))} && cat > #{DevBox.sh_quote(path)}"]
+            "mkdir -p #{BayBox.sh_quote(File.dirname(path))} && cat > #{BayBox.sh_quote(path)}"]
     capture(argv, env_for(box_row), timeout: 30, stdin: body)
   end
 

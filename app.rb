@@ -5,14 +5,14 @@ require_relative "queue_service"
 require_relative "auth"
 require_relative "snooze"
 
-# The review feature needs Postgres and a dev box. Without DATABASE_URL the
+# The review feature needs Postgres and a baybox. Without DATABASE_URL the
 # dashboard still runs and simply does not offer it, so this branch can deploy
 # before the database exists.
 REVIEWS_ENABLED = !ENV["DATABASE_URL"].to_s.empty?
 if REVIEWS_ENABLED
   require_relative "db"
   require_relative "jobs"
-  require_relative "devbox"
+  require_relative "baybox"
 require_relative "runner"
 require_relative "stream_render"
 require_relative "transcript"
@@ -225,10 +225,10 @@ class ReviewQueue < Roda
       r.redirect "/?#{r.query_string}"
     end
 
-    r.on "devbox" do
+    r.on "baybox" do
       next r.redirect "/" unless REVIEWS_ENABLED
 
-      current = -> { DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login]) }
+      current = -> { DB.row("SELECT * FROM bayboxes WHERE login = $1", [current_login]) }
 
       # A blank box means keep what is stored, "-" means clear it. The page
       # never shows a token back, so blank cannot mean "set it to empty".
@@ -243,10 +243,10 @@ class ReviewQueue < Roda
         check_csrf!
         error = nil
         begin
-          t = DevBox.check_target!(host: r.params["host"], ssh_user: r.params["ssh_user"],
+          t = BayBox.check_target!(host: r.params["host"], ssh_user: r.params["ssh_user"],
                                    port: r.params["port"].to_s.empty? ? 22 : r.params["port"])
-          skills = DevBox.check_skills_repo!(r.params["skills_repo"])
-          repo_path = DevBox.check_repo_path!(r.params["repo_path"])
+          skills = BayBox.check_skills_repo!(r.params["skills_repo"])
+          repo_path = BayBox.check_repo_path!(r.params["repo_path"])
           # A blank field means "leave what is stored". Otherwise a user who
           # only wants to change the host would have to retype both tokens,
           # and the page never shows them back.
@@ -257,18 +257,18 @@ class ReviewQueue < Roda
             # Keep the existing keypair: changing the address must not force the
             # user to reinstall the key.
             DB.exec(<<~SQL, [t[:host], t[:ssh_user], t[:port], skills, repo_path, claude, github, row["id"]])
-              UPDATE dev_boxes SET host=$1, ssh_user=$2, port=$3, skills_repo=$4,
+              UPDATE bayboxes SET host=$1, ssh_user=$2, port=$3, skills_repo=$4,
                                    repo_path=$5, claude_token_enc=$6, github_token_enc=$7
               WHERE id=$8
             SQL
           else
-            priv, pub = DevBox.generate_keypair(comment: "review-queue:#{current_login}")
+            priv, pub = BayBox.generate_keypair(comment: "review-queue:#{current_login}")
             # The array is built first: a heredoc body starts on the next line,
             # so a continuation inside the argument list lands inside the SQL.
             values = [current_login, t[:host], t[:ssh_user], t[:port],
                       Crypto.encrypt(priv), pub, skills, repo_path, claude, github]
             DB.exec(<<~SQL, values)
-              INSERT INTO dev_boxes (login, host, ssh_user, port, private_key_enc, public_key,
+              INSERT INTO bayboxes (login, host, ssh_user, port, private_key_enc, public_key,
                                      skills_repo, repo_path, claude_token_enc, github_token_enc)
               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             SQL
@@ -278,13 +278,13 @@ class ReviewQueue < Roda
           # again, and so does the next save.
           if (row = current.call)
             res = Runner.run(row, "skills #{skills}")
-            session["devbox_notice"] = res[:ok] ? nil : "saved, but the box did not take the skills repository yet: #{(res[:error] || res[:output]).to_s[0, 200]}"
+            session["baybox_notice"] = res[:ok] ? nil : "saved, but the box did not take the skills repository yet: #{(res[:error] || res[:output]).to_s[0, 200]}"
           end
-        rescue DevBox::Error => e
+        rescue BayBox::Error => e
           error = e.message
         end
-        session["devbox_error"] = error
-        r.redirect "/devbox"
+        session["baybox_error"] = error
+        r.redirect "/baybox"
       end
 
       # Everything a box needs except the key that grants access to do it.
@@ -297,11 +297,11 @@ class ReviewQueue < Roda
           # is nil when the string is shorter than n, and that silently threw
           # away every short answer, including every success.
           tail = detail.length > 1200 ? detail[(detail.length - 1200)..] : detail
-          session[res[:ok] ? "devbox_notice" : "devbox_error"] =
+          session[res[:ok] ? "baybox_notice" : "baybox_error"] =
             (res[:ok] ? "Prepared the box.\n" : "Could not finish preparing the box.\n") + tail.to_s
-          DB.exec("UPDATE dev_boxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]]) if res[:ok]
+          DB.exec("UPDATE bayboxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]]) if res[:ok]
         end
-        r.redirect "/devbox"
+        r.redirect "/baybox"
       end
 
       r.post "test" do
@@ -309,46 +309,46 @@ class ReviewQueue < Roda
         if (row = current.call)
           res = Runner.check(row)
           if res[:ok]
-            DB.exec("UPDATE dev_boxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
+            DB.exec("UPDATE bayboxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
             # A reachable box is the moment to make the stored value true again,
             # for a box that was down when it was saved, or was rebuilt since.
             Runner.run(row, "skills #{row["skills_repo"]}")
           else
             detail = (res[:error] || res[:output].to_s)[0, 500]
-            DB.exec("UPDATE dev_boxes SET last_error = $1 WHERE id = $2", [detail, row["id"]])
+            DB.exec("UPDATE bayboxes SET last_error = $1 WHERE id = $2", [detail, row["id"]])
           end
         end
-        r.redirect "/devbox"
+        r.redirect "/baybox"
       end
 
       # A new keypair revokes the old one, which is the point.
       r.post "rotate" do
         check_csrf!
         if (row = current.call)
-          priv, pub = DevBox.generate_keypair(comment: "review-queue:#{current_login}")
-          DB.exec("UPDATE dev_boxes SET private_key_enc=$1, public_key=$2, last_ok_at=NULL, last_error=NULL WHERE id=$3",
+          priv, pub = BayBox.generate_keypair(comment: "review-queue:#{current_login}")
+          DB.exec("UPDATE bayboxes SET private_key_enc=$1, public_key=$2, last_ok_at=NULL, last_error=NULL WHERE id=$3",
                   [Crypto.encrypt(priv), pub, row["id"]])
         end
-        r.redirect "/devbox"
+        r.redirect "/baybox"
       end
 
       r.post "delete" do
         check_csrf!
-        DB.exec("DELETE FROM dev_boxes WHERE login = $1", [current_login])
-        r.redirect "/devbox"
+        DB.exec("DELETE FROM bayboxes WHERE login = $1", [current_login])
+        r.redirect "/baybox"
       end
 
       r.get true do
         box = current.call
-        view("devbox", locals: {box: box, login: current_login,
-                                error: session.delete("devbox_error"),
-                                notice: session.delete("devbox_notice"),
-                                authorized_line: box && DevBox.authorized_keys_line(box["public_key"]),
-                                csrf_save: csrf_tag("/devbox/save"),
-                                csrf_test: csrf_tag("/devbox/test"),
-                                csrf_prepare: csrf_tag("/devbox/prepare"),
-                                csrf_rotate: csrf_tag("/devbox/rotate"),
-                                csrf_delete: csrf_tag("/devbox/delete")},
+        view("baybox", locals: {box: box, login: current_login,
+                                error: session.delete("baybox_error"),
+                                notice: session.delete("baybox_notice"),
+                                authorized_line: box && BayBox.authorized_keys_line(box["public_key"]),
+                                csrf_save: csrf_tag("/baybox/save"),
+                                csrf_test: csrf_tag("/baybox/test"),
+                                csrf_prepare: csrf_tag("/baybox/prepare"),
+                                csrf_rotate: csrf_tag("/baybox/rotate"),
+                                csrf_delete: csrf_tag("/baybox/delete")},
           layout: false)
       end
     end
@@ -367,11 +367,11 @@ class ReviewQueue < Roda
                              [current_login, id])
           name = row ? row["box_name"].to_s : ""
         end
-        box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
+        box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [current_login])
 
         if name.empty? || box.nil?
-          session["sessions_error"] = "no such box, or no dev box registered"
-        elsif !name.match?(DevBox::BOX_RE)
+          session["sessions_error"] = "no such box, or no baybox registered"
+        elsif !name.match?(BayBox::BOX_RE)
           session["sessions_error"] = "bad box name"
         else
           res = Runner.run(box, "teardown #{name}")
@@ -398,14 +398,14 @@ class ReviewQueue < Roda
         id = param_id(r.params["id"])
         job = id && DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2",
                            [current_login, id])
-        box = job && Jobs.dev_box(job)
+        box = job && Jobs.baybox(job)
 
         if prompt.empty?
           session["sessions_error"] = "type a question first"
         elsif prompt.bytesize > 8192
           session["sessions_error"] = "that question is too long (8 KB limit)"
         elsif job.nil? || box.nil?
-          session["sessions_error"] = "no such review, or no dev box registered"
+          session["sessions_error"] = "no such review, or no baybox registered"
         elsif !%w[done failed].include?(job["state"])
           session["sessions_error"] = "wait for the review to finish first"
         else
@@ -595,11 +595,11 @@ class ReviewQueue < Roda
         # Only the reviews this page is going to print. The rest carry their
         # size and load from /sessions/review when their panel is opened.
         outputs = Jobs.outputs(current_login, Jobs.inline_ids(jobs))
-        box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
-        # Boxes outlive their reviews, so ask the dev box what actually exists
+        box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [current_login])
+        # Boxes outlive their reviews, so ask the baybox what actually exists
         # rather than trusting our own rows.
         boxes = box ? Runner.box_list(box) : []
-        view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, dev_box: box,
+        view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, baybox: box,
                                   login: current_login,
                                   error: session.delete("sessions_error"),
                                   notice: session.delete("sessions_notice"),
@@ -711,8 +711,8 @@ class ReviewQueue < Roda
                              suggested_label: SUGGESTED_LABEL,
                              reviews_enabled: REVIEWS_ENABLED,
                              review_error: session.delete("review_error"),
-                             has_dev_box: (REVIEWS_ENABLED &&
-                               !DB.row("SELECT 1 FROM dev_boxes WHERE login = $1", [current_login]).nil?),
+                             has_baybox: (REVIEWS_ENABLED &&
+                               !DB.row("SELECT 1 FROM bayboxes WHERE login = $1", [current_login]).nil?),
                              csrf_review: csrf_tag("/review"),
                              jobs_by_key: (REVIEWS_ENABLED ? Jobs.by_key(current_login) : {}),
                              csrf_unsnooze: csrf_tag("/unsnooze"),

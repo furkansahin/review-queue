@@ -564,7 +564,7 @@ class QueueService
     {
       # repo is the bare name ("ubicloud"), which is what the row shows.
       # repo_full is "owner/name", which is what GitHub, the job records and
-      # the dev box all need. The key uses the full name so a row and its job
+      # the baybox all need. The key uses the full name so a row and its job
       # identify the same pull request.
       key: "#{pr[:owner]}/#{pr[:repo]}##{pr[:number]}",
       repo: pr[:repo], repo_full: "#{pr[:owner]}/#{pr[:repo]}", number: pr[:number],

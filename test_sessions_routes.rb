@@ -13,7 +13,7 @@ require "rack/test"
 require "json"
 require_relative "app"
 require_relative "jobs"
-require_relative "devbox"
+require_relative "baybox"
 
 WHO = {login: "furkansahin"}
 GitHubOAuth.class_eval { define_method(:exchange) { |_| "gho_x" } }
@@ -35,7 +35,7 @@ QueueService.class_eval do
      error: nil, reviews_7d: {count: 0, complete: true}}
   end
 end
-# One stub for the dev box. Mutable, so a test can change how a verb behaves.
+# One stub for the baybox. Mutable, so a test can change how a verb behaves.
 STUB = {teardown: {ok: true, output: "torn down"}, asked: nil}
 # Both transports are stubbed, so these tests hold whichever one the app is
 # built with -- bay running here, or the wrapper on the box.
@@ -57,7 +57,7 @@ box_stub = Module.new do
   def forget_box_list(_box_row) = nil
   def check(box_row) = run(box_row, "ping")
 end
-DevBox.singleton_class.prepend(box_stub)
+BayBox.singleton_class.prepend(box_stub)
 Runner.singleton_class.prepend(box_stub)
 
 include Rack::Test::Methods
@@ -70,27 +70,27 @@ def check(name, got, want)
 end
 def csrf_for(body, path) = body[/action="#{Regexp.escape(path)}[^"]*"[^>]*>\s*<input type="hidden" name="[^"]+" value="([^"]+)"/m, 1]
 
-DB.exec("TRUNCATE review_jobs, dev_boxes RESTART IDENTITY CASCADE")
-priv, pub = DevBox.generate_keypair
-DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
+priv, pub = BayBox.generate_keypair
+DB.exec("INSERT INTO bayboxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
         ["furkansahin", "10.0.0.5", Crypto.encrypt(priv), pub])
 
 get "/auth/start"; st = last_response.location[/state=([^&]+)/, 1]
 get "/auth/callback?code=c&state=#{st}"
 
-# with no dev box the button must not silently do nothing
-DB.exec("DELETE FROM dev_boxes WHERE login = $1", ["furkansahin"])
+# with no baybox the button must not silently do nothing
+DB.exec("DELETE FROM bayboxes WHERE login = $1", ["furkansahin"])
 get "/"
-check("no dev box -> offers Set up, not Review", last_response.body.include?(">Set up</a>"), true)
+check("no baybox -> offers Set up, not Review", last_response.body.include?(">Set up</a>"), true)
 tok0 = csrf_for(last_response.body, "/review") rescue tok0 = nil
-check("no dev box -> no review form at all", tok0.nil?, true)
-DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+check("no baybox -> no review form at all", tok0.nil?, true)
+DB.exec("INSERT INTO bayboxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
         ["furkansahin", "203.0.113.10", Crypto.encrypt(priv), pub])
 
 get "/"
 check("Review button is offered", last_response.body.include?(">Review<"), true)
 # the form must post owner/name, not the bare repo name: a bare name fails
-# DevBox validation with "bad repo"
+# BayBox validation with "bad repo"
 check("form posts the full owner/name",
       last_response.body.include?('name="repo" value="ubicloud/ubicloud"'), true)
 check("Sessions link is in the bar", last_response.body.include?('href="/sessions"'), true)
@@ -112,21 +112,21 @@ check("review without CSRF is blocked", last_response.status, 403)
 
 # a rejected enqueue must tell the user why
 DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
-DB.exec("DELETE FROM dev_boxes WHERE login = $1", ["furkansahin"])
+DB.exec("DELETE FROM bayboxes WHERE login = $1", ["furkansahin"])
 get "/"
-DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+DB.exec("INSERT INTO bayboxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
         ["furkansahin", "203.0.113.10", Crypto.encrypt(priv), pub])
 get "/"; t2 = csrf_for(last_response.body, "/review")
-DB.exec("DELETE FROM dev_boxes WHERE login = $1", ["furkansahin"])
+DB.exec("DELETE FROM bayboxes WHERE login = $1", ["furkansahin"])
 post "/review", {"repo" => "ubicloud/ubicloud", "pr" => "6172", "_csrf" => t2}
 get "/"
 check("failed review shows an explanation", last_response.body.include?("Could not start the review"), true)
-check("and points at the dev box page", last_response.body.include?("register one"), true)
+check("and points at the baybox page", last_response.body.include?("register one"), true)
 get "/"
 check("the banner is shown once, then cleared", last_response.body.include?("Could not start the review"), false)
 
 # put the state back for the sessions assertions below
-DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
+DB.exec("INSERT INTO bayboxes (login, host, private_key_enc, public_key) VALUES ($1,$2,$3,$4)",
         ["furkansahin", "203.0.113.10", Crypto.encrypt(priv), pub])
 get "/"; post "/review", {"repo" => "ubicloud/ubicloud", "pr" => "6172",
                           "_csrf" => csrf_for(last_response.body, "/review")}
@@ -135,7 +135,7 @@ get "/sessions"
 check("sessions page renders", last_response.status, 200)
 check("active section lists the job", last_response.body.include?("ubicloud/ubicloud #6172"), true)
 check("links to the pull request", last_response.body.include?("https://github.com/ubicloud/ubicloud/pull/6172"), true)
-check("shows real boxes from the dev box", last_response.body.include?("rq-ubicloud-6172"), true)
+check("shows real boxes from the baybox", last_response.body.include?("rq-ubicloud-6172"), true)
 
 # progress on a running job must show, and must not change its state
 job_id = DB.row("SELECT id FROM review_jobs ORDER BY id DESC LIMIT 1")["id"]
@@ -380,9 +380,9 @@ check("another user gets their own empty page", other.last_response.status, 200)
 # reopen re-enters the unique index and used to raise a 500 -- after the ask had
 # already been sent to the box.
 DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
-boxid = DB.row("SELECT id FROM dev_boxes WHERE login=$1", ["furkansahin"])["id"]
+boxid = DB.row("SELECT id FROM bayboxes WHERE login=$1", ["furkansahin"])["id"]
 failed = DB.row(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 555, "rq-a-555", boxid])
-  INSERT INTO review_jobs (login, repo, pr_number, box_name, state, error, dev_box_id)
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, state, error, baybox_id)
   VALUES ($1,$2,$3,$4,'failed','cancelled',$5) RETURNING *
 SQL
 DB.exec(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 555, "rq-a-555"])

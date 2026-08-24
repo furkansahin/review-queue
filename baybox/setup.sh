@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Prepares a dev box: docker, the docker group, and a checkout.
+# Prepares a baybox: docker, the docker group, and a checkout.
 #
 #   ./setup.sh           install what is missing
 #   ./setup.sh --check   report only, change nothing
 #
 # This is the same work the dashboard's "Prepare this box" button does, and
 # that button is the easier way -- it needs nothing on the box but the key from
-# the Dev box page. This script exists for a machine you are already sitting on,
+# the Baybox page. This script exists for a machine you are already sitting on,
 # or for one the dashboard cannot reach yet.
 #
 # A box needs three things and no more:
@@ -22,7 +22,7 @@ set -euo pipefail
 # This changes a machine. It once ran on a laptop by accident and rewrote an
 # ssh config, so it refuses anything that is not a Linux box unless told.
 if [ "$(uname -s)" != "Linux" ] && [ "${RQ_FORCE_HOST:-}" != "1" ]; then
-  echo "setup.sh changes this machine and is meant for a Linux dev box." >&2
+  echo "setup.sh changes this machine and is meant for a Linux baybox." >&2
   echo "Run it there, or set RQ_FORCE_HOST=1 if you are certain." >&2
   exit 1
 fi
@@ -41,11 +41,11 @@ can_change() { ! $CHECK_ONLY; }
 
 echo "== the dashboard's key =="
 # The one step nothing here can do: it is what grants the access the rest of
-# this would use. The line to paste is on the Dev box page.
+# this would use. The line to paste is on the Baybox page.
 if grep -q "review-queue:" "$HOME/.ssh/authorized_keys" 2>/dev/null; then
   ok "a review-queue key is installed"
 else
-  todo "paste the key line from the dashboard's Dev box page into ~/.ssh/authorized_keys"
+  todo "paste the key line from the dashboard's Baybox page into ~/.ssh/authorized_keys"
 fi
 
 echo "== docker =="

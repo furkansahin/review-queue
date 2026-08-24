@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Dev box · Review queue</title>
+<title>Baybox · Review queue</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -52,7 +52,7 @@
 </head>
 <body>
 <div class="bar">
-  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Dev box</div>
+  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Baybox</div>
   <a class="mono" style="font-size: 12px;" href="/">← back to the queue</a>
   <a class="mono" style="font-size: 12px;" href="/sessions">sessions</a>
   <div style="flex: 1;"></div>
@@ -72,7 +72,7 @@
 
   <h2>Where it is</h2>
   <div class="card">
-    <form method="post" action="/devbox/save">
+    <form method="post" action="/baybox/save">
       <%== csrf_save %>
       <div class="fields">
         <div class="f-host">
@@ -133,7 +133,7 @@
         </div>
       </div>
       <div style="margin-top: 14px; display: flex; gap: 8px; align-items: center;">
-        <button class="go" type="submit"><%= box ? "Save" : "Register this dev box" %></button>
+        <button class="go" type="submit"><%= box ? "Save" : "Register this baybox" %></button>
         <% if box %>
           <span class="note">Changing the address keeps your key, so there is nothing to reinstall.</span>
         <% end %>
@@ -174,7 +174,7 @@
               or <span class="mono">~/.bay/env</span>: the dashboard holds those. A few minutes
               the first time, and it does nothing it has already done.
             </div>
-            <form method="post" action="/devbox/prepare" style="margin: 0;">
+            <form method="post" action="/baybox/prepare" style="margin: 0;">
               <%== csrf_prepare %>
               <button class="go" type="submit">Prepare this box</button>
             </form>
@@ -188,7 +188,7 @@
     <h2>Connection</h2>
     <div class="card">
       <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-        <form method="post" action="/devbox/test" style="margin: 0;">
+        <form method="post" action="/baybox/test" style="margin: 0;">
           <%== csrf_test %>
           <button class="btn" type="submit">Test connection</button>
         </form>
@@ -209,16 +209,16 @@
     <div class="card">
       <div class="note" style="margin-bottom: 10px;">
         Rotating generates a new keypair and invalidates the old one. You then reinstall the
-        line above. Removing the dev box deletes the private key from this server entirely.
+        line above. Removing the baybox deletes the private key from this server entirely.
       </div>
       <div style="display: flex; gap: 8px;">
-        <form method="post" action="/devbox/rotate" style="margin: 0;">
+        <form method="post" action="/baybox/rotate" style="margin: 0;">
           <%== csrf_rotate %>
           <button class="btn" type="submit">Rotate key</button>
         </form>
-        <form method="post" action="/devbox/delete" style="margin: 0;">
+        <form method="post" action="/baybox/delete" style="margin: 0;">
           <%== csrf_delete %>
-          <button class="btn danger" type="submit">Remove dev box</button>
+          <button class="btn danger" type="submit">Remove baybox</button>
         </form>
       </div>
     </div>

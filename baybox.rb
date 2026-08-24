@@ -16,7 +16,7 @@ require_relative "crypto"
 # than forgiving: a host, a user, a repository path and a skills URL all end up
 # in a config file or a command on somebody's machine, so each one is checked
 # against what it is allowed to be and refused otherwise, never cleaned up.
-module DevBox
+module BayBox
   class Error < StandardError; end
 
   BOX_PREFIX = "rq".freeze

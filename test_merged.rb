@@ -89,7 +89,7 @@ page = tpl.render(Object.new, {
   snap: snap.merge(counts: snap[:counts].merge(merged: {open: nil, total: snap[:merged].size})),
   rows: snap[:merged], tab: :merged, hide: false, service: fresh, login: ME,
   csrf: "", csrf_logout: "", csrf_snooze: "", csrf_settings: "", suggested_label: "",
-  reviews_enabled: true, review_error: nil, has_dev_box: true, csrf_review: "",
+  reviews_enabled: true, review_error: nil, has_baybox: true, csrf_review: "",
   jobs_by_key: {}, csrf_unsnooze: "", snooze: nil
 })
 check("both merged titles are on the page", ["Older", "Newer"].all? { |t| page.include?(t) }, true)
