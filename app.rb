@@ -17,10 +17,6 @@ require_relative "runner"
 require_relative "stream_render"
 require_relative "transcript"
 require_relative "markdown"
-
-# bay runs here now. RQ_TRANSPORT=ssh falls back to the wrapper on the box,
-# which is what every box ran before this change.
-BOX = (ENV.fetch("RQ_TRANSPORT", "bay") == "bay") ? Runner : DevBox
   warn "[review-queue] #{DB.describe}"
   DB.setup!
 end
@@ -85,11 +81,6 @@ REAUTH_GRACE = ENV.fetch("RQ_REAUTH_GRACE", "30").to_i
 # Only a hint in the settings box. It is deliberately NOT applied as a default:
 # a shared default is what made every user inherit one person's topic feed.
 SUGGESTED_LABEL = ENV.fetch("RQ_LABEL", "")
-
-# Where a user fetches the wrapper from. Points at this repo so the script the
-# dashboard talks to is the script in version control.
-WRAPPER_URL = ENV.fetch("RQ_WRAPPER_URL",
-  "https://raw.githubusercontent.com/furkansahin/review-queue/main/devbox/rq-review")
 
 # Fails closed: with no allowlist nobody gets in, rather than everybody.
 # Required at boot alongside the other secrets. It was not, so a fresh deploy
@@ -286,7 +277,7 @@ class ReviewQueue < Roda
           # cannot be reached keeps the stored value: Test connection pushes it
           # again, and so does the next save.
           if (row = current.call)
-            res = BOX.run(row, "skills #{skills}")
+            res = Runner.run(row, "skills #{skills}")
             session["devbox_notice"] = res[:ok] ? nil : "saved, but the box did not take the skills repository yet: #{(res[:error] || res[:output]).to_s[0, 200]}"
           end
         rescue DevBox::Error => e
@@ -300,7 +291,7 @@ class ReviewQueue < Roda
       r.post "prepare" do
         check_csrf!
         if (row = current.call)
-          res = BOX.respond_to?(:prepare_box) ? BOX.prepare_box(row) : {ok: false, error: "not supported"}
+          res = Runner.prepare_box(row)
           detail = (res[:output].to_s.empty? ? res[:error].to_s : res[:output]).strip
           # The last part of it, which is where the failure is -- but str[-n..]
           # is nil when the string is shorter than n, and that silently threw
@@ -316,12 +307,12 @@ class ReviewQueue < Roda
       r.post "test" do
         check_csrf!
         if (row = current.call)
-          res = BOX.check(row)
+          res = Runner.check(row)
           if res[:ok]
             DB.exec("UPDATE dev_boxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
             # A reachable box is the moment to make the stored value true again,
             # for a box that was down when it was saved, or was rebuilt since.
-            BOX.run(row, "skills #{row["skills_repo"]}")
+            Runner.run(row, "skills #{row["skills_repo"]}")
           else
             detail = (res[:error] || res[:output].to_s)[0, 500]
             DB.exec("UPDATE dev_boxes SET last_error = $1 WHERE id = $2", [detail, row["id"]])
@@ -352,9 +343,7 @@ class ReviewQueue < Roda
         view("devbox", locals: {box: box, login: current_login,
                                 error: session.delete("devbox_error"),
                                 notice: session.delete("devbox_notice"),
-                                wrapper_url: WRAPPER_URL,
-                                bay_transport: BOX == Runner,
-                                authorized_line: box && DevBox.authorized_keys_line(box["public_key"], forced: BOX != Runner),
+                                authorized_line: box && DevBox.authorized_keys_line(box["public_key"]),
                                 csrf_save: csrf_tag("/devbox/save"),
                                 csrf_test: csrf_tag("/devbox/test"),
                                 csrf_prepare: csrf_tag("/devbox/prepare"),
@@ -385,10 +374,10 @@ class ReviewQueue < Roda
         elsif !name.match?(DevBox::BOX_RE)
           session["sessions_error"] = "bad box name"
         else
-          res = BOX.run(box, "teardown #{name}")
+          res = Runner.run(box, "teardown #{name}")
           # Whether or not it worked, what we remember about this box's list is
           # no longer trustworthy.
-          BOX.forget_box_list(box)
+          Runner.forget_box_list(box)
           if res[:ok]
             # Say so. A teardown that works and one that silently does nothing
             # looked identical before.
@@ -435,7 +424,7 @@ class ReviewQueue < Roda
               "another review is already running for that pull request; wait for it to finish"
           else
             # The question goes over stdin, so it is never part of a command line.
-            res = BOX.run(box, "ask #{job["box_name"]}", stdin: prompt)
+            res = Runner.run(box, "ask #{job["box_name"]}", stdin: prompt)
             unless res[:ok]
               detail = (res[:error] || res[:output]).to_s.strip
               Jobs.finish(job["id"], "failed", error: "could not ask: #{detail[0, 400]}")
@@ -497,8 +486,8 @@ class ReviewQueue < Roda
           response.status = code
           ""
         end
-        next nothing.call(204) unless job && BOX.respond_to?(:log_path)
-        path = BOX.log_path(current_login, job["box_name"])
+        next nothing.call(204) unless job && Runner.respond_to?(:log_path)
+        path = Runner.log_path(current_login, job["box_name"])
         next nothing.call(204) unless path
         # 503 means "busy, try again": every stream slot is taken.
         next nothing.call(503) unless stream_slot
@@ -535,7 +524,7 @@ class ReviewQueue < Roda
                     out << "event: log\ndata: #{JSON.generate(offset: offset, text: text)}\n\n"
                   end
                 end
-                state = BOX.state_word(login, box_name)
+                state = Runner.state_word(login, box_name)
                 if %w[done failed].include?(state)
                   rest = cursor.finish
                   out << "event: log\ndata: #{JSON.generate(offset: offset, text: rest)}\n\n" unless rest.empty?
@@ -609,7 +598,7 @@ class ReviewQueue < Roda
         box = DB.row("SELECT * FROM dev_boxes WHERE login = $1", [current_login])
         # Boxes outlive their reviews, so ask the dev box what actually exists
         # rather than trusting our own rows.
-        boxes = box ? BOX.box_list(box) : []
+        boxes = box ? Runner.box_list(box) : []
         view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, dev_box: box,
                                   login: current_login,
                                   error: session.delete("sessions_error"),

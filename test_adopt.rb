@@ -52,7 +52,6 @@ Runner.singleton_class.prepend(Module.new do
   end
 end)
 
-ENV["RQ_TRANSPORT"] = "bay"
 load File.expand_path("worker.rb", __dir__) rescue nil
 
 puts "-- a run still going in the box is kept, not failed --"

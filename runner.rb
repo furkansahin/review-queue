@@ -11,7 +11,7 @@ require_relative "stream_render"
 # bay already knows how to work a remote Docker host: DOCKER_HOST=ssh://<host>
 # for containers, ssh for git and worktrees. So the dashboard runs bay, points
 # it at the user's own machine, and the containers still live there. What used
-# to be a shell wrapper installed on every box (rq-review, its own verbs, its
+# to be a shell wrapper installed on every box (its own verbs, its
 # own state files) is this file instead -- one copy, deployed with the app.
 #
 # Each user gets their own bay home, their own config, their own state. Nothing

@@ -142,7 +142,7 @@
   </div>
 
   <% if box %>
-    <% if bay_transport %>
+
       <h2>Set up <span class="mono"><%= box["host"] %></span></h2>
 
       <div class="card">
@@ -185,43 +185,6 @@
           </div>
         </div>
       </div>
-    <% else %>
-      <h2>Install these two things on <span class="mono"><%= box["host"] %></span></h2>
-
-      <div class="card">
-        <div class="step">
-          <div class="num">1</div>
-          <div style="min-width: 0; flex: 1;">
-            <div class="note" style="margin-bottom: 8px;">
-              The wrapper. It is the only thing this dashboard's key may run.
-            </div>
-            <pre>curl -fsSL <%= wrapper_url %> \
-  | sudo tee /usr/local/bin/rq-review >/dev/null \
-  && sudo chmod 0755 /usr/local/bin/rq-review</pre>
-          </div>
-        </div>
-
-        <div class="step">
-          <div class="num">2</div>
-          <div style="min-width: 0; flex: 1;">
-            <div class="note" style="margin-bottom: 8px;">
-              The key, with a forced command. <span class="mono">command=</span> pins it to the
-              wrapper and <span class="mono">restrict</span> removes port forwarding, agent
-              forwarding and a pty — so this key cannot become a shell even if this dashboard is
-              compromised.
-            </div>
-            <pre>echo '<%= authorized_line %>' >> ~/.ssh/authorized_keys</pre>
-          </div>
-        </div>
-
-        <div class="note">
-          Your box also needs docker and a checkout. <span class="mono">devbox/setup.sh</span> in
-          the repo installs both, and <span class="mono">--check</span> reports without changing
-          anything.
-        </div>
-      </div>
-    <% end %>
-
     <h2>Connection</h2>
     <div class="card">
       <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">

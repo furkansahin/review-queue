@@ -69,7 +69,8 @@ check("and it says what to remove",
       last_response.body.include?("it pins the key to"), true)
 check("shows the public key", last_response.body.include?(row["public_key"][0, 40]), true)
 check("never shows the private key", last_response.body.include?("BEGIN RSA"), false)
-check("shows the wrapper install command", last_response.body.include?("/usr/local/bin/rq-review"), true)
+check("and says which old line to remove",
+      last_response.body.include?("/usr/local/bin/rq-review"), true)
 
 # editing the address must not churn the key
 before = row["public_key"]

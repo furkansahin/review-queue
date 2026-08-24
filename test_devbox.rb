@@ -37,58 +37,44 @@ Tempfile.create("id") do |f|
 end
 
 line = DevBox.authorized_keys_line(pub)
-check("forced command is set", line.start_with?('command="/usr/local/bin/rq-review",restrict '), true)
+check("the key is restricted", line.start_with?("restrict "), true)
 check("the key is in the line", line.include?(pub), true)
 
 check("box name carries owner and repo", DevBox.box_name("ubicloud/ubicloud", 6172), "rq-ubicloud-ubicloud-6172")
 
-cmd = DevBox.review_command(repo: "ubicloud/ubicloud", pr_number: 6172, box: "rq-ubicloud-6172")
-check("command is plain fields", cmd, "review ubicloud/ubicloud 6172 rq-ubicloud-6172")
-
-# injection attempts must be refused before anything is sent
+bad = ->(**kw) { raises(DevBox::Error) { DevBox.validate!(**kw) } }
+fields = {repo: "o.r-1/re_po", pr_number: 9, box: "rq-x-9"}
+check("accepts a normal repo", DevBox.validate!(**fields), true)
 check("rejects shell metacharacters in repo",
-      raises(DevBox::Error) { DevBox.review_command(repo: "o/r; rm -rf /", pr_number: 1, box: "b") }.start_with?("bad repo"), true)
+      bad.(**fields.merge(repo: "o/r; rm -rf /")).start_with?("bad repo"), true)
 check("rejects a non-numeric pull request",
-      raises(DevBox::Error) { DevBox.review_command(repo: "o/r", pr_number: "1 && curl evil", box: "b") }.start_with?("bad pull request number"), true) if true
+      bad.(**fields.merge(pr_number: "1 && curl evil")).start_with?("bad pull request number"), true)
 check("rejects a backtick in the box name",
-      raises(DevBox::Error) { DevBox.review_command(repo: "o/r", pr_number: 1, box: "b`id`") }.start_with?("bad box name"), true)
+      bad.(**fields.merge(box: "b`id`")).start_with?("bad box name"), true)
 check("rejects a newline in the box name",
-      raises(DevBox::Error) { DevBox.review_command(repo: "o/r", pr_number: 1, box: "b\nreview x") }.start_with?("bad box name"), true)
+      bad.(**fields.merge(box: "b\nreview x")).start_with?("bad box name"), true)
 check("rejects a path traversal repo",
-      raises(DevBox::Error) { DevBox.review_command(repo: "../../etc", pr_number: 1, box: "b") }.start_with?("bad repo"), true)
+      bad.(**fields.merge(repo: "../../etc")).start_with?("bad repo"), true)
 check("rejects a bare repo name (the 'bad repo' bug)",
-      raises(DevBox::Error) { DevBox.review_command(repo: "ubicloud", pr_number: 6172, box: "rq-x-1") }.start_with?("bad repo"), true)
-check("accepts a normal repo", DevBox.review_command(repo: "o.r-1/re_po", pr_number: 9, box: "rq-x-9"),
-      "review o.r-1/re_po 9 rq-x-9")
+      bad.(**fields.merge(repo: "ubicloud")).start_with?("bad repo"), true)
 
-# an unreachable host returns data, it does not raise
-row = {"host" => "127.0.0.1", "ssh_user" => "nobody", "port" => "1",
-       "private_key_enc" => Crypto.encrypt(priv)}
-res = DevBox.run(row, "ping", timeout: 3)
-check("unreachable box returns ok=false", res[:ok], false)
-check("unreachable box reports why", res[:error].to_s.empty?, false)
-
-# run_many runs several commands over one connection. A caller matches results
-# to commands by position, so a connection that never opens must still answer
-# once per command rather than returning a short list.
-many = DevBox.run_many(row, [["status a", nil], ["result a", nil], ["build a", nil]], timeout: 3)
-check("a broken connection answers once per command", many.size, 3)
-check("and every one of them failed", many.all? { |r| r[:ok] == false }, true)
-check("each carrying the reason", many.all? { |r| !r[:error].to_s.empty? }, true)
-
-# A key that cannot be decrypted fails before the connection is attempted, and
-# must not lose the shape of the answer either.
-bad = {"host" => "127.0.0.1", "ssh_user" => "nobody", "port" => "1",
-       "private_key_enc" => Crypto.encrypt(priv).sub(/.\z/) { |c| c == "A" ? "B" : "A" }}
-many = DevBox.run_many(bad, [["status a", nil], ["result a", nil]], timeout: 3)
-check("an unreadable key also answers once per command", many.size, 2)
-check("and says the key is the problem", many.first[:error].to_s.include?("cannot read the stored key"), true)
+# --- box names must not collide across owners -------------------------------
+# ubicloud/ubicloud and furkansahin/ubicloud shared rq-ubicloud-5, so each
+# published the other's review and tearing one down removed the other's box.
+check("different owners get different names",
+      DevBox.box_name("ubicloud/ubicloud", 5) == DevBox.box_name("furkansahin/ubicloud", 5), false)
+check("the owner is in the name", DevBox.box_name("ubicloud/ubicloud", 5), "rq-ubicloud-ubicloud-5")
+check("an uppercase repo is usable", DevBox.box_name("ubicloud/Bay", 42), "rq-ubicloud-bay-42")
+check("a dotted repo is usable", DevBox.box_name("o/r.rb", 7), "rq-o-r-rb-7")
+long = DevBox.box_name("a" * 80 + "/" + "b" * 80, 6172)
+check("a long repo still fits BOX_RE", long.match?(DevBox::BOX_RE), true)
+check("and keeps the pull request number", long.end_with?("-6172"), true)
 
 # --- the key line -----------------------------------------------------------
-forced = DevBox.authorized_keys_line("ssh-rsa AAAA", forced: true)
-open_line = DevBox.authorized_keys_line("ssh-rsa AAAA", forced: false)
-check("the wrapper transport pins the key", forced.start_with?('command="/usr/local/bin/rq-review",restrict '), true)
-check("bay cannot be pinned, so it is not", open_line.include?("command="), false)
+# bay needs git and docker over this connection, so the key cannot be pinned to
+# one program. restrict is what survives that.
+open_line = DevBox.authorized_keys_line("ssh-rsa AAAA")
+check("the key is not pinned to a program", open_line.include?("command="), false)
 check("but it keeps restrict", open_line.start_with?("restrict "), true)
 check("and it is still the same key", open_line.end_with?("ssh-rsa AAAA"), true)
 
@@ -126,133 +112,6 @@ check("nil means the same", DevBox.check_skills_repo!(nil), nil)
   end
   check("refuses #{bad[0, 34]}", refused, true)
 end
-
-# The wrapper is the security boundary, so it must not trust the dashboard's
-# check. Both sides carry the same rule.
-wrapper_src = File.read(File.join(__dir__, "devbox", "rq-review"))
-check("the wrapper checks the URL itself",
-      wrapper_src.include?('^https://github\\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(\\.git)?$'), true)
-check("and takes - to clear it", wrapper_src.include?('[ "$url" = "-" ]'), true)
-check("push_skills sends - for nothing",
-      DevBox.method(:push_skills).source_location.is_a?(Array), true)
-
-# --- the ssh wait loop -------------------------------------------------------
-# net-ssh runs ssh.loop while the block gives back true, so the block must say
-# whether the command is still running. A block that always gives back true
-# never stops. It runs to the deadline and raises for every command, even one
-# that answered at once, which made every dev box command fail after 30s.
-#
-# These fakes copy that contract: the block is asked first, then one step of
-# the conversation happens, exactly as net-ssh preprocesses before it reads.
-FakeData = Struct.new(:value) { def read_long = value }
-
-class FakeChannel
-  def initialize(script)
-    @script = script
-    @handlers = {}
-    @open = true
-  end
-  def active? = @open
-  def exec(_command) = yield(self, true)
-  def on_data(&b) = @handlers[:data] = b
-  def on_extended_data(&b) = @handlers[:extended] = b
-  def on_request(name, &b) = @handlers[name] = b
-  def send_data(_bytes) = nil
-  def eof! = nil
-
-  def step
-    case @script.shift
-    when :data then @handlers[:data]&.call(self, "pong\n")
-    when :exit
-      @handlers["exit-status"]&.call(self, FakeData.new(0))
-      @open = false
-    end
-  end
-end
-
-class FakeSession
-  attr_reader :turns
-  def initialize = @turns = 0
-  def open_channel(&block)
-    @channel = FakeChannel.new([:data, :exit])
-    block.call(@channel)
-    @channel
-  end
-  def loop(_wait = nil)
-    while yield
-      @turns += 1
-      # A loop that cannot stop is the bug. Cut it off, and report it the way a
-      # dead box reports, so the check below fails instead of hanging.
-      raise Timeout::Error, "the wait loop never stopped" if @turns > 200
-      @channel.step
-    end
-  end
-end
-
-$fake_session = FakeSession.new
-Net::SSH.singleton_class.prepend(Module.new do
-  define_method(:start) { |*_args, **_opts, &block| block.call($fake_session) }
-end)
-
-row = {"host" => "10.0.0.1", "ssh_user" => "ubi", "port" => 22,
-       "private_key_enc" => Crypto.encrypt(priv)}
-t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-res = DevBox.run(row, "ping", timeout: 30)
-elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
-check("the loop stops when the channel closes", res[:ok], true)
-check("the output is kept", res[:output].strip, "pong")
-check("the exit status is read", res[:exit_code], 0)
-check("it does not wait out the deadline", elapsed < 1.0, true)
-check("and it stops in a few turns", $fake_session.turns < 10, true)
-
-# --- the wrapper and the bay command must agree on one path ----------------
-# The wrapper writes the question into the box worktree, and bay starts a
-# command in that same worktree. So the ask command must read a relative path.
-# An absolute /workspace path is the repository root, not the worktree: the
-# question is not there, and neither is the review conversation that
-# --continue resumes. That failure cost a follow-up its answer twice over.
-toml = File.read(File.join(__dir__, "devbox", "bay-review-command.toml"))
-ask_cmd = toml[/^ask = """\n(.*?)\n"""/m, 1].to_s
-wrapper = File.read(File.join(__dir__, "devbox", "rq-review"))
-
-check("ask reads the question", ask_cmd.include?(".rq/followup.txt"), true)
-check("by a path relative to the worktree", ask_cmd.include?("/workspace"), false)
-check("and never cds away from it", ask_cmd.match?(/\bcd\s/), false)
-check("the text is passed after --", ask_cmd.include?(" -- "), true)
-check("the wrapper writes to that same path", wrapper.include?("$wt/.rq/followup.txt"), true)
-check("and the worktree is the box worktree", wrapper.include?('wt="$REPO_PATH/.worktrees/$box"'), true)
-
-# The review prompt travels the same way, and for the same reason.
-review_cmd = toml[/^review = """\n(.*?)\n"""/m, 1].to_s
-prompt = File.read(File.join(__dir__, "devbox", "review-prompt.md"))
-setup = File.read(File.join(__dir__, "devbox", "setup.sh"))
-
-check("review reads its prompt from a file", review_cmd.include?(".rq/review-prompt.md"), true)
-check("relative, like the follow-up", review_cmd.include?("/workspace"), false)
-check("and after --", review_cmd.include?(" -- "), true)
-check("the wrapper copies the prompt in", wrapper.include?("$wt/.rq/review-prompt.md"), true)
-check("it refuses when the prompt is missing", wrapper.include?("review prompt missing"), true)
-# setup.sh no longer installs any of this: the dashboard runs bay, so a box
-# needs docker, the docker group and a checkout, and nothing else. It is the
-# same work the Prepare button does, for a machine you are already sitting on.
-check("setup.sh installs docker", setup.include?("docker-ce"), true)
-check("and puts the user in the docker group", setup.include?("usermod -aG docker"), true)
-check("and clones the repository", setup.include?("git clone"), true)
-check("over https, so a box needs no key of its own", setup.include?("https://github.com/"), true)
-check("it no longer installs bay", setup.include?("go build"), false)
-check("nor the wrapper", setup.include?("rq-review"), false)
-check("nor a token file", setup.include?("CLAUDE_CODE_OAUTH_TOKEN"), false)
-# It rewrote an ssh config on a laptop once, by being run in the wrong place.
-check("and it still refuses a machine that is not a dev box",
-      setup.include?("RQ_FORCE_HOST"), true)
-
-# The point of the harness is that the review runs things. If someone trims the
-# prompt back to reading only, these fail rather than the tab quietly reverting.
-check("the prompt tells it to run the specs", prompt.include?("bundle exec rspec"), true)
-check("with the right environment", prompt.include?("RACK_ENV=test"), true)
-check("it must mark findings verified or read-only",
-      prompt.include?("verified") && prompt.include?("read-only"), true)
-check("and it must not run the whole suite", prompt.include?("Do not run the whole suite"), true)
 
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")

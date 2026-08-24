@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # Page weight:  DATABASE_URL=... bundle exec ruby test_page_weight.rb
 #
-# rq-review caps a review at 200 KB and the sessions page lists 50 jobs, so
+# A review is capped at 200 KB and the sessions page lists 50 jobs, so
 # printing every one built a 10 MB page and the queue page pulled all 10 MB out
 # of Postgres to render a state word. These assert the pages stay bounded --
 # and, just as importantly, that every review is still reachable.
@@ -40,7 +40,7 @@ DB.exec("INSERT INTO dev_boxes (login, host, private_key_enc, public_key) VALUES
         ["furkansahin", "box.example", "x", "ssh-rsa AAAA"])
 bid = DB.row("SELECT id FROM dev_boxes")["id"]
 
-# 50 finished reviews at the size rq-review actually caps them to.
+# 50 finished reviews at the size a review is actually capped to.
 JOBS = 50
 CAP = 200_000
 ids = []

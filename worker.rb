@@ -14,9 +14,6 @@ require_relative "jobs"
 require_relative "devbox"
 require_relative "runner"
 
-# bay runs here now, not on the box. RQ_TRANSPORT=ssh falls back to the wrapper.
-BOX = (ENV.fetch("RQ_TRANSPORT", "bay") == "bay") ? Runner : DevBox
-
 TICK = Integer(ENV.fetch("RQ_WORKER_TICK", "10"))
 
 def log(message)
@@ -39,8 +36,9 @@ def start_one(job)
   box = Jobs.dev_box(job)
   return Jobs.finish(job["id"], "failed", error: "the dev box was removed") unless box
 
-  command = DevBox.review_command(repo: job["repo"], pr_number: job["pr_number"], box: job["box_name"])
-  res = BOX.run(box, command)
+  # Runner validates each field before it reaches a command line, and answers
+  # with the reason if one is wrong.
+  res = Runner.run(box, "review #{job["repo"]} #{job["pr_number"]} #{job["box_name"]}")
   if res[:ok]
     log("started #{job["box_name"]} for #{job["login"]}")
   else
@@ -61,7 +59,7 @@ def poll_running
     # wants the output, so asking for it up front costs a channel and saves a
     # whole connection -- handshake, key exchange and a 4096-bit signature --
     # for every running job on every tick.
-    status, result = BOX.run_many(box, ["status #{job["box_name"]}",
+    status, result = Runner.run_many(box, ["status #{job["box_name"]}",
                                         "result #{job["box_name"]}"])
     state = status[:output].to_s.strip
 
@@ -77,7 +75,7 @@ def poll_running
       # This host lost track of the run -- a deploy, a restart. The box kept
       # going (a docker exec outlives its client), so take it back rather than
       # calling a review failed that is still being written.
-      taken = BOX.adopt(box, job["box_name"])
+      taken = Runner.adopt(box, job["box_name"])
       unless taken[:ok]
         log("could not adopt #{job["box_name"]}: #{taken[:error]}")
         Jobs.finish(job["id"], "failed", error: "lost the run and could not reach the box") if Jobs.stale?(job)
@@ -97,10 +95,10 @@ def poll_running
       # error message only -- it is never shown as review output.
       detail = nil
       if state == "failed"
-        b = BOX.run(box, "build #{job["box_name"]}")
+        b = Runner.run(box, "build #{job["box_name"]}")
         detail = b[:output].to_s.lines.last(12).join.strip
       end
-      # Only write output when the fetch actually succeeded. DevBox.run's rescue
+      # Only write output when the fetch actually succeeded. Runner.run's rescue
       # path returns output:"", so a single dropped connection here used to
       # overwrite a finished review with nothing -- and jobs.rb only rescans
       # state='running', so it was gone for good.

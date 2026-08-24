@@ -4,7 +4,7 @@ require_relative "devbox"
 # The review job queue. A job moves queued -> running -> done|failed.
 #
 # The work happens on the user's dev box and takes minutes, so the worker does
-# not hold it open: rq-review detaches, and the worker polls. That means a
+# not hold it open: the run detaches, and the worker polls. That means a
 # worker restart loses nothing -- a running job is picked up again by its box
 # name on the next tick.
 module Jobs
@@ -36,7 +36,7 @@ module Jobs
 
   # Everything the list pages read, except `output`.
   #
-  # `output` is deliberately absent. rq-review caps a review at 200 KB and this
+  # `output` is deliberately absent. A review is capped at 200 KB and this
   # query takes 50 rows, so SELECT * hauls up to 10 MB out of Postgres -- on
   # every load of a page that then prints a state word and a timestamp. The
   # size is still wanted (the panel summary shows it), and octet_length costs

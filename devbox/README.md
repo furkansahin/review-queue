@@ -11,9 +11,9 @@ Docker over ssh, so the box itself needs very little.
 3. a checkout of the repository
 
 The box does *not* need bay, a wrapper, a bay config, or a token file. Those
-all lived here before the dashboard took bay over. If your box still has them,
-they are inert; you can delete `~/go/bin/bay`, `/usr/local/bin/rq-review` and
-`~/.bay/` whenever you like.
+all lived here before the dashboard took bay over, and the code that used them
+is gone. If your box still has them they are inert: delete `~/go/bin/bay`,
+`/usr/local/bin/rq-review` and `~/.bay/` whenever you like.
 
 ## From a fresh Ubuntu 24.04 VM
 
@@ -93,7 +93,6 @@ free space and how many boxes that is.
 | `review-prompt.md` | the review instructions, copied into a box at review time |
 | `install-host.sh` | installs bay and its config on the **dashboard** host, not here |
 | `base-image` | an optional prebaked box image; see below |
-| `rq-review`, `test_wrapper.sh`, `bay-review-command.toml`, `install-skills.sh` | from before the dashboard ran bay. Kept for `RQ_TRANSPORT=ssh`, unused otherwise |
 
 ### The base image
 
