@@ -230,10 +230,11 @@ module Runner
   # it comes after the newest start stamp.
   RUN_MARK = "__RQ_RUN__"
 
-  def self.wrapped(command, truncate:, preamble: nil)
+  def self.wrapped(command, truncate:, preamble: nil, stamp: true)
     reset = truncate ? " && : > #{BOX_LOG}" : ""
+    mark = stamp ? %( && echo "#{RUN_MARK}" >> #{BOX_LOG}) : ""
     say = preamble ? "#{preamble}; " : ""
-    %(mkdir -p .rq#{reset} && echo "#{RUN_MARK}" >> #{BOX_LOG} && ) +
+    %(mkdir -p .rq#{reset}#{mark} && ) +
       %({ #{say}#{command}; echo "#{EXIT_MARK}$?"; } 2>&1 | tee -a #{BOX_LOG})
   end
 
@@ -244,9 +245,11 @@ module Runner
   # used to be written only to this host's copy of the log, which adopting then
   # replaced with the box's -- so the question vanished from the page while the
   # answer to it stayed.
+  # No start stamp in this one: ask writes it from the dashboard, before the
+  # run is detached. See mark_run.
   ASK_CMD = wrapped(
     %(claude -p --continue --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/followup.txt)"),
-    truncate: false,
+    truncate: false, stamp: false,
     preamble: %(printf '\\n== you asked\\n%s\\n\\n' "$(cat .rq/followup.txt)"))
 
   def local_toml(box_row)
@@ -481,6 +484,19 @@ module Runner
     placed = put_file(box_row, "#{worktree(box_row, box)}/.rq/followup.txt", prompt.to_s.byteslice(0, 8192))
     return placed unless placed[:ok]
 
+    # Stamp the new run here, not inside the box.
+    #
+    # The command in the box writes its own stamp, but not for a second or two:
+    # bay has to reach the machine and exec into the container first. The worker
+    # polls inside that gap, finds no stamp newer than the last run's, reads the
+    # previous run's exit stamp as this one's, and calls a question that has
+    # only just been asked already answered -- with the answer to the last one.
+    #
+    # A review does not need this: the worker starts it, so the worker can see
+    # its process and never treats it as lost in the first place.
+    stamped = mark_run(box_row, box)
+    return stamped unless stamped[:ok]
+
     File.write(File.join(dir, "state"), "reviewing\n")
     detach(box_row, dir, <<~SH)
       if "$BAY" run #{box} ask >> "$DIR/log" 2>&1; then
@@ -613,6 +629,16 @@ module Runner
         exit 1
       fi
     SH
+  end
+
+  # Opens a new run in the box's log, so nothing reads the previous one as this
+  # one. Appends rather than writes: the log is the record of every run.
+  def mark_run(box_row, box)
+    path = "#{worktree(box_row, box)}/#{BOX_LOG}"
+    argv = ["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
+            "mkdir -p #{DevBox.sh_quote(File.dirname(path))} && " \
+            "echo #{DevBox.sh_quote(RUN_MARK)} >> #{DevBox.sh_quote(path)}"]
+    capture(argv, env_for(box_row), timeout: 30)
   end
 
   # A small file onto the machine, over the same ssh bay uses. The path is

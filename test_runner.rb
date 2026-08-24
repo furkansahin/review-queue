@@ -110,7 +110,10 @@ check("so is the follow-up",
 check("the review reads the harness prompt", toml.include?(".rq/review-prompt.md"), true)
 check("the follow-up reads its question", toml.include?(".rq/followup.txt"), true)
 check("and says what was asked", toml.include?("== you asked"), true)
-check("each run stamps its own start", toml.scan(Runner::RUN_MARK).size, 2)
+# The review stamps its own start; the follow-up is stamped from here instead,
+# because the box takes a second or two to get going and the worker looks in
+# that gap. See the ask checks below.
+check("the review stamps its own start", toml.scan(Runner::RUN_MARK).size, 1)
 check("both after --, so a leading dash is text",
       toml.scan(/ -- \\"\$\(cat/).size, 2)
 check("and by a relative path, never /workspace", toml.include?("/workspace"), false)
@@ -357,6 +360,13 @@ check("the question is written into the box worktree",
       File.read("#{ROOT}/ssh.stdin"), STDIN_TEXT)
 check("at the path the bay command reads",
       File.read("#{ROOT}/ssh.cmds").include?("ubicloud/.worktrees/rq-ubicloud-6172/.rq/followup.txt"), true)
+# Stamped before the run is detached, or the worker reads the previous run's
+# ending as this one's and answers a question with the last answer.
+cmds = File.read("#{ROOT}/ssh.cmds")
+check("the new run is opened before anything is started",
+      cmds.include?("#{Runner::RUN_MARK}") && cmds.include?("run.log"), true)
+check("and it appends rather than replacing the record",
+      cmds.include?(">> "), true)
 # The ask above is still running, and a box does one thing at a time.
 check("a second question is refused while the first runs",
       Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "again?")[:ok], false)

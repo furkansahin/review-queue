@@ -34,10 +34,14 @@ BOXSAYS = {text: "the review, half written\n"}
 Runner.singleton_class.prepend(Module.new do
   def adopt(box_row, box_name)
     text = BOXSAYS[:text]
-    mark = text.rindex(Runner::EXIT_MARK)
+    # Only this run's stamps count, exactly as the real one does.
+    started = text.rindex(Runner::RUN_MARK)
+    scope = started ? text[(started + Runner::RUN_MARK.length)..] : text
+    mark = scope.rindex(Runner::EXIT_MARK)
     {ok: true, finished: !mark.nil?,
-     exit_code: mark ? text[(mark + Runner::EXIT_MARK.length)..].to_i : nil,
-     output: mark ? text[0...mark] : text}
+     exit_code: mark ? scope[(mark + Runner::EXIT_MARK.length)..].to_i : nil,
+     output: text.gsub(/^#{Regexp.escape(Runner::RUN_MARK)}\n?/, "")
+                 .gsub(/#{Regexp.escape(Runner::EXIT_MARK)}\d+\n?/, "")}
   end
   def run(_box_row, command, timeout: 120, stdin: nil)
     return {ok: true, output: "orphaned", exit_code: 0} if command.start_with?("status")
@@ -73,6 +77,25 @@ row = DB.row("SELECT * FROM review_jobs WHERE id = $1", [job["id"]])
 check("the job failed", row["state"], "failed")
 check("keeping what the box wrote", row["output"], "it broke\n")
 check("and saying so", row["error"].to_s.include?("failed on the dev box"), true)
+
+puts "-- a question just asked is not answered by the last answer --"
+# The box's log still ends with the previous run's exit stamp for the second
+# or two it takes bay to get going. Opening the new run before detaching is
+# what stops the worker reading that ending as this run's.
+DB.exec("UPDATE review_jobs SET state='running', output=NULL, error=NULL, started_at=now() WHERE id=$1", [job["id"]])
+BOXSAYS[:text] = "the review\n#{Runner::EXIT_MARK}0\n#{Runner::RUN_MARK}\n"
+poll_running
+row = DB.row("SELECT * FROM review_jobs WHERE id = $1", [job["id"]])
+check("the job is still running", row["state"], "running")
+check("and shows the review while it waits", row["output"].include?("the review"), true)
+
+# ...and once the answer lands, the job finishes on it.
+BOXSAYS[:text] = "the review\n#{Runner::EXIT_MARK}0\n#{Runner::RUN_MARK}\nthe answer\n#{Runner::EXIT_MARK}0\n"
+poll_running
+row = DB.row("SELECT * FROM review_jobs WHERE id = $1", [job["id"]])
+check("then it is done", row["state"], "done")
+check("with the answer", row["output"].include?("the answer"), true)
+check("and the review it followed", row["output"].include?("the review"), true)
 
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
