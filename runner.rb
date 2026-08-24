@@ -631,6 +631,81 @@ module Runner
     SH
   end
 
+  # Everything a box needs, done from here.
+  #
+  # Since bay moved to the dashboard a box needs three things: this key in its
+  # authorized_keys, docker, and a checkout. The key is the one that cannot be
+  # automated -- it is what grants the access everything else would use. The
+  # other two are just commands, and the dashboard can already reach the
+  # machine, so it runs them.
+  #
+  # Idempotent: it checks before it installs, so pressing the button twice is
+  # the same as pressing it once, and a box that is already set up says so
+  # rather than reinstalling anything.
+  REPO_URL = ENV.fetch("RQ_REPO_URL", "https://github.com/ubicloud/ubicloud.git")
+
+  def prepare_box(box_row)
+    path = (box_row["repo_path"] || "ubicloud").to_s
+    script = <<~SH
+      set -u
+      say() { echo "  $*"; }
+
+      if command -v docker >/dev/null 2>&1; then
+        say "docker already installed ($(docker --version 2>/dev/null))"
+      else
+        # Passwordless sudo is what makes the rest possible. Say so plainly
+        # rather than failing halfway through an apt run.
+        if ! sudo -n true 2>/dev/null; then
+          echo "  cannot install docker: this user needs sudo without a password"
+          exit 1
+        fi
+        say "installing docker from its own repository"
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl
+        sudo install -m 0755 -d /etc/apt/keyrings
+        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+        printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+          "$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")" \
+          "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+          docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        say "docker installed ($(docker --version 2>/dev/null))"
+      fi
+
+      # Without this every docker command needs sudo, and the dashboard does
+      # not use sudo. A group is picked up at login, so the next connection
+      # from here has it.
+      if id -nG | grep -qw docker; then
+        say "this user can reach docker"
+      elif sudo -n true 2>/dev/null; then
+        sudo usermod -aG docker "$(id -un)" && say "added $(id -un) to the docker group"
+      else
+        echo "  $(id -un) is not in the docker group, and sudo needs a password"
+        exit 1
+      fi
+
+      if [ -d #{DevBox.sh_quote(path)}/.git ]; then
+        say "checkout already at ~/#{path}"
+      else
+        say "cloning #{REPO_URL}"
+        git clone --quiet #{DevBox.sh_quote(REPO_URL)} #{DevBox.sh_quote(path)} \
+          && say "cloned into ~/#{path}" || { echo "  clone failed"; exit 1; }
+      fi
+
+      # A first review builds a container image, which is where the disk goes.
+      avail=$(df -Pk "$HOME" | awk 'NR==2 {print int($4/1048576)}')
+      say "${avail}G free (a box costs about 7G)"
+      say "ready"
+    SH
+    argv = ["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), script]
+    prepare!(box_row)
+    capture(argv, env_for(box_row), timeout: Integer(ENV.fetch("RQ_PREPARE_TIMEOUT", "420")))
+  rescue Error, Crypto::Error => e
+    {ok: false, output: "", exit_code: nil, error: e.message}
+  end
+
   # Opens a new run in the box's log, so nothing reads the previous one as this
   # one. Appends rather than writes: the log is the record of every run.
   def mark_run(box_row, box)

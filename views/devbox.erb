@@ -168,11 +168,20 @@
           <div class="num">2</div>
           <div style="min-width: 0; flex: 1;">
             <div class="note" style="margin-bottom: 8px;">
-              Your machine needs Docker and a checkout of the repository. It no longer needs
-              bay, the wrapper, or <span class="mono">~/.bay/env</span>: the dashboard holds
-              those now.
+              The rest is done from here. Once the key above is in place, this installs Docker,
+              puts <span class="mono"><%= box["ssh_user"] %></span> in the docker group, and clones
+              the repository — the three things a box needs. It no longer needs bay, the wrapper
+              or <span class="mono">~/.bay/env</span>: the dashboard holds those. A few minutes
+              the first time, and it does nothing it has already done.
             </div>
-            <pre>docker --version && ls ~/<%= box["repo_path"] || "ubicloud" %></pre>
+            <form method="post" action="/devbox/prepare" style="margin: 0;">
+              <%== csrf_prepare %>
+              <button class="go" type="submit">Prepare this box</button>
+            </form>
+            <div class="note" style="margin-top: 8px;">
+              Needs <span class="mono">sudo</span> without a password to install Docker. If it
+              does not have that, it says so rather than stopping half way.
+            </div>
           </div>
         </div>
       </div>

@@ -296,6 +296,23 @@ class ReviewQueue < Roda
         r.redirect "/devbox"
       end
 
+      # Everything a box needs except the key that grants access to do it.
+      r.post "prepare" do
+        check_csrf!
+        if (row = current.call)
+          res = BOX.respond_to?(:prepare_box) ? BOX.prepare_box(row) : {ok: false, error: "not supported"}
+          detail = (res[:output].to_s.empty? ? res[:error].to_s : res[:output]).strip
+          # The last part of it, which is where the failure is -- but str[-n..]
+          # is nil when the string is shorter than n, and that silently threw
+          # away every short answer, including every success.
+          tail = detail.length > 1200 ? detail[(detail.length - 1200)..] : detail
+          session[res[:ok] ? "devbox_notice" : "devbox_error"] =
+            (res[:ok] ? "Prepared the box.\n" : "Could not finish preparing the box.\n") + tail.to_s
+          DB.exec("UPDATE dev_boxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]]) if res[:ok]
+        end
+        r.redirect "/devbox"
+      end
+
       r.post "test" do
         check_csrf!
         if (row = current.call)
@@ -340,6 +357,7 @@ class ReviewQueue < Roda
                                 authorized_line: box && DevBox.authorized_keys_line(box["public_key"], forced: BOX != Runner),
                                 csrf_save: csrf_tag("/devbox/save"),
                                 csrf_test: csrf_tag("/devbox/test"),
+                                csrf_prepare: csrf_tag("/devbox/prepare"),
                                 csrf_rotate: csrf_tag("/devbox/rotate"),
                                 csrf_delete: csrf_tag("/devbox/delete")},
           layout: false)

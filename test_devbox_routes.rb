@@ -137,6 +137,35 @@ check("a traversing repo path is refused",
 
 get "/devbox"   # the next CSRF token comes from a rendered form, not a redirect
 
+# --- preparing a box -----------------------------------------------------
+# The key is the one step that cannot be automated: it is what grants the
+# access everything else needs. Docker and the checkout are just commands.
+PREPARED = {ok: true, output: "  docker already installed\n  cloned into ~/ubicloud\n  ready\n"}
+[DevBox, Runner].each do |mod|
+  mod.singleton_class.prepend(Module.new do
+    define_method(:prepare_box) { |_row| PREPARED }
+  end)
+end
+
+get "/devbox"
+check("the page offers to prepare the box", last_response.body.include?("Prepare this box"), true)
+post "/devbox/prepare", {"_csrf" => csrf_for(last_response.body, "/devbox/prepare")}
+get "/devbox"
+check("it says what it did", last_response.body.include?("cloned into"), true)
+check("and that it finished", last_response.body.include?("Prepared the box"), true)
+
+PREPARED.replace(ok: false, output: "", error: "sudo needs a password")
+get "/devbox"
+post "/devbox/prepare", {"_csrf" => csrf_for(last_response.body, "/devbox/prepare")}
+get "/devbox"
+check("a failure is reported, not swallowed", last_response.body.include?("sudo needs a password"), true)
+
+post "/devbox/prepare", {}
+check("preparing without CSRF blocked", last_response.status, 403)
+PREPARED.replace(ok: true, output: "  ready\n")
+
+get "/devbox"   # the next CSRF token comes from a rendered form, not a redirect
+
 # rotation replaces the key
 old_pub = DB.row("SELECT public_key FROM dev_boxes WHERE login=$1", ["furkansahin"])["public_key"]
 post "/devbox/rotate", {"_csrf" => csrf_for(last_response.body, "/devbox/rotate")}
