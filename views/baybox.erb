@@ -174,7 +174,12 @@
               or <span class="mono">~/.bay/env</span>: the dashboard holds those. A few minutes
               the first time, and it does nothing it has already done.
             </div>
-            <form method="post" action="/baybox/prepare" style="margin: 0;">
+            <%# It runs for minutes and the page waits for it. Without this the
+                button looked like it had done nothing, so it got pressed again,
+                and the second apt-get fought the first one's dpkg lock. %>
+            <form method="post" action="/baybox/prepare" style="margin: 0;"
+                  onsubmit="var b=this.querySelector('button');
+                            b.disabled=true; b.textContent='Preparing… this can take a few minutes';">
               <%== csrf_prepare %>
               <button class="go" type="submit">Prepare this box</button>
             </form>

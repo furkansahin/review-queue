@@ -649,50 +649,64 @@ module Runner
     path = (box_row["repo_path"] || "ubicloud").to_s
     script = <<~SH
       set -u
-      say() { echo "  $*"; }
+      say()  { echo "  $*"; }
+      # Every step is checked. Without this the script ran on past a failed
+      # apt-get, printed "docker installed ()" with no version, failed to add a
+      # group that was never created, cloned, and finished by saying "ready" --
+      # and the exit status was the last command's, so it reported success.
+      fail() { echo "  $*"; exit 1; }
+
+      # One preparation at a time. Pressing the button twice used to start a
+      # second apt-get against the first one's dpkg lock, and both then failed
+      # on a machine that was working perfectly well.
+      exec 9>"$HOME/.rq-prepare.lock"
+      if ! flock -n 9; then
+        fail "already preparing this box; give it a few minutes"
+      fi
 
       if command -v docker >/dev/null 2>&1; then
         say "docker already installed ($(docker --version 2>/dev/null))"
       else
-        # Passwordless sudo is what makes the rest possible. Say so plainly
-        # rather than failing halfway through an apt run.
-        if ! sudo -n true 2>/dev/null; then
-          echo "  cannot install docker: this user needs sudo without a password"
-          exit 1
-        fi
-        say "installing docker from its own repository"
-        sudo apt-get update -qq
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl
-        sudo install -m 0755 -d /etc/apt/keyrings
-        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        sudo -n true 2>/dev/null || fail "cannot install docker: this user needs sudo without a password"
+        say "installing docker from its own repository (a few minutes)"
+        sudo apt-get update -qq || fail "apt-get update failed"
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl \
+          || fail "could not install ca-certificates and curl"
+        sudo install -m 0755 -d /etc/apt/keyrings || fail "could not create /etc/apt/keyrings"
+        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+          || fail "could not fetch docker's signing key"
         sudo chmod a+r /etc/apt/keyrings/docker.asc
         printf 'Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
           "$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")" \
-          "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
-        sudo apt-get update -qq
+          "$(dpkg --print-architecture)" | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null \
+          || fail "could not add docker's apt source"
+        sudo apt-get update -qq || fail "apt-get update failed after adding docker's source"
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-          docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin \
+          || fail "could not install docker"
+        command -v docker >/dev/null 2>&1 || fail "apt-get finished but docker is still not on PATH"
         say "docker installed ($(docker --version 2>/dev/null))"
       fi
 
-      # Without this every docker command needs sudo, and the dashboard does
-      # not use sudo. A group is picked up at login, so the next connection
-      # from here has it.
+      # Installing docker is not enough: without the group every docker command
+      # needs sudo, and the dashboard does not use sudo. The daemon then reads
+      # as unreachable when it is running perfectly well.
       if id -nG | grep -qw docker; then
-        say "this user can reach docker"
-      elif sudo -n true 2>/dev/null; then
-        sudo usermod -aG docker "$(id -un)" && say "added $(id -un) to the docker group"
+        say "$(id -un) can reach docker"
       else
-        echo "  $(id -un) is not in the docker group, and sudo needs a password"
-        exit 1
+        getent group docker >/dev/null || fail "there is no docker group; the install did not finish"
+        sudo -n true 2>/dev/null || fail "$(id -un) is not in the docker group, and sudo needs a password"
+        sudo usermod -aG docker "$(id -un)" || fail "could not add $(id -un) to the docker group"
+        say "added $(id -un) to the docker group"
       fi
 
-      if [ -d #{BayBox.sh_quote(path)}/.git ]; then
+      if [ -d #{DevBox.sh_quote(path)}/.git ]; then
         say "checkout already at ~/#{path}"
       else
         say "cloning #{REPO_URL}"
-        git clone --quiet #{BayBox.sh_quote(REPO_URL)} #{BayBox.sh_quote(path)} \
-          && say "cloned into ~/#{path}" || { echo "  clone failed"; exit 1; }
+        git clone --quiet #{DevBox.sh_quote(REPO_URL)} #{DevBox.sh_quote(path)} \
+          || fail "could not clone #{REPO_URL}"
+        say "cloned into ~/#{path}"
       fi
 
       # A first review builds a container image, which is where the disk goes.

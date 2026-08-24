@@ -160,6 +160,14 @@ get "/baybox"
 post "/baybox/prepare", {"_csrf" => csrf_for(last_response.body, "/baybox/prepare")}
 get "/baybox"
 check("a failure is reported, not swallowed", last_response.body.include?("sudo needs a password"), true)
+check("and it is not called a success",
+      last_response.body.include?("Prepared the box"), false)
+
+get "/baybox"
+check("the button says it will take a while",
+      last_response.body.include?("Preparing…"), true)
+check("and disables itself, so it is not pressed twice",
+      last_response.body.include?("b.disabled=true"), true)
 
 post "/baybox/prepare", {}
 check("preparing without CSRF blocked", last_response.status, 403)
