@@ -241,7 +241,15 @@ class ReviewQueue < Roda
     end
 
     r.get "login" do
-      next r.redirect "/" if current_login
+      # Both, and for the same reason the queue below wants both: a session
+      # holding a login without a token is not signed in, it is half way
+      # through signing in. Bouncing it to the queue, which bounces it back
+      # here for the missing token, is a loop the browser gives up on --
+      # ERR_TOO_MANY_REDIRECTS, and no way out but deleting cookies.
+      #
+      # The re-sign-in path makes exactly that state: it drops a dead token on
+      # the way to GitHub, so any round trip that does not finish lands here.
+      next r.redirect "/" if current_login && current_token
       view("login", locals: {error: nil}, layout: false)
     end
 
