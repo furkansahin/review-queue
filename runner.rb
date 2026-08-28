@@ -105,6 +105,7 @@ module Runner
     link_ssh_config!
     write_file(File.join(dir, "bay.local.toml"), local_toml(box_row), 0o600)
     write_env_file!(box_row)
+    FileUtils.mkdir_p(repo_root(login))
     link_compose!(login)
     dir
   end
@@ -252,8 +253,21 @@ module Runner
     truncate: false, stamp: false,
     preamble: %(printf '\\n== you asked\\n%s\\n\\n' "$(cat .rq/followup.txt)"))
 
+  # bay decides where a synced file lands by comparing the config folder to the
+  # repo root: files from the config folder go to the box's <repo>/.bay/, and
+  # everything else to the repo root. With no repoPath the root falls back to
+  # the config folder itself, the two are equal, and post-create.sh was rsynced
+  # to the top of the checkout -- where the setup step, which looks in .bay/,
+  # could not find it. A box that already had a .bay from the old by-hand setup
+  # hid this; a fresh one could not build at all.
+  #
+  # There is no checkout on this host and none is wanted, so this is an empty
+  # directory whose only job is to be somewhere else.
+  def repo_root(login) = File.join(user_dir(login), "repo")
+
   def local_toml(box_row)
     lines = ["# Written by review-queue. Edits here are overwritten.",
+             %(repoPath = #{repo_root(box_row["login"]).inspect}),
              "", "[remote]", %(host = #{host_alias(box_row["login"]).inspect}),
              %(repo = #{(box_row["repo_path"] || "ubicloud").inspect}), "", "[box]"]
     skills = box_row["skills_repo"].to_s.strip

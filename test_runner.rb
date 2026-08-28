@@ -92,6 +92,13 @@ check("directories are copied as directories, not links",
 check("bay.local.toml is this user's own", File.symlink?(File.join(dir, "bay.local.toml")), false)
 toml = File.read(File.join(dir, "bay.local.toml"))
 check("it names this user's alias", toml.include?('host = "rq-furkansahin"'), true)
+# bay puts a synced file in the box's <repo>/.bay/ only when the config folder
+# and the repo root differ. Equal, they went to the top of the checkout, and
+# the setup step could not find post-create.sh.
+check("the repo root is not the config folder", toml.include?("repoPath = "), true)
+check("and it really is somewhere else",
+      toml[/repoPath = "([^"]+)"/, 1] == Runner.config_dir("furkansahin"), false)
+check("which exists, so bay can resolve it", Dir.exist?(Runner.repo_root("furkansahin")), true)
 check("and carries the skills repo", toml.include?("furkansahin/skills"), true)
 
 # The commands are the dashboard's now, not the repo's. Without them bay falls
