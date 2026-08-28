@@ -152,14 +152,24 @@ get "/baybox"
 check("the page offers to prepare the box", last_response.body.include?("Prepare this box"), true)
 post "/baybox/prepare", {"_csrf" => csrf_for(last_response.body, "/baybox/prepare")}
 get "/baybox"
-check("it says what it did", last_response.body.include?("cloned into"), true)
 check("and that it finished", last_response.body.include?("Prepared the box"), true)
+# The output goes to the database, not the session: it runs to over a thousand
+# bytes and the session is a 4 KB cookie shared with the sign-in and the snooze
+# list. What is left in the flash has to stay small.
+notice = last_response.body[/Prepared the box[^<]*/].to_s
+check("the message is bounded", notice.length <= 220, true)
+check("a success clears any previous failure",
+      DB.row("SELECT last_error FROM bayboxes WHERE login=$1", ["furkansahin"])["last_error"], nil)
 
 PREPARED.replace(ok: false, output: "", error: "sudo needs a password")
 get "/baybox"
 post "/baybox/prepare", {"_csrf" => csrf_for(last_response.body, "/baybox/prepare")}
 get "/baybox"
 check("a failure is reported, not swallowed", last_response.body.include?("sudo needs a password"), true)
+# ...and the whole of it is kept where the page prints it, rather than in the
+# cookie, which is what made the site unusable until cookies were cleared.
+check("the detail is stored on the row",
+      DB.row("SELECT last_error FROM bayboxes WHERE login=$1", ["furkansahin"])["last_error"].to_s.include?("sudo needs a password"), true)
 check("and it is not called a success",
       last_response.body.include?("Prepared the box"), false)
 

@@ -112,6 +112,25 @@ class ReviewQueue < Roda
   plugin :error_handler do |e|
     warn "[review-queue] #{e.class}: #{e.message}"
     warn e.backtrace.take(8).join("\n") if e.backtrace
+
+    # A session that will not fit in its cookie locks a person out completely:
+    # the queue rewrites the session on every load, so every load fails, the
+    # cookie never changes, and the only way back is clearing cookies -- which
+    # the site cannot ask for and which costs them their snooze list anyway.
+    #
+    # So shed the parts that are allowed to be lost and carry on. The sign-in
+    # is kept; the snooze list and any pending message are not worth a lockout.
+    if defined?(Roda::RodaPlugins::Sessions::CookieTooLarge) &&
+       e.is_a?(Roda::RodaPlugins::Sessions::CookieTooLarge)
+      session.delete("snoozed")
+      %w[sessions_error sessions_notice baybox_error baybox_notice review_error]
+        .each { |k| session.delete(k) }
+      # The handler gets the exception, not the routing block's r.
+      response.status = 302
+      response["Location"] = "/"
+      next ""
+    end
+
     response.status = 500
     if request.path.start_with?("/sessions/tail")
       response["Content-Type"] = "application/json"
@@ -135,6 +154,24 @@ class ReviewQueue < Roda
   def param_id(value)
     v = value.to_s.strip
     v.match?(/\A[0-9]{1,18}\z/) && v.to_i.positive? ? v.to_i : nil
+  end
+
+  # A message shown once, on the next page. It lives in the session, which is a
+  # 4 KB cookie carrying the sign-in, the watch label and the snooze list too,
+  # so a flash is bounded here rather than at each call site. One long one was
+  # enough to make the cookie unwritable, and a user who hit that could not use
+  # the site at all until they cleared their cookies -- which is not something
+  # the site can ask for, and it loses their snooze list on the way.
+  FLASH_MAX = 200
+
+  def flash!(key, message)
+    text = message.to_s.strip.gsub(/\s+/, " ")
+    session[key] = text.length > FLASH_MAX ? "#{text[0, FLASH_MAX - 1]}…" : text
+  end
+
+  # The part of a run's output that says what happened.
+  def last_line(detail)
+    detail.to_s.lines.map(&:strip).reject(&:empty?).last.to_s
   end
 
   def current_login = session["login"]
@@ -278,12 +315,18 @@ class ReviewQueue < Roda
           # again, and so does the next save.
           if (row = current.call)
             res = Runner.run(row, "skills #{skills}")
-            session["baybox_notice"] = res[:ok] ? nil : "saved, but the box did not take the skills repository yet: #{(res[:error] || res[:output]).to_s[0, 200]}"
+            if res[:ok]
+              session["baybox_notice"] = nil
+            else
+              flash!("baybox_notice",
+                     "saved, but the box did not take the skills repository yet: " \
+                     "#{(res[:error] || res[:output])}")
+            end
           end
         rescue BayBox::Error => e
           error = e.message
         end
-        session["baybox_error"] = error
+        flash!("baybox_error", error)
         r.redirect "/baybox"
       end
 
@@ -293,13 +336,22 @@ class ReviewQueue < Roda
         if (row = current.call)
           res = Runner.prepare_box(row)
           detail = (res[:output].to_s.empty? ? res[:error].to_s : res[:output]).strip
-          # The last part of it, which is where the failure is -- but str[-n..]
-          # is nil when the string is shorter than n, and that silently threw
-          # away every short answer, including every success.
-          tail = detail.length > 1200 ? detail[(detail.length - 1200)..] : detail
-          session[res[:ok] ? "baybox_notice" : "baybox_error"] =
-            (res[:ok] ? "Prepared the box.\n" : "Could not finish preparing the box.\n") + tail.to_s
-          DB.exec("UPDATE bayboxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]]) if res[:ok]
+          # The output goes in the database, not the session. It ran to over a
+          # thousand bytes, and the session is a 4 KB cookie that also carries
+          # the sign-in, the watch label and the snooze list -- so a full snooze
+          # list plus this took the cookie past the limit, Roda refused to write
+          # it, and the only way back was clearing cookies.
+          #
+          # last_error is already printed on this page, so it is the right home
+          # for it, and it survives the redirect either way.
+          if res[:ok]
+            DB.exec("UPDATE bayboxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
+            flash!("baybox_notice", "Prepared the box. #{last_line(detail)}")
+          else
+            DB.exec("UPDATE bayboxes SET last_error = $1 WHERE id = $2",
+                    [detail.length > 4000 ? detail[(detail.length - 4000)..] : detail, row["id"]])
+            flash!("baybox_error", "Could not finish preparing the box. #{last_line(detail)}")
+          end
         end
         r.redirect "/baybox"
       end
@@ -370,9 +422,9 @@ class ReviewQueue < Roda
         box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [current_login])
 
         if name.empty? || box.nil?
-          session["sessions_error"] = "no such box, or no baybox registered"
+          flash!("sessions_error", "no such box, or no baybox registered")
         elsif !name.match?(BayBox::BOX_RE)
-          session["sessions_error"] = "bad box name"
+          flash!("sessions_error", "bad box name")
         else
           res = Runner.run(box, "teardown #{name}")
           # Whether or not it worked, what we remember about this box's list is
@@ -382,10 +434,10 @@ class ReviewQueue < Roda
             # Say so. A teardown that works and one that silently does nothing
             # looked identical before.
             Jobs.mark_torn_down(current_login, name)
-            session["sessions_notice"] = "tore down #{name}. That pull request can be reviewed again."
+            flash!("sessions_notice", "tore down #{name}. That pull request can be reviewed again.")
           else
             detail = (res[:error] || res[:output]).to_s.strip
-            session["sessions_error"] = "could not tear down #{name}: #{detail[0, 400]}"
+            flash!("sessions_error", "could not tear down #{name}: #{detail[0, 400]}")
           end
         end
         r.redirect "/sessions"
@@ -401,13 +453,13 @@ class ReviewQueue < Roda
         box = job && Jobs.baybox(job)
 
         if prompt.empty?
-          session["sessions_error"] = "type a question first"
+          flash!("sessions_error", "type a question first")
         elsif prompt.bytesize > 8192
-          session["sessions_error"] = "that question is too long (8 KB limit)"
+          flash!("sessions_error", "that question is too long (8 KB limit)")
         elsif job.nil? || box.nil?
-          session["sessions_error"] = "no such review, or no baybox registered"
+          flash!("sessions_error", "no such review, or no baybox registered")
         elsif !%w[done failed].include?(job["state"])
-          session["sessions_error"] = "wait for the review to finish first"
+          flash!("sessions_error", "wait for the review to finish first")
         else
           # Reopen FIRST. reopen re-enters review_jobs_live_idx, so it can lose
           # to another live job for the same pull request; firing the ask before
@@ -420,15 +472,15 @@ class ReviewQueue < Roda
           end
 
           if reopened.nil?
-            session["sessions_error"] =
-              "another review is already running for that pull request; wait for it to finish"
+            flash!("sessions_error",
+                   "another review is already running for that pull request; wait for it to finish")
           else
             # The question goes over stdin, so it is never part of a command line.
             res = Runner.run(box, "ask #{job["box_name"]}", stdin: prompt)
             unless res[:ok]
               detail = (res[:error] || res[:output]).to_s.strip
               Jobs.finish(job["id"], "failed", error: "could not ask: #{detail[0, 400]}")
-              session["sessions_error"] = "could not ask: #{detail[0, 400]}"
+              flash!("sessions_error", "could not ask: #{detail[0, 400]}")
             end
           end
         end
@@ -616,12 +668,12 @@ class ReviewQueue < Roda
       if REVIEWS_ENABLED
         pr = param_id(r.params["pr"])
         if pr.nil?
-          session["review_error"] = "that pull request number is not valid"
+          flash!("review_error", "that pull request number is not valid")
         else
           res = Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s, pr_number: pr)
           # Never swallow this: pressing Review and seeing nothing happen is
           # worse than seeing an error.
-          session["review_error"] = res[:error] unless res[:ok]
+          flash!("review_error", res[:error]) unless res[:ok]
         end
       end
       r.redirect "/?#{r.query_string}"
