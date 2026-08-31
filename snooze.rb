@@ -12,7 +12,16 @@ class Snooze
   # The store maps a row key to [wake_epoch, snoozed_at_epoch].
   # snoozed_at_epoch is necessary to find activity that is newer than the snooze.
   def initialize(store)
-    @store = (store || {}).to_h
+    # dup, because Hash#to_h returns the same hash when it is already one -- so
+    # this shared the caller's, and adding or sweeping reached back out and
+    # changed it. Nothing in the app noticed, because each request builds one of
+    # these from a freshly deserialized cookie. It is still a trap: it cost me a
+    # wrong answer about when a snooze ends, in a check that built two of these
+    # from one hash and had the first quietly empty it for the second.
+    #
+    # Shallow is enough. The values are [wake_at, snoozed_at] pairs and nothing
+    # mutates one in place -- add replaces the whole pair.
+    @store = (store || {}).to_h.dup
   end
 
   def add(key, seconds, now: Time.now)
@@ -53,7 +62,9 @@ class Snooze
 
   def count = @store.size
 
-  def to_h = @store
+  # A copy, for the same reason: what a caller does with this must not reach
+  # back into the snooze list.
+  def to_h = @store.dup
 
   private
 

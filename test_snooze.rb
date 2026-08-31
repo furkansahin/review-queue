@@ -59,6 +59,32 @@ s = Snooze.new({}).add("o/r#1", 7 * 86_400, now: NOW)
 back = Snooze.new(JSON.parse(JSON.generate(s.to_h)))
 check("survives JSON round trip (cookie storage)", back.hidden?(r), true)
 
+# --- a snooze list is nobody else's to change -----------------------------
+# Hash#to_h returns the same hash when it is already one, so building a Snooze
+# from a hash used to share it: adding or sweeping reached back out and changed
+# the caller's copy. The app never noticed, because each request builds one of
+# these from a freshly deserialized cookie. It still cost a wrong answer about
+# when a snooze ends, in a check that built two from one hash.
+stored = Snooze.new({}).add("o/r#1", 600).to_h
+Snooze.new(stored).sweep([])
+check("sweeping a copy leaves the original alone", stored.key?("o/r#1"), true)
+Snooze.new(stored).add("o/r#2", 600)
+check("nor does adding to one", stored.size, 1)
+
+live = Snooze.new({}).add("o/r#1", 600)
+live.to_h.clear
+check("and what to_h hands out cannot empty it", live.count, 1)
+live.to_h["o/r#9"] = [1, 2]
+check("nor add to it", live.count, 1)
+
+# The pairs inside are replaced whole, never mutated, so a shallow copy is
+# enough -- but say so, in case that ever stops being true.
+first = Snooze.new({}).add("o/r#1", 600)
+copy = Snooze.new(first.to_h)
+copy.add("o/r#1", 99_999)
+check("re-snoozing in a copy does not move the original's wake time",
+      first.to_h["o/r#1"], Snooze.new(first.to_h).to_h["o/r#1"])
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
