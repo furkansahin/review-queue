@@ -65,10 +65,9 @@
   <% if notice %><div class="banner" style="border-color: var(--btn-border);"><%= notice %></div><% end %>
 
   <div class="note" style="margin-bottom: 18px;">
-    A review runs on your own machine, not on this server. The dashboard connects to it and
-    asks bay to start a session. It generates the key itself and you install only the public
-    half, so your personal SSH key never reaches this server, and removing the box below is a
-    real revocation.
+    Reviews run on your own machine, not on this server. The dashboard generates its own key
+    and you install only the public half, so your personal SSH key never comes here — and
+    removing the box below really does revoke access.
   </div>
 
   <h2>Where it is</h2>
@@ -104,19 +103,30 @@
         <label for="claude_token">Claude Code token</label>
         <input type="password" id="claude_token" name="claude_token" style="width: 100%;"
                autocomplete="new-password"
-               placeholder="<%= box && box["claude_token_enc"] ? "stored — leave blank to keep it" : "sk-ant-oat01-… (from claude setup-token)" %>" />
+               placeholder="<%= box && box["claude_token_enc"] ? "stored — leave blank to keep it" : "sk-ant-oat01-…" %>" />
+        <div class="note" style="margin-top: 6px;">
+          Run <span class="mono">claude setup-token</span> in your terminal and paste what it prints.
+        </div>
       </div>
 
       <div style="margin-top: 14px;">
         <label for="github_token">GitHub token</label>
         <input type="password" id="github_token" name="github_token" style="width: 100%;"
                autocomplete="new-password"
-               placeholder="<%= box && box["github_token_enc"] ? "stored — leave blank to keep it" : "a PAT that can read the repository" %>" />
+               placeholder="<%= box && box["github_token_enc"] ? "stored — leave blank to keep it" : "github_pat_…" %>" />
         <div class="note" style="margin-top: 6px;">
-          The dashboard runs bay for you, so it needs the two tokens your boxes used to read
-          from <span class="mono">~/.bay/env</span> on your own machine. Both are encrypted
-          with the same key as your SSH key and are never shown back on this page. Leave a
-          field blank to keep what is stored; type <span class="mono">-</span> to clear it.
+          <a href="https://github.com/settings/personal-access-tokens" target="_blank"
+             rel="noreferrer">Make one here</a> — fine-grained, with
+          <span class="mono">Contents: Read</span> on
+          <%# Named from RQ_SCOPE, so it stays right if this dashboard is pointed
+              somewhere else. An org-wide scope names no single repository. %>
+          <% if scope_repos.empty? %>
+            the repositories you review<%
+          %><% else %><%
+            %><% scope_repos.each_with_index do |repo, i| %><%
+              %><%= i.zero? ? "" : ", " %><span class="mono"><%= repo %></span><%
+            %><% end %><%
+          %><% end %>.
         </div>
       </div>
 
@@ -126,12 +136,16 @@
                value="<%= box ? box["skills_repo"] : "" %>"
                placeholder="https://github.com/you/skills" />
         <div class="note" style="margin-top: 6px;">
-          A repository whose top level holds skill directories, each with a SKILL.md. bay clones
-          it into every new box's <span class="mono">~/.claude/skills</span> and pulls it on later
-          starts, so a review has the skills you rely on. It is cloned inside the box using that
-          box's own GitHub token, so a private repository works and this server never reads it.
-          Leave empty for none. <span class="mono">owner/name</span> is accepted too.
+          Put your Claude skills in a public repository — one directory per skill, each with a
+          <span class="mono">SKILL.md</span> — and point this at it. Every new box gets them.
+          A private one works too: it is cloned inside your box with your token above.
         </div>
+      </div>
+
+      <div class="note" style="margin-top: 14px;">
+        Both tokens are encrypted with the same key as your SSH key and are never shown back
+        here. Leave a field blank to keep what is stored, or type
+        <span class="mono">-</span> to clear it.
       </div>
       <div style="margin-top: 14px; display: flex; gap: 8px; align-items: center;">
         <button class="go" type="submit"><%= box ? "Save" : "Register this baybox" %></button>
@@ -151,16 +165,14 @@
           <div class="num">1</div>
           <div style="min-width: 0; flex: 1;">
             <div class="note" style="margin-bottom: 8px;">
-              The key. The dashboard runs bay here and drives your machine's Docker over this
-              connection, so the key logs in rather than running one fixed program.
-              <span class="mono">restrict</span> still refuses port forwarding, agent
-              forwarding, X11 and a pty — bay needs none of them.
+              Run this on <span class="mono"><%= box["host"] %></span>. It is the one step
+              nothing here can do for you: it is what gives the dashboard access.
             </div>
             <pre>echo '<%= authorized_line %>' >> ~/.ssh/authorized_keys</pre>
             <div class="note" style="margin-top: 8px;">
-              Replacing an older line? Remove the one starting
-              <span class="mono">command="/usr/local/bin/rq-review"</span> — it pins the key to
-              a wrapper that is no longer used.
+              <span class="mono">restrict</span> keeps the key to what bay needs — no port
+              forwarding, no agent forwarding, no pty. Replacing an older line? Delete the one
+              starting <span class="mono">command="/usr/local/bin/rq-review"</span>.
             </div>
           </div>
         </div>
@@ -169,11 +181,9 @@
           <div class="num">2</div>
           <div style="min-width: 0; flex: 1;">
             <div class="note" style="margin-bottom: 8px;">
-              The rest is done from here. Once the key above is in place, this installs Docker,
-              puts <span class="mono"><%= box["ssh_user"] %></span> in the docker group, and clones
-              the repository — the three things a box needs. It no longer needs bay, the wrapper
-              or <span class="mono">~/.bay/env</span>: the dashboard holds those. A few minutes
-              the first time, and it does nothing it has already done.
+              Then press this. It installs Docker, lets
+              <span class="mono"><%= box["ssh_user"] %></span> use it, and clones the repository.
+              A few minutes the first time; pressing it again does nothing it has already done.
             </div>
             <%# It runs for minutes and the page waits for it. Without this the
                 button looked like it had done nothing, so it got pressed again,
@@ -185,8 +195,8 @@
               <button class="go" type="submit">Prepare this box</button>
             </form>
             <div class="note" style="margin-top: 8px;">
-              Needs <span class="mono">sudo</span> without a password to install Docker. If it
-              does not have that, it says so rather than stopping half way.
+              Needs <span class="mono">sudo</span> without a password. If it does not have that,
+              it says so rather than stopping half way.
             </div>
           </div>
         </div>

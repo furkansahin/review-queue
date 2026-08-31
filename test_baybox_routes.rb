@@ -65,12 +65,25 @@ get "/baybox"
 check("the key line is restricted", last_response.body.include?("restrict ssh-rsa"), true)
 check("but not pinned to the old wrapper",
       last_response.body.include?('command=&quot;/usr/local/bin/rq-review&quot;'), false)
-check("and it says what to remove",
-      last_response.body.include?("it pins the key to"), true)
 check("shows the public key", last_response.body.include?(row["public_key"][0, 40]), true)
 check("never shows the private key", last_response.body.include?("BEGIN RSA"), false)
+# Anyone whose box predates the migration has a pinned line that must go, so
+# the page names it. Checked by the name, not by the sentence around it.
 check("and says which old line to remove",
       last_response.body.include?("/usr/local/bin/rq-review"), true)
+
+# Each field says how to get its value, because the answer is a command or a
+# page somewhere else and nobody should have to go looking.
+check("the claude token says where it comes from",
+      last_response.body.include?("claude setup-token"), true)
+check("the github token links to where you make one",
+      last_response.body.include?("github.com/settings/personal-access-tokens"), true)
+check("and names the access it needs",
+      last_response.body.include?("Contents: Read"), true)
+check("and the repository it needs it on",
+      last_response.body.include?("ubicloud/ubicloud"), true)
+check("the skills field says what shape a skills repo is",
+      last_response.body.include?("SKILL.md"), true)
 
 # editing the address must not churn the key
 before = row["public_key"]

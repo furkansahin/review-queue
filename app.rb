@@ -57,6 +57,13 @@ REGISTRY = ServiceRegistry.new(
 
 SNOOZE_SECONDS = ENV.fetch("RQ_SNOOZE_DAYS", "7").to_i * 86_400
 
+# The repositories this dashboard watches, read out of RQ_SCOPE so the baybox
+# page can name them when it asks for a token that must read them. Naming the
+# wrong repository is worse than naming none, so an org-wide or unparseable
+# scope yields nothing and the page says "the repositories you review".
+SCOPE_REPOS = ENV.fetch("RQ_SCOPE", "repo:ubicloud/ubicloud")
+  .scan(%r{repo:([\w.\-]+/[\w.\-]+)}i).flatten.freeze
+
 # Live log limits. Puma serves on RQ_PUMA_THREADS threads and a stream occupies
 # one for its whole life, so this must leave enough to serve pages. A stream
 # ends itself after RQ_STREAM_SECONDS; the browser's EventSource reconnects on
@@ -447,7 +454,7 @@ class ReviewQueue < Roda
 
       r.get true do
         box = current.call
-        view("baybox", locals: {box: box, login: current_login,
+        view("baybox", locals: {box: box, login: current_login, scope_repos: SCOPE_REPOS,
                                 error: session.delete("baybox_error"),
                                 notice: session.delete("baybox_notice"),
                                 authorized_line: box && BayBox.authorized_keys_line(box["public_key"]),
