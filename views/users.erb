@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>People · Review queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+<%= PALETTE %>
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
+         border-bottom: 1px solid var(--border); }
+  .wrap { max-width: 900px; padding: 22px 24px 80px; }
+  h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2);
+       font-family: 'IBM Plex Mono', monospace; font-weight: 600; margin: 26px 0 10px; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.55; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 4px 0; margin-bottom: 12px; }
+  .row { display: grid; grid-template-columns: 200px 130px 1fr 92px; align-items: center;
+         gap: 12px; padding: 11px 18px; border-bottom: 1px solid var(--border-soft); }
+  .row:last-child { border-bottom: 0; }
+  .head { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em;
+          text-transform: uppercase; color: var(--muted-3); padding-top: 12px; padding-bottom: 8px; }
+  .who { font-weight: 500; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .sub { font-size: 11px; color: var(--muted-3); font-family: 'IBM Plex Mono', monospace; }
+  .cell { font-size: 12px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+  .n { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500; }
+  .chip { font-size: 10px; font-family: 'IBM Plex Mono', monospace; padding: 2px 6px;
+          border-radius: 3px; border: 1px solid; }
+  .empty { padding: 40px 18px; text-align: center; color: var(--muted-2); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">People</div>
+  <a class="mono" style="font-size: 12px;" href="/">← back to the queue</a>
+  <a class="mono" style="font-size: 12px;" href="/sessions">sessions</a>
+  <a class="mono" style="font-size: 12px;" href="/baybox">baybox</a>
+  <div style="flex: 1;"></div>
+  <div class="mono" style="font-size: 11px; color: var(--muted-2);">@<%= login %></div>
+</div>
+
+<div class="wrap">
+  <%
+    # A duration, said the way a person would. Same shape the queue uses.
+    ago = lambda do |seconds|
+      next "—" if seconds.nil?
+      next "just now" if seconds < 60
+      mins = seconds / 60
+      next "#{mins}m" if mins < 60
+      mins < 1440 ? "#{mins / 60}h" : "#{mins / 1440}d"
+    end
+    since = ->(time) { time ? ago.call((Time.now - time).to_i) : "never" }
+    here = people.count { |p| p[:signed_in] }
+  %>
+
+  <div class="note" style="margin-bottom: 18px;">
+    Everyone on this dashboard's allowlist.
+    <strong><%= here %></strong> signed in right now.
+    <%# Being honest about what this can and cannot know matters more than the
+        number looking impressive: it is one process's memory, so a deploy
+        empties it and it forgets anyone idle. %>
+    That count comes from the running process, so a deploy resets it and anyone
+    idle for more than <%= idle_ttl / 60 %> minutes drops off it. What each person
+    has actually done is from the database and does not.
+  </div>
+
+  <div class="card">
+    <div class="row head">
+      <div>Person</div>
+      <div>Signed in</div>
+      <div><%= reviews_enabled ? "Baybox" : "Watching" %></div>
+      <div style="text-align: right;">Reviews</div>
+    </div>
+
+    <% people.each do |p| %>
+      <div class="row">
+        <div class="who">
+          <span class="dot" style="background: <%= p[:signed_in] ? "var(--age-fresh-bar)" : "var(--border)" %>;"
+                title="<%= p[:signed_in] ? "signed in" : "not signed in right now" %>"></span>
+          <span style="overflow: hidden; text-overflow: ellipsis;">
+            <%= p[:login] %><%= p[:login].to_s.downcase == login.to_s.downcase ? " (you)" : "" %>
+          </span>
+        </div>
+
+        <div class="cell">
+          <% if p[:signed_in] %>
+            <%= ago.call(p[:signed_in_for]) %>
+            <div class="sub"><%= p[:idle_for].to_i < 60 ? "active" : "idle #{ago.call(p[:idle_for])}" %></div>
+          <% else %>
+            <span style="color: var(--muted-3);">—</span>
+          <% end %>
+        </div>
+
+        <div class="cell" style="min-width: 0; overflow: hidden; text-overflow: ellipsis;">
+          <% if reviews_enabled %>
+            <% if p[:baybox] %>
+              <%= p[:baybox] %>
+              <div class="sub">
+                <%= p[:has_claude] ? "token stored" : "no claude token" %><%
+                  %><%= p[:last_ok_at] ? " · reached #{since.call(p[:last_ok_at])} ago" : "" %>
+              </div>
+            <% else %>
+              <span style="color: var(--muted-3);">no baybox</span>
+            <% end %>
+          <% elsif p[:label].to_s.empty? %>
+            <span style="color: var(--muted-3);">—</span>
+          <% else %>
+            <%= p[:label] %>
+          <% end %>
+        </div>
+
+        <div class="n">
+          <% if p[:reviews].to_i.positive? %>
+            <%= p[:reviews] %>
+            <div class="sub"><%= since.call(p[:last_review]) %> ago</div>
+          <% else %>
+            <span style="color: var(--muted-3);">0</span>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <% if people.empty? %>
+      <div class="empty">The allowlist is empty, which should not be possible.</div>
+    <% end %>
+  </div>
+
+  <% if reviews_enabled && people.any? { |p| p[:signed_in] && !p[:baybox] } %>
+    <div class="note">
+      Someone signed in without a baybox cannot start a review. The
+      <a href="/baybox">baybox page</a> is where they would register one.
+    </div>
+  <% end %>
+</div>
+</body>
+</html>

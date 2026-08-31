@@ -31,8 +31,12 @@ end
 PALETTE = File.read(File.expand_path("views/_palette.erb", __dir__)).freeze
 
 # Global defaults: every signed-in user watches the same scope and label.
+# Named, because the people page has to say how long "signed in" lasts before
+# the registry forgets someone.
+REGISTRY_IDLE_TTL = ENV.fetch("RQ_IDLE_TTL", "3600").to_i
+
 REGISTRY = ServiceRegistry.new(
-  idle_ttl: ENV.fetch("RQ_IDLE_TTL", "3600").to_i,
+  idle_ttl: REGISTRY_IDLE_TTL,
   max_users: ENV.fetch("RQ_MAX_USERS", "25").to_i,
   scope: ENV.fetch("RQ_SCOPE", "repo:ubicloud/ubicloud"),
   warn_days: ENV.fetch("RQ_WARN_DAYS", "2").to_i,
@@ -268,6 +272,49 @@ class ReviewQueue < Roda
       check_csrf!
       service.snapshot(force: true)
       r.redirect "/?#{r.query_string}"
+    end
+
+    # Who is using this dashboard.
+    #
+    # Two different questions, and the page keeps them apart because only one
+    # of them has a reliable answer. The registry knows who has loaded the
+    # queue recently, in this one web process, since it last restarted -- that
+    # is a real answer to "signed in now" and a poor one to anything else. The
+    # database knows who has ever registered a box or run a review, which
+    # survives a deploy.
+    r.get "users" do
+      people = ALLOWED_LOGINS.to_h { |l| [l, {login: l}] }
+
+      REGISTRY.active.each do |u|
+        entry = people[u[:login].downcase] ||= {login: u[:login]}
+        entry.merge!(u.slice(:label, :idle_for, :signed_in_for), signed_in: true)
+      end
+
+      if REVIEWS_ENABLED
+        DB.rows(<<~SQL).each do |row|
+          SELECT b.login,
+                 b.host,
+                 b.last_ok_at,
+                 (b.claude_token_enc IS NOT NULL) AS has_claude,
+                 (SELECT count(*) FROM review_jobs j WHERE j.login = b.login) AS reviews,
+                 (SELECT max(created_at) FROM review_jobs j WHERE j.login = b.login) AS last_review
+          FROM bayboxes b
+        SQL
+          entry = people[row["login"].to_s.downcase] ||= {login: row["login"]}
+          # The type map hands back real booleans and Integers, so no parsing.
+          entry.merge!(baybox: row["host"], reviews: row["reviews"].to_i,
+                       last_review: row["last_review"], has_claude: row["has_claude"],
+                       last_ok_at: row["last_ok_at"])
+        end
+      end
+
+      # Signed in first, then whoever has run the most reviews. Someone on the
+      # allowlist who has never appeared is still listed: an empty row is the
+      # useful part of the answer when you are wondering who has not started.
+      ordered = people.values.sort_by { |u| [u[:signed_in] ? 0 : 1, -u[:reviews].to_i, u[:login].to_s] }
+      view("users", locals: {people: ordered, login: current_login,
+                             idle_ttl: REGISTRY_IDLE_TTL, reviews_enabled: REVIEWS_ENABLED},
+        layout: false)
     end
 
     r.on "baybox" do

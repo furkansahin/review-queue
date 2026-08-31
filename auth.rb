@@ -53,7 +53,7 @@ end
 # keeps their own TTL cache. Evicts on idle and caps total users, since every
 # live entry holds a snapshot in memory and a rebuild fans out worker threads.
 class ServiceRegistry
-  Entry = Struct.new(:service, :token, :label, :last_used)
+  Entry = Struct.new(:service, :token, :label, :last_used, :first_seen)
 
   def initialize(idle_ttl:, max_users:, **service_opts)
     @idle_ttl = idle_ttl
@@ -75,12 +75,32 @@ class ServiceRegistry
       # cached snapshot no longer answers the right question.
       if entry.nil? || entry.token != token || entry.label != label
         service = QueueService.new(token: token, label: label, **@service_opts)
-        entry = Entry.new(service, token, label, nil)
+        # first_seen carries across a new token or a changed label: those make
+        # a new service, not a new person at the keyboard.
+        entry = Entry.new(service, token, label, nil, entry&.first_seen || Time.now)
         @entries[login] = entry
       end
       entry.last_used = Time.now
       evict_extras
       entry.service
+    end
+  end
+
+  # Who is signed in, for the people page. Read-only, and nothing it returns
+  # holds a token: the point of the registry is that a token stays in the one
+  # place it is used.
+  #
+  # This is less than it sounds. One web process, in memory, emptied by a
+  # deploy, swept after idle_ttl. So it answers "who has used the queue
+  # recently", not "who has ever signed in", and the page says so.
+  def active(now: Time.now)
+    @lock.synchronize do
+      sweep
+      @entries.map { |login, e|
+        {login: login, label: e.label.to_s,
+         idle_for: e.last_used ? (now - e.last_used).to_i : nil,
+         signed_in_for: e.first_seen ? (now - e.first_seen).to_i : nil}
+      }.sort_by { |u| u[:idle_for] || 0 }
     end
   end
 
