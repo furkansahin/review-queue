@@ -55,22 +55,23 @@ tok = csrf_for(last_response.body, "/baybox/save")
 post "/baybox/save", {"host" => "203.0.113.10", "ssh_user" => "ubi", "port" => "22", "_csrf" => tok}
 row = DB.row("SELECT * FROM bayboxes WHERE login = $1", ["furkansahin"])
 check("box saved", row["host"], "203.0.113.10")
-check("a keypair was generated", row["public_key"].start_with?("ssh-rsa "), true)
+check("a keypair was generated", row["public_key"].start_with?("ssh-ed25519 "), true)
 check("private key is encrypted at rest", row["private_key_enc"].include?("BEGIN"), false)
 check("private key decrypts to a PEM", Crypto.decrypt(row["private_key_enc"]).start_with?("-----BEGIN"), true)
 
 get "/baybox"
 # bay needs git and docker over this connection, so the key logs in. restrict
 # is what survives the move: no forwarding, no pty, none of which bay uses.
-check("the key line is restricted", last_response.body.include?("restrict ssh-rsa"), true)
+check("the key line is restricted", last_response.body.include?("restrict ssh-ed25519"), true)
 check("but not pinned to the old wrapper",
       last_response.body.include?('command=&quot;/usr/local/bin/rq-review&quot;'), false)
 check("shows the public key", last_response.body.include?(row["public_key"][0, 40]), true)
 check("never shows the private key", last_response.body.include?("BEGIN RSA"), false)
-# Anyone whose box predates the migration has a pinned line that must go, so
-# the page names it. Checked by the name, not by the sentence around it.
-check("and says which old line to remove",
-      last_response.body.include?("/usr/local/bin/rq-review"), true)
+# The page used to carry advice about removing a forced-command line left by
+# the old wrapper. One baybox exists and it was migrated months ago, so that
+# advice served nobody and is gone.
+check("no advice about a wrapper that no longer exists",
+      last_response.body.include?("rq-review"), false)
 
 # Each field says how to get its value, because the answer is a command or a
 # page somewhere else and nobody should have to go looking.

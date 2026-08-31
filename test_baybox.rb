@@ -19,7 +19,10 @@ end
 
 priv, pub = BayBox.generate_keypair(comment: "review-queue")
 check("private key is a PEM", priv.start_with?("-----BEGIN"), true)
-check("public key is ssh-rsa", pub.start_with?("ssh-rsa "), true)
+# ed25519, so the line a person pastes is one line rather than 758 characters
+# of base64. What matters is that OpenSSH takes it, which is checked below.
+check("public key is ssh-ed25519", pub.start_with?("ssh-ed25519 "), true)
+check("and the whole line fits on one", BayBox.authorized_keys_line(pub).length < 140, true)
 
 # The real test: does OpenSSH itself accept the key we generated?
 Tempfile.create(["k", ".pub"]) do |f|
@@ -73,10 +76,10 @@ check("and keeps the pull request number", long.end_with?("-6172"), true)
 # --- the key line -----------------------------------------------------------
 # bay needs git and docker over this connection, so the key cannot be pinned to
 # one program. restrict is what survives that.
-open_line = BayBox.authorized_keys_line("ssh-rsa AAAA")
+open_line = BayBox.authorized_keys_line("ssh-ed25519 AAAA")
 check("the key is not pinned to a program", open_line.include?("command="), false)
 check("but it keeps restrict", open_line.start_with?("restrict "), true)
-check("and it is still the same key", open_line.end_with?("ssh-rsa AAAA"), true)
+check("and it is still the same key", open_line.end_with?("ssh-ed25519 AAAA"), true)
 
 # --- the skills repository ---------------------------------------------------
 # It is typed by a person, stored, written into a TOML file on the box, and

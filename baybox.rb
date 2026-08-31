@@ -1,8 +1,4 @@
 require "openssl"
-# Only for OpenSSL key #to_blob, which writes the ssh wire format. This module
-# used to be the transport as well; bay is, now. One dependency for one method
-# is still better than encoding "string, mpint e, mpint n" by hand.
-require "net/ssh"
 require_relative "crypto"
 
 # One remote box per user: what it is, and what a person is allowed to say
@@ -20,17 +16,41 @@ module BayBox
   class Error < StandardError; end
 
   BOX_PREFIX = "rq".freeze
-  KEY_BITS = 4096
+
+  # ed25519, not RSA.
+  #
+  # The line a person pastes into authorized_keys was 758 characters of base64
+  # that wrapped over half a dozen lines and looked like damage. The same key
+  # as ed25519 is 105 characters and fits on one. It is also the modern default
+  # and generates in a fraction of a millisecond rather than a tenth of a
+  # second, which is the pause between pressing Register and seeing the page.
+  #
+  # This was not possible while net-ssh was the transport: it needs two more
+  # gems to touch an ed25519 key at all. bay drives a real ssh binary now, and
+  # OpenSSH has read this key format for years -- checked with ssh-keygen -y
+  # against a key generated exactly this way.
+  KEY_TYPE = "ED25519".freeze
+  KEY_NAME = "ssh-ed25519".freeze
 
   module_function
 
-  # Returns [private_key_pem, openssh_public_key].
+  # Returns [private_key_pem, openssh_public_key]. Keys made before this was
+  # ed25519 are RSA and keep working: they are stored, not regenerated, and
+  # nothing here re-derives a public key from a private one.
   def generate_keypair(comment: "review-queue")
-    key = OpenSSL::PKey::RSA.generate(KEY_BITS)
-    [key.to_pem, openssh_public(key, comment)]
+    key = OpenSSL::PKey.generate_key(KEY_TYPE)
+    [key.private_to_pem, openssh_public(key, comment)]
   end
 
-  def openssh_public(key, comment) = "ssh-rsa #{[key.to_blob].pack("m0")} #{comment}"
+  # The ssh wire format for an ed25519 public key: the string "ssh-ed25519",
+  # then the 32 raw bytes, each length-prefixed with a 32-bit big-endian count.
+  # Short enough to write out rather than take a dependency for.
+  def openssh_public(key, comment)
+    blob = ssh_string(KEY_NAME) + ssh_string(key.raw_public_key)
+    "#{KEY_NAME} #{[blob].pack("m0")} #{comment}"
+  end
+
+  def ssh_string(value) = [value.bytesize].pack("N") + value
 
   # The line a user pastes into ~/.ssh/authorized_keys on their machine.
   #
