@@ -376,6 +376,19 @@ check("and tried both first", verbs, %w[inspect pull build])
 check("and says the boxes will be slow", none[:output].include?("build from scratch"), true)
 check("and records no image", none[:base_image], nil)
 
+puts "-- the base image carries no host key --"
+# openssh-server generates SSH host keys when it installs. Baking them into an
+# image gives every box built from it, and everyone who pulls it, the same host
+# identity with the private half included.
+lines = File.read(Runner::BASE_IMAGE_DOCKERFILE)
+           .gsub(/\\\n/, " ").lines.reject { |l| l.strip.start_with?("#") }
+sshd = lines.find { |l| l.include?("openssh-server") }
+check("openssh-server is installed", !sshd.nil?, true)
+# In the same RUN. A later one only writes a whiteout -- the keys still travel
+# inside the earlier layer and arrive with the pull.
+check("and the same layer deletes the host keys",
+      sshd.to_s.include?("rm -f /etc/ssh/ssh_host_*"), true)
+
 puts "-- a lost run is taken back from the box --"
 # The fake ssh answers `cat` with whatever is queued for it, so adopt sees the
 # box's own copy of the output.

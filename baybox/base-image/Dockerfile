@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libffi-dev libyaml-dev libssl-dev zlib1g-dev \
       libpq-dev libreadline-dev libncurses-dev libgdbm-dev \
       postgresql-client psmisc \
+    && rm -f /etc/ssh/ssh_host_* \
     && rm -rf /var/lib/apt/lists/*
 
 # Do NOT create the dev user here. bay's own Dockerfile runs
@@ -83,3 +84,21 @@ RUN mkdir -p /tmp/warm && cd /tmp/warm \
     && rm -rf /tmp/warm
 
 USER root
+
+# Why the rm is up in the apt layer and not down here, where it reads better:
+# openssh-server's postinst generates the SSH host keys when it installs, and a
+# layer keeps whatever it created. Deleting them in a later RUN only writes a
+# whiteout -- the private keys still travel inside the earlier layer and come
+# down with every pull. It has to happen in the same RUN, so they are never
+# committed at all.
+#
+# They must not be baked in under any arrangement. An image is copied, so a
+# baked key is one host identity shared by every box built from it, and by
+# everyone who pulls it. bay's entrypoint runs `ssh-keygen -A` before starting
+# sshd, which generates only the missing types, so each container makes its own
+# on first start -- stronger than what these boxes had before, where they all
+# shared whatever the image build happened to produce.
+#
+# This checks the finished filesystem. It cannot see into the layers, so it is
+# a guard against someone adding openssh-server back, not proof on its own.
+RUN ! ls /etc/ssh/ssh_host_* >/dev/null 2>&1
