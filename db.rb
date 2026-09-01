@@ -301,6 +301,12 @@ module DB
     ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS repo_path        text;
     ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS claude_token_enc text;
     ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS github_token_enc text;
+    -- The prebaked box image, recorded only once this baybox is known to have
+    -- it. bay resolves a base image by tag, and a tag that is not on the
+    -- machine is looked for on Docker Hub, where it fails with "pull access
+    -- denied" and takes every build with it. So this is a per-box fact, not a
+    -- setting: no image, no line, cold builds that work.
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS base_image       text;
   SQL
 
   def setup!

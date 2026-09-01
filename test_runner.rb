@@ -319,6 +319,29 @@ check("into the path this box uses", sent.include?("'ubicloud'"), true)
 check("takes a lock, so two presses do not fight", sent.include?("flock -n 9"), true)
 check("and stops at the first failure", sent.include?("|| fail "), true)
 
+# The prebaked image. Naming one the machine does not have makes bay look for
+# it on Docker Hub and fail every build with "pull access denied" -- so a box
+# only gets a baseImage line once it is known to have the image.
+check("it reports the image it built", res[:base_image], Runner::BASE_IMAGE_TAG)
+check("and the config names it",
+      Runner.local_toml(BOXROW.merge("base_image" => Runner::BASE_IMAGE_TAG)).include?("baseImage = "), true)
+check("a box without one gets no baseImage line",
+      Runner.local_toml(BOXROW.merge("base_image" => nil)).include?("baseImage"), false)
+
+# It must never be able to fail a setup: a box with no image is slower, not
+# broken. Take docker build away and check prepare still succeeds.
+File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
+  #!/usr/bin/env bash
+  args=("$@"); last="${args[${#args[@]}-1]}"
+  case "$last" in *"docker build"*|*"docker image inspect"*) exit 1 ;; esac
+  echo "  ready"; exit 0
+SH
+File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
+none = Runner.prepare_box(BOXROW)
+check("preparing still succeeds without the image", none[:ok], true)
+check("and says the boxes will be slow", none[:output].include?("build from scratch"), true)
+check("and records no image", none[:base_image], nil)
+
 puts "-- a lost run is taken back from the box --"
 # The fake ssh answers `cat` with whatever is queued for it, so adopt sees the
 # box's own copy of the output.

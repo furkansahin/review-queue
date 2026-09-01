@@ -272,7 +272,12 @@ module Runner
              %(repo = #{(box_row["repo_path"] || "ubicloud").inspect}), "", "[box]"]
     skills = box_row["skills_repo"].to_s.strip
     lines << %(claudeSkills = #{skills.inspect}) unless skills.empty?
-    base = ENV["RQ_BOX_BASE_IMAGE"].to_s.strip
+    # Only when this baybox is known to have it. bay resolves a base image by
+    # tag, and a tag the machine does not have is looked for on Docker Hub --
+    # where it fails with "pull access denied" and takes the whole build with
+    # it. Writing this from a global setting broke every box whose machine had
+    # not been given the image.
+    base = box_row["base_image"].to_s.strip
     lines << %(baseImage = #{base.inspect}) unless base.empty?
     lines += ["", "[commands]",
               "review = #{REVIEW_CMD.inspect}",
@@ -659,6 +664,33 @@ module Runner
   # rather than reinstalling anything.
   REPO_URL = ENV.fetch("RQ_REPO_URL", "https://github.com/ubicloud/ubicloud.git")
 
+  # The prebaked box image. Building it costs about four minutes once, and
+  # takes a box from roughly 290 seconds to 53. The Dockerfile is deployed with
+  # this app and goes over the wire on stdin, which works because it copies
+  # nothing in -- it fetches everything it needs itself.
+  BASE_IMAGE_TAG = ENV.fetch("RQ_BOX_BASE_IMAGE", "ubicloud-bay-base:latest")
+  BASE_IMAGE_DOCKERFILE = File.expand_path("baybox/base-image/Dockerfile", __dir__)
+
+  # Returns the tag if the box has the image afterwards, nil if it does not.
+  # Never raises: a box without the image still works, only slower, so this
+  # must not be able to fail a setup.
+  def ensure_base_image(box_row)
+    return nil unless File.size?(BASE_IMAGE_DOCKERFILE)
+    have = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
+                    "docker image inspect #{BayBox.sh_quote(BASE_IMAGE_TAG)} >/dev/null 2>&1"],
+                   env_for(box_row), timeout: 60)
+    return BASE_IMAGE_TAG if have[:ok]
+
+    built = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
+                     "docker build -t #{BayBox.sh_quote(BASE_IMAGE_TAG)} -"],
+                    env_for(box_row),
+                    timeout: Integer(ENV.fetch("RQ_BASE_IMAGE_TIMEOUT", "1800")),
+                    stdin: File.read(BASE_IMAGE_DOCKERFILE))
+    built[:ok] ? BASE_IMAGE_TAG : nil
+  rescue StandardError
+    nil
+  end
+
   def prepare_box(box_row)
     path = (box_row["repo_path"] || "ubicloud").to_s
     script = <<~SH
@@ -730,7 +762,20 @@ module Runner
     SH
     argv = ["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), script]
     prepare!(box_row)
-    capture(argv, env_for(box_row), timeout: Integer(ENV.fetch("RQ_PREPARE_TIMEOUT", "420")))
+    res = capture(argv, env_for(box_row), timeout: Integer(ENV.fetch("RQ_PREPARE_TIMEOUT", "420")))
+    return res unless res[:ok]
+
+    # Docker has to be working before this, so it goes after the script rather
+    # than inside it. Slow -- about four minutes -- and worth it: a box built
+    # on this image comes up in 53 seconds instead of 290.
+    #
+    # The caller records what comes back. Nil means the box does not have the
+    # image, and the config is then written without a baseImage line, which is
+    # a slower box rather than a broken one.
+    tag = ensure_base_image(box_row)
+    {ok: true, output: res[:output].to_s + (tag ? "  prebaked image ready (#{tag})\n"
+                                                : "  no prebaked image; boxes will build from scratch\n"),
+     exit_code: 0, base_image: tag}
   rescue Error, Crypto::Error => e
     {ok: false, output: "", exit_code: nil, error: e.message}
   end

@@ -407,7 +407,11 @@ class ReviewQueue < Roda
           # last_error is already printed on this page, so it is the right home
           # for it, and it survives the redirect either way.
           if res[:ok]
-            DB.exec("UPDATE bayboxes SET last_ok_at = now(), last_error = NULL WHERE id = $1", [row["id"]])
+            # base_image is recorded only when the box actually has it, because
+            # naming an image the machine lacks makes bay look for it on Docker
+            # Hub and fail every build.
+            DB.exec("UPDATE bayboxes SET last_ok_at = now(), last_error = NULL, base_image = $1 WHERE id = $2",
+                    [res[:base_image], row["id"]])
             flash!("baybox_notice", "Prepared the box. #{last_line(detail)}")
           else
             DB.exec("UPDATE bayboxes SET last_error = $1 WHERE id = $2",
