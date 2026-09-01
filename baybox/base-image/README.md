@@ -12,6 +12,11 @@ On a 2-vcpu Ubicloud VM, `bay up` took:
 | with `MISE_RUBY_COMPILE=0` | 144s |
 | **on the prebaked base image** | **66s** |
 
+Re-measured on 2026-09-01, on a different VM: **53s**. The first box after a
+new base image took **385s** and that is expected -- bay layers its own sshd
+and tmux image on top, which is built once per base image and reused by every
+box after it. Time the second box, not the first.
+
 A warm machine saved nothing, because the work happens **inside each fresh
 container**, not on the host.
 
