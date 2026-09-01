@@ -669,13 +669,14 @@ module Runner
   # this app and goes over the wire on stdin, which works because it copies
   # nothing in -- it fetches everything it needs itself.
   BASE_IMAGE_TAG = ENV.fetch("RQ_BOX_BASE_IMAGE", "ubicloud-bay-base:latest")
-  # Where a machine that does not have the image can fetch it instead of
-  # spending twenty-five minutes building it. This names a published copy of
-  # what BASE_IMAGE_DOCKERFILE builds, and it is the maintainer's -- if you are
-  # running your own copy of this dashboard, publish your own and point this at
-  # it, or set it empty to always build locally. Nothing breaks either way: a
-  # pull that fails falls through to the build.
-  BASE_IMAGE_SOURCE = ENV.fetch("RQ_BOX_BASE_IMAGE_SOURCE", "furkansahin/baybox:latest")
+  # Where a machine that does not have the image can fetch it, instead of
+  # spending twenty-five minutes building it. Empty by default, and that is
+  # deliberate: pulling a base image is trusting whoever built it, and this
+  # repository is public, so a default here would hand that trust to my
+  # namespace on behalf of anyone who cloned it without their ever choosing it.
+  # Name your own published copy to turn it on. Nothing breaks while it is
+  # empty -- the box builds the image from BASE_IMAGE_DOCKERFILE instead.
+  BASE_IMAGE_SOURCE = ENV.fetch("RQ_BOX_BASE_IMAGE_SOURCE", "")
   BASE_IMAGE_DOCKERFILE = File.expand_path("baybox/base-image/Dockerfile", __dir__)
 
   # Returns the tag if the box has the image afterwards, nil if it does not.

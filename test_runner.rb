@@ -6,6 +6,9 @@ require "tmpdir"
 ROOT = Dir.mktmpdir("rq-runner")
 ENV["RQ_ENCRYPTION_KEY"] = "0" * 64
 ENV["RQ_BAY_ROOT"] = ROOT
+# Off by default in production, so the tests have to name one to exercise the
+# pull. It is unresolvable on purpose: the fake ssh decides what happens.
+ENV["RQ_BOX_BASE_IMAGE_SOURCE"] = "example.invalid/baybox:latest"
 FileUtils.mkdir_p([File.join(ROOT, "bin"), File.join(ROOT, "config")])
 # A bay that records what it was asked and answers plausibly.
 File.write(File.join(ROOT, "bin", "bay"), <<~SH)
@@ -375,6 +378,15 @@ check("a box that can do neither still prepares", none[:ok], true)
 check("and tried both first", verbs, %w[inspect pull build])
 check("and says the boxes will be slow", none[:output].include?("build from scratch"), true)
 check("and records no image", none[:base_image], nil)
+
+# With no source named -- the default -- it must not reach for a registry at
+# all, because that would be pulling someone else's image without being asked.
+Runner.send(:remove_const, :BASE_IMAGE_SOURCE)
+Runner.const_set(:BASE_IMAGE_SOURCE, "")
+_, verbs = image_run.call(:can_build)
+check("with no source named it never pulls", verbs, %w[inspect build])
+Runner.send(:remove_const, :BASE_IMAGE_SOURCE)
+Runner.const_set(:BASE_IMAGE_SOURCE, ENV["RQ_BOX_BASE_IMAGE_SOURCE"])
 
 puts "-- the base image carries no host key --"
 # openssh-server generates SSH host keys when it installs. Baking them into an
