@@ -714,11 +714,11 @@ module Runner
         say "added $(id -un) to the docker group"
       fi
 
-      if [ -d #{DevBox.sh_quote(path)}/.git ]; then
+      if [ -d #{BayBox.sh_quote(path)}/.git ]; then
         say "checkout already at ~/#{path}"
       else
         say "cloning #{REPO_URL}"
-        git clone --quiet #{DevBox.sh_quote(REPO_URL)} #{DevBox.sh_quote(path)} \
+        git clone --quiet #{BayBox.sh_quote(REPO_URL)} #{BayBox.sh_quote(path)} \
           || fail "could not clone #{REPO_URL}"
         say "cloned into ~/#{path}"
       fi

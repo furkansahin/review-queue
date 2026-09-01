@@ -295,6 +295,30 @@ File.delete("#{ROOT}/align.sh") if File.exist?("#{ROOT}/align.sh")
 Runner.align_pr_branch(BOXROW, "ubicloud/ubicloud", 1)
 check("and does nothing when GitHub cannot be asked", File.exist?("#{ROOT}/align.sh"), false)
 
+puts "-- preparing a box actually runs --"
+# This is the one that got away. prepare_box builds a shell script, and the
+# route tests stub it, so nothing ever called it -- a rewrite reintroduced a
+# constant that had been renamed away and the whole page raised NameError for
+# anyone setting up a machine. Call it for real against the fake ssh.
+File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
+  #!/usr/bin/env bash
+  args=("$@"); printf '%s' "${args[${#args[@]}-1]}" >> "#{ROOT}/prepare.sh"
+  echo "  ready"
+  exit 0
+SH
+File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
+File.delete("#{ROOT}/prepare.sh") if File.exist?("#{ROOT}/prepare.sh")
+
+res = Runner.prepare_box(BOXROW)
+check("it runs without raising", res[:ok], true)
+sent = File.read("#{ROOT}/prepare.sh")
+check("it installs docker", sent.include?("docker-ce"), true)
+check("puts the user in the docker group", sent.include?("usermod -aG docker"), true)
+check("clones the repository", sent.include?("git clone"), true)
+check("into the path this box uses", sent.include?("'ubicloud'"), true)
+check("takes a lock, so two presses do not fight", sent.include?("flock -n 9"), true)
+check("and stops at the first failure", sent.include?("|| fail "), true)
+
 puts "-- a lost run is taken back from the box --"
 # The fake ssh answers `cat` with whatever is queued for it, so adopt sees the
 # box's own copy of the output.
