@@ -6,6 +6,36 @@ Dashboard for the pull requests that actually need you: review requests, mention
 and a watched label you choose yourself. Sign in with GitHub and the queue is fetched with your own account,
 so each person sees their own. Rendered server-side — no JS.
 
+## What you can run
+
+Two halves, and only one of them is self-contained.
+
+**The queue.** The dashboard above. Sign in with GitHub, point `RQ_SCOPE` at
+whatever repositories you care about, and it works — for any repo, any org.
+It needs a GitHub OAuth app and nothing else: with no `DATABASE_URL` it boots
+and simply does not offer reviews. Start here.
+
+**The reviews.** The Review button starts an adversarial review of a pull
+request on a machine of your own, in a container, and streams it back. That
+half runs on [bay](https://github.com/ubicloud/bay), which is **a private
+Ubicloud repository**. Without access to it the Review button has nothing to
+call, so this half is not usable outside Ubicloud today. Everything in
+`baybox/` and `runner.rb` belongs to it.
+
+If you are outside Ubicloud, run the queue and ignore the rest. If bay ever
+goes public, the review half needs no changes.
+
+### Configure it for your own repositories
+
+| variable | what it does | default |
+| --- | --- | --- |
+| `RQ_SCOPE` | the GitHub search fragment the queue is built from | `repo:ubicloud/ubicloud` |
+| `RQ_ALLOWED_LOGINS` | who may sign in; empty means nobody | required |
+| `RQ_REPO_URL` | the checkout a baybox clones (review half only) | ubicloud |
+
+`RQ_SCOPE` takes anything GitHub search takes -- `repo:you/yours`,
+`org:yourcompany`, or several at once. See `.env.example` for the rest.
+
 ## State model
 
 One merged timeline per PR (issue comments, review comments, submitted reviews, head-commit push):
@@ -153,14 +183,14 @@ A     review  <vm-public-ip>     DNS only (grey cloud)  ← during setup
 Then on the Dokku host:
 
 ```sh
-dokku domains:set review-queue review.furkansahin.work
+dokku domains:set review-queue review.example.com
 ```
 
 The Ubicloud VM firewall needs inbound 80 and 443 (80 is required for the ACME HTTP-01
 challenge and for the redirect Dokku installs).
 
 Issue the cert with the proxy **off**, so Let's Encrypt talks to the origin directly. Once
-`https://review.furkansahin.work` works, you can switch the record to **Proxied** (orange) and
+`https://review.example.com` works, you can switch the record to **Proxied** (orange) and
 set the zone's SSL/TLS mode to **Full (strict)** — the origin already has a real cert, so strict
 validates. Leave it grey if you'd rather Cloudflare never see the traffic; the certificate
 renews the same way either way.
@@ -205,8 +235,8 @@ is no database. Changing that secret signs everyone out.
 
 Register one at **Settings → Developer settings → OAuth Apps**:
 
-- Homepage URL: `https://review.furkansahin.work`
-- Authorization callback URL: `https://review.furkansahin.work/auth/callback` (must match exactly)
+- Homepage URL: `https://review.example.com`
+- Authorization callback URL: `https://review.example.com/auth/callback` (must match exactly)
 
 Put the Client ID and Secret in `RQ_GITHUB_CLIENT_ID` / `RQ_GITHUB_CLIENT_SECRET`.
 
@@ -231,3 +261,7 @@ bundle exec puma -b tcp://127.0.0.1:9292
 For local sign-in, register a second OAuth App with callback `http://127.0.0.1:9292/auth/callback`
 and keep `RQ_INSECURE_COOKIES=1` set — otherwise the session cookie is `Secure` and the browser
 will drop it over plain http.
+
+## Licence
+
+MIT. See `LICENSE`.

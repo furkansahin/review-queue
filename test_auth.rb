@@ -4,7 +4,7 @@ ENV["RQ_ENCRYPTION_KEY"]        = "0" * 64
 ENV["RQ_ALLOWED_LOGINS"]      = "furkansahin, Alice"
 ENV["RQ_GITHUB_CLIENT_ID"]    = "cid"
 ENV["RQ_GITHUB_CLIENT_SECRET"]= "csecret"
-ENV["RQ_BASE_URL"]            = "https://review.furkansahin.work"
+ENV["RQ_BASE_URL"]            = "https://review.example.com"
 ENV["RQ_SESSION_SECRET"]      = "a" * 64
 ENV["RQ_INSECURE_COOKIES"]    = "1"   # test client is plain http
 

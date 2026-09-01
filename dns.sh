@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Create or update review.furkansahin.work -> VM IP in Cloudflare.
+# Create or update a DNS record pointing at the VM, in Cloudflare.
 #
-#   CF_API_TOKEN=... VM_IP=1.2.3.4 ./dns.sh
+#   CF_API_TOKEN=... VM_IP=1.2.3.4 ZONE=example.com NAME=review.example.com ./dns.sh
 #
 # Token needs Zone -> DNS -> Edit on the zone. Looking the zone up by name also
 # needs Zone -> Zone -> Read; if your token lacks that, pass ZONE_ID=... directly
@@ -10,8 +10,10 @@ set -euo pipefail
 
 : "${CF_API_TOKEN:?set CF_API_TOKEN}"
 : "${VM_IP:?set VM_IP to the Ubicloud VM public IPv4}"
-ZONE=${ZONE:-furkansahin.work}
-NAME=${NAME:-review.furkansahin.work}
+# No defaults: this repository is public, and a default here would point
+# someone else's record at the author's zone.
+: "${ZONE:?set ZONE to your Cloudflare zone, e.g. example.com}"
+: "${NAME:?set NAME to the record, e.g. review.example.com}"
 PROXIED=${PROXIED:-false}   # false while issuing the Let's Encrypt cert
 
 api() { curl -sS -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" "$@"; }

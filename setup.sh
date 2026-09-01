@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Run ON the Dokku host. Safe to re-run: creates what's missing, leaves the rest alone.
-# Edit APP/DOMAIN/allowlist and the OAuth credentials first.
+#
+#   DOMAIN=review.example.com ./setup.sh
+#
+# DOMAIN has no default on purpose. This repository is public, and a default
+# would mean someone else's deployment quietly pointing at the author's domain.
+# Fill in the OAuth credentials and the allowlist below before running.
 set -euo pipefail
 
-APP=review-queue
-DOMAIN=review.furkansahin.work
+APP=${APP:-review-queue}
+: "${DOMAIN:?set DOMAIN to the hostname this will be served on, e.g. review.example.com}"
 BASE_URL="https://$DOMAIN"
 
 # From the GitHub OAuth App (Settings -> Developer settings -> OAuth Apps).
