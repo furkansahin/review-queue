@@ -669,26 +669,53 @@ module Runner
   # this app and goes over the wire on stdin, which works because it copies
   # nothing in -- it fetches everything it needs itself.
   BASE_IMAGE_TAG = ENV.fetch("RQ_BOX_BASE_IMAGE", "ubicloud-bay-base:latest")
+  # Where a machine that does not have the image can fetch it instead of
+  # spending twenty-five minutes building it. This names a published copy of
+  # what BASE_IMAGE_DOCKERFILE builds, and it is the maintainer's -- if you are
+  # running your own copy of this dashboard, publish your own and point this at
+  # it, or set it empty to always build locally. Nothing breaks either way: a
+  # pull that fails falls through to the build.
+  BASE_IMAGE_SOURCE = ENV.fetch("RQ_BOX_BASE_IMAGE_SOURCE", "furkansahin/baybox:latest")
   BASE_IMAGE_DOCKERFILE = File.expand_path("baybox/base-image/Dockerfile", __dir__)
 
   # Returns the tag if the box has the image afterwards, nil if it does not.
   # Never raises: a box without the image still works, only slower, so this
   # must not be able to fail a setup.
+  # Runs one command on the box itself, over the same ssh the Docker host uses.
+  def on_box(box_row, command, timeout:, stdin: nil)
+    capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), command],
+            env_for(box_row), timeout: timeout, stdin: stdin)
+  end
+
+  # Gets the prebaked image onto a machine, in order of what it costs: already
+  # there, pulled, built. Never raises and never fails a setup -- a box with no
+  # image is slower, not broken, so every path here can return nil.
   def ensure_base_image(box_row)
     return nil unless File.size?(BASE_IMAGE_DOCKERFILE)
-    have = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
-                    "docker image inspect #{BayBox.sh_quote(BASE_IMAGE_TAG)} >/dev/null 2>&1"],
-                   env_for(box_row), timeout: 60)
-    return BASE_IMAGE_TAG if have[:ok]
+    return BASE_IMAGE_TAG if on_box(box_row, "docker image inspect #{BayBox.sh_quote(BASE_IMAGE_TAG)} >/dev/null 2>&1",
+                                    timeout: 60)[:ok]
+    return BASE_IMAGE_TAG if pull_base_image(box_row)
 
-    built = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
-                     "docker build -t #{BayBox.sh_quote(BASE_IMAGE_TAG)} -"],
-                    env_for(box_row),
-                    timeout: Integer(ENV.fetch("RQ_BASE_IMAGE_TIMEOUT", "1800")),
-                    stdin: File.read(BASE_IMAGE_DOCKERFILE))
+    # The Dockerfile goes over the wire on stdin. That works only because it
+    # copies nothing in from here -- it fetches what it needs itself -- so
+    # there is no build context to send.
+    built = on_box(box_row, "docker build -t #{BayBox.sh_quote(BASE_IMAGE_TAG)} -",
+                   timeout: Integer(ENV.fetch("RQ_BASE_IMAGE_TIMEOUT", "1800")),
+                   stdin: File.read(BASE_IMAGE_DOCKERFILE))
     built[:ok] ? BASE_IMAGE_TAG : nil
   rescue StandardError
     nil
+  end
+
+  # Fetches the published copy and gives it the local name, so what bay is told
+  # to use does not depend on who published it.
+  def pull_base_image(box_row)
+    source = BASE_IMAGE_SOURCE.to_s.strip
+    return false if source.empty?
+    pull = on_box(box_row, "docker pull #{BayBox.sh_quote(source)}",
+                  timeout: Integer(ENV.fetch("RQ_BASE_IMAGE_PULL_TIMEOUT", "900")))
+    return false unless pull[:ok]
+    on_box(box_row, "docker tag #{BayBox.sh_quote(source)} #{BayBox.sh_quote(BASE_IMAGE_TAG)}", timeout: 60)[:ok]
   end
 
   def prepare_box(box_row)

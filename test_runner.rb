@@ -328,17 +328,51 @@ check("and the config names it",
 check("a box without one gets no baseImage line",
       Runner.local_toml(BOXROW.merge("base_image" => nil)).include?("baseImage"), false)
 
-# It must never be able to fail a setup: a box with no image is slower, not
-# broken. Take docker build away and check prepare still succeeds.
+# Three ways to get the image, and they differ by twenty-five minutes, so which
+# one ran matters. This ssh records every docker command and obeys marker files
+# for what the machine can do.
 File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
   #!/usr/bin/env bash
   args=("$@"); last="${args[${#args[@]}-1]}"
-  case "$last" in *"docker build"*|*"docker image inspect"*) exit 1 ;; esac
+  echo "$last" >> "#{ROOT}/dockerlog"
+  case "$last" in
+    *"docker image inspect"*) [ -f "#{ROOT}/has-image" ] || exit 1 ;;
+    *"docker pull"*)          [ -f "#{ROOT}/can-pull" ]  || exit 1 ;;
+    *"docker build"*)         [ -f "#{ROOT}/can-build" ] || exit 1 ;;
+  esac
   echo "  ready"; exit 0
 SH
 File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
-none = Runner.prepare_box(BOXROW)
-check("preparing still succeeds without the image", none[:ok], true)
+
+# Say which docker verbs one prepare used.
+image_run = lambda do |*can|
+  ["has-image", "can-pull", "can-build"].each { |m| FileUtils.rm_f(File.join(ROOT, m)) }
+  can.each { |m| File.write(File.join(ROOT, m.to_s.tr("_", "-")), "") }
+  File.write("#{ROOT}/dockerlog", "")
+  out = Runner.prepare_box(BOXROW)
+  log = File.read("#{ROOT}/dockerlog")
+  verbs = {"inspect" => "docker image inspect", "pull" => "docker pull",
+           "tag" => "docker tag", "build" => "docker build"}
+  [out, verbs.select { |_, cmd| log.include?(cmd) }.keys]
+end
+
+already, verbs = image_run.call(:has_image)
+check("a box that has the image is left alone", verbs, ["inspect"])
+check("and keeps it", already[:base_image], Runner::BASE_IMAGE_TAG)
+
+pulled, verbs = image_run.call(:can_pull, :can_build)
+check("a box without it pulls instead of building", verbs, %w[inspect pull tag])
+check("and records the image", pulled[:base_image], Runner::BASE_IMAGE_TAG)
+
+built, verbs = image_run.call(:can_build)
+check("a box that cannot pull builds", verbs, %w[inspect pull build])
+check("and records the image too", built[:base_image], Runner::BASE_IMAGE_TAG)
+
+# It must never be able to fail a setup: a box with no image is slower, not
+# broken.
+none, verbs = image_run.call
+check("a box that can do neither still prepares", none[:ok], true)
+check("and tried both first", verbs, %w[inspect pull build])
 check("and says the boxes will be slow", none[:output].include?("build from scratch"), true)
 check("and records no image", none[:base_image], nil)
 
