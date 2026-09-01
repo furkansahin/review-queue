@@ -100,7 +100,7 @@ module Runner
       FileUtils.cp_r(src, dst, remove_destination: true)
     end
 
-    write_private(key_path(login), Crypto.decrypt(box_row["private_key_enc"]))
+    write_private(key_path(login), BayBox.ssh_private_key(Crypto.decrypt(box_row["private_key_enc"])))
     write_file(ssh_config_path(login), ssh_config(box_row), 0o600)
     link_ssh_config!
     write_file(File.join(dir, "bay.local.toml"), local_toml(box_row), 0o600)

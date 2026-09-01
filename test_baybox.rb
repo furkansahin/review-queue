@@ -18,7 +18,12 @@ rescue klass => e
 end
 
 priv, pub = BayBox.generate_keypair(comment: "review-queue")
-check("private key is a PEM", priv.start_with?("-----BEGIN"), true)
+# The format, spelled out. `ssh-keygen -y` alone does not answer this: macOS
+# reads a PKCS8 ed25519 key and OpenSSH 9.6 on Linux does not, so the shell out
+# below passed on my laptop while every box registered in production got a key
+# the dashboard itself could not load.
+check("private key is in OpenSSH's own format",
+      priv.start_with?("-----BEGIN OPENSSH PRIVATE KEY-----\n"), true)
 # ed25519, so the line a person pastes is one line rather than 758 characters
 # of base64. What matters is that OpenSSH takes it, which is checked below.
 check("public key is ssh-ed25519", pub.start_with?("ssh-ed25519 "), true)
@@ -38,6 +43,28 @@ Tempfile.create("id") do |f|
   derived = `ssh-keygen -y -f #{f.path} 2>/dev/null`.strip
   check("public half matches the private half", derived.split[1], pub.split[1])
 end
+
+# Keys already stored in the format that did not work. They are re-encoded on
+# the way to disk, not regenerated: the key is fine and its owner has already
+# installed the public half, so a new one would mean going and pasting again.
+pkcs8 = OpenSSL::PKey.generate_key("ED25519")
+fixed = BayBox.ssh_private_key(pkcs8.private_to_pem)
+check("a stored PKCS8 key is re-encoded", fixed.start_with?("-----BEGIN OPENSSH PRIVATE KEY-----"), true)
+Tempfile.create("id8") do |f|
+  f.write(fixed); f.flush
+  File.chmod(0o600, f.path)
+  derived = `ssh-keygen -y -f #{f.path} 2>/dev/null`.strip
+  check("and is the same key as before",
+        derived.split[1], BayBox.openssh_public(pkcs8, "review-queue").split[1])
+end
+
+# RSA keys predate the switch and OpenSSH reads their PEM, so changing them
+# would be work with nothing to gain.
+rsa = OpenSSL::PKey::RSA.new(2048).to_pem
+check("an RSA key is left alone", BayBox.ssh_private_key(rsa), rsa)
+# Anything unreadable is passed through, so ssh reports the real problem
+# instead of a guess made here.
+check("nonsense is passed through", BayBox.ssh_private_key("not a key"), "not a key")
 
 line = BayBox.authorized_keys_line(pub)
 check("the key is restricted", line.start_with?("restrict "), true)

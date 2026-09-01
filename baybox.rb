@@ -1,4 +1,5 @@
 require "openssl"
+require "securerandom"
 require_relative "crypto"
 
 # One remote box per user: what it is, and what a person is allowed to say
@@ -26,9 +27,7 @@ module BayBox
   # second, which is the pause between pressing Register and seeing the page.
   #
   # This was not possible while net-ssh was the transport: it needs two more
-  # gems to touch an ed25519 key at all. bay drives a real ssh binary now, and
-  # OpenSSH has read this key format for years -- checked with ssh-keygen -y
-  # against a key generated exactly this way.
+  # gems to touch an ed25519 key at all. bay drives a real ssh binary now.
   KEY_TYPE = "ED25519".freeze
   KEY_NAME = "ssh-ed25519".freeze
 
@@ -39,7 +38,58 @@ module BayBox
   # nothing here re-derives a public key from a private one.
   def generate_keypair(comment: "review-queue")
     key = OpenSSL::PKey.generate_key(KEY_TYPE)
-    [key.private_to_pem, openssh_public(key, comment)]
+    [openssh_private(key, comment: comment), openssh_public(key, comment)]
+  end
+
+  # OpenSSH's own private key format, not PEM.
+  #
+  # `private_to_pem` writes PKCS8, and OpenSSH 9.6 on Linux will not read an
+  # ed25519 key in it:
+  #
+  #   Load key ".../key": invalid format
+  #
+  # It reads PEM for RSA and ECDSA, which is where the assumption came from,
+  # but an ed25519 private key has to be openssh-key-v1. macOS's ssh-keygen
+  # accepts the PKCS8 file, so checking it there said yes and it shipped
+  # broken: every box registered after that got a key its own dashboard could
+  # not use. The test now shells out to ssh-keygen, which is the only thing
+  # that actually answers this question.
+  #
+  # The unencrypted form is small enough to write out. A header naming no
+  # cipher and no KDF, then the public blob, then a section repeating the
+  # public half and carrying the private one, padded to a multiple of 8.
+  def openssh_private(key, comment: "review-queue")
+    pub = key.raw_public_key
+    blob = ssh_string(KEY_NAME) + ssh_string(pub)
+    # Two copies of the same number, which is how ssh checks that a decryption
+    # worked. Nothing here is encrypted, but the format still wants them.
+    check = SecureRandom.random_bytes(4)
+    body = check + check + ssh_string(KEY_NAME) + ssh_string(pub) +
+           ssh_string(key.raw_private_key + pub) + ssh_string(comment)
+    # The "none" cipher still has an 8-byte block, and the padding counts up.
+    body += (1..((8 - body.bytesize % 8) % 8)).to_a.pack("C*")
+    data = "openssh-key-v1\0" + ssh_string("none") + ssh_string("none") +
+           ssh_string("") + [1].pack("N") + ssh_string(blob) + ssh_string(body)
+    "-----BEGIN OPENSSH PRIVATE KEY-----\n" \
+      "#{[data].pack("m0").scan(/.{1,70}/).join("\n")}\n" \
+      "-----END OPENSSH PRIVATE KEY-----\n"
+  end
+
+  # What to write to disk for a key that is already stored.
+  #
+  # RSA keys predate the switch and OpenSSH reads their PEM, so they pass
+  # through untouched. A PKCS8 ed25519 key was written by the version with the
+  # bug above; it is re-encoded rather than regenerated, because the key itself
+  # is fine and its owner has already installed the public half on their
+  # machine. Regenerating would make them go and paste a new line.
+  def ssh_private_key(stored)
+    text = stored.to_s
+    return text if text.include?("OPENSSH PRIVATE KEY") || text.include?("RSA PRIVATE KEY")
+    openssh_private(OpenSSL::PKey.read(text))
+  rescue StandardError
+    # Anything unreadable is left exactly as it was, for ssh to complain about.
+    # Guessing here would turn a clear error into a confusing one.
+    text
   end
 
   # The ssh wire format for an ed25519 public key: the string "ssh-ed25519",
