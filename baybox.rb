@@ -130,6 +130,36 @@ module BayBox
     "#{BOX_PREFIX}-#{slug[0, [room, 1].max]}#{suffix}"
   end
 
+  # A box for working on an issue. Its own namespace, so a list of boxes says
+  # which is which at a glance, and so a review of a pull request and work on
+  # an issue can never land on one box -- even though GitHub keeps their
+  # numbers apart, a name that depends on that is one nobody can read.
+  def issue_box_name(repo, number) = box_name(repo, "issue-#{number}")
+
+  # The branch work on an issue is committed to, and later pushed as the pull
+  # request's head. Chosen here rather than by bay, whose own is
+  # <branchPrefix>/<box> -- and the shared config sets that prefix to one
+  # person's name, so every pull request opened from here would have carried
+  # it.
+  #
+  # The title makes it readable in a list of branches. It is folded to what
+  # git and a shell both take without quoting, and cut short, because a branch
+  # name is not the place for the whole sentence.
+  BRANCH_RE = %r{\A[a-z0-9][a-z0-9._/-]{0,99}\z}
+
+  def issue_branch(number, title)
+    # Whole words only: cutting at a character count gave "...-into-the-nex".
+    words = title.to_s.downcase.split(/[^a-z0-9]+/).reject(&:empty?)
+    slug = words.each_with_object([]) { |w, kept| break kept if (kept + [w]).join("-").length > 40; kept << w }
+    ["issue", number.to_i, *slug].join("-")
+  end
+
+  def check_branch!(branch)
+    b = branch.to_s
+    raise Error, "bad branch #{shown(b)}" unless b.match?(BRANCH_RE) && !b.include?("..") && !b.end_with?(".lock", "/")
+    b
+  end
+
   # Single quotes, for a path that is built here and read by a remote shell.
   # Everything inside single quotes is literal to a shell except a single quote
   # itself, which is closed, escaped and reopened.

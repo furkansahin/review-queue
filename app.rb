@@ -352,24 +352,27 @@ class ReviewQueue < Roda
           stored = current.call
           claude = token_update.call(r.params["claude_token"], stored, "claude_token_enc")
           github = token_update.call(r.params["github_token"], stored, "github_token_enc")
+          writer = token_update.call(r.params["github_write_token"], stored, "github_write_token_enc")
           if (row = current.call)
             # Keep the existing keypair: changing the address must not force the
             # user to reinstall the key.
-            DB.exec(<<~SQL, [t[:host], t[:ssh_user], t[:port], skills, repo_path, claude, github, row["id"]])
+            DB.exec(<<~SQL, [t[:host], t[:ssh_user], t[:port], skills, repo_path, claude, github, writer, row["id"]])
               UPDATE bayboxes SET host=$1, ssh_user=$2, port=$3, skills_repo=$4,
-                                   repo_path=$5, claude_token_enc=$6, github_token_enc=$7
-              WHERE id=$8
+                                   repo_path=$5, claude_token_enc=$6, github_token_enc=$7,
+                                   github_write_token_enc=$8
+              WHERE id=$9
             SQL
           else
             priv, pub = BayBox.generate_keypair(comment: "review-queue:#{current_login}")
             # The array is built first: a heredoc body starts on the next line,
             # so a continuation inside the argument list lands inside the SQL.
             values = [current_login, t[:host], t[:ssh_user], t[:port],
-                      Crypto.encrypt(priv), pub, skills, repo_path, claude, github]
+                      Crypto.encrypt(priv), pub, skills, repo_path, claude, github, writer]
             DB.exec(<<~SQL, values)
               INSERT INTO bayboxes (login, host, ssh_user, port, private_key_enc, public_key,
-                                     skills_repo, repo_path, claude_token_enc, github_token_enc)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                     skills_repo, repo_path, claude_token_enc, github_token_enc,
+                                     github_write_token_enc)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             SQL
           end
           # The box is where this has to take effect, so tell it now. A box that
@@ -566,6 +569,44 @@ class ReviewQueue < Roda
         r.redirect "/sessions"
       end
 
+      # Pushes an issue's branch and opens a draft pull request from it.
+      #
+      # Only from here, and only on a press: this is the one thing the app does
+      # that other people see, and a branch pushed to the repository runs its
+      # CI with its secrets. The card this is pressed on shows what the branch
+      # holds, and Runner.publish looks again before it pushes, because a
+      # follow-up may have changed it since the page was drawn.
+      r.post "publish" do
+        check_csrf!
+        id = param_id(r.params["id"])
+        job = id && DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2", [current_login, id])
+        box = job && Jobs.baybox(job)
+
+        if job.nil? || box.nil?
+          flash!("sessions_error", "no such session, or no baybox registered")
+        elsif job["kind"] != "work"
+          flash!("sessions_error", "only work on an issue can open a pull request")
+        elsif job["state"] != "done"
+          flash!("sessions_error", "wait for the work to finish first")
+        elsif job["torn_down_at"]
+          flash!("sessions_error", "that box has been torn down")
+        elsif job["branch"].to_s.empty?
+          flash!("sessions_error", "this session has no branch recorded")
+        else
+          res = Runner.run(box, "publish #{job["repo"]} #{job["pr_number"]} #{job["box_name"]} #{job["branch"]}",
+                           timeout: 300)
+          Jobs.set_summary(job["id"], JSON.generate(res[:summary])) if res[:summary]
+          if res[:ok]
+            Jobs.set_pr(current_login, job["id"], res[:pr_url])
+            flash!("sessions_notice", res[:updated] ? "pushed the branch; #{res[:pr_url]} is up to date."
+                                                    : "opened a draft pull request: #{res[:pr_url]}")
+          else
+            flash!("sessions_error", (res[:error] || res[:output]).to_s.strip[0, 500])
+          end
+        end
+        r.redirect "/sessions"
+      end
+
       r.post "cancel" do
         check_csrf!
         if (id = param_id(r.params["id"]))
@@ -724,6 +765,7 @@ class ReviewQueue < Roda
                                   csrf_teardown: csrf_tag("/sessions/teardown"),
                                   csrf_cancel: csrf_tag("/sessions/cancel"),
                                   csrf_ask: csrf_tag("/sessions/ask"),
+                                  csrf_publish: csrf_tag("/sessions/publish"),
                                   csrf_forget: csrf_tag("/sessions/forget")},
           layout: false)
       end
@@ -739,6 +781,21 @@ class ReviewQueue < Roda
           res = Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s, pr_number: pr)
           # Never swallow this: pressing Review and seeing nothing happen is
           # worse than seeing an error.
+          flash!("review_error", res[:error]) unless res[:ok]
+        end
+      end
+      r.redirect "/?#{r.query_string}"
+    end
+
+    # Work on an issue. Same queue as a review; the worker tells them apart.
+    r.post "work" do
+      check_csrf!
+      if REVIEWS_ENABLED
+        n = param_id(r.params["issue"])
+        if n.nil?
+          flash!("review_error", "that issue number is not valid")
+        else
+          res = Jobs.enqueue(login: current_login, repo: r.params["repo"].to_s, pr_number: n, kind: "work")
           flash!("review_error", res[:error]) unless res[:ok]
         end
       end
@@ -804,10 +861,16 @@ class ReviewQueue < Roda
       # by definition, and there is nothing left to hide.
       merged = snap[:merged] || []
 
+      # Issues are their own list too, and nil means they could not be read --
+      # which the tab says, rather than claiming nothing is assigned to you.
+      issues = snap[:issues] || []
+
       if tab == :snoozed
         rows = asleep
       elsif tab == :merged
         rows = merged
+      elsif tab == :issues
+        rows = hide ? issues.reject { |row| row[:settled] } : issues
       else
         rows = awake.select { |row| tab == :all || row[:buckets].include?(tab) }
         rows = rows.reject { |row| row[:settled] } if hide
@@ -819,6 +882,8 @@ class ReviewQueue < Roda
       counts[:snoozed] = {open: asleep.count { |row| !row[:settled] }, total: asleep.size}
       # No open count: nothing merged is open, and "0/10" reads as a warning.
       counts[:merged] = {open: nil, total: merged.size}
+      # "Open" is what is still yours to start: no pull request on it yet.
+      counts[:issues] = {open: issues.count { |i| !i[:settled] }, total: issues.size}
       snap = snap.merge(counts: counts)
 
       view("queue", locals: {snap: snap, rows: rows, tab: tab, hide: hide, service: service,
@@ -833,6 +898,8 @@ class ReviewQueue < Roda
                                !DB.row("SELECT 1 FROM bayboxes WHERE login = $1", [current_login]).nil?),
                              csrf_review: csrf_tag("/review"),
                              jobs_by_key: (REVIEWS_ENABLED ? Jobs.by_key(current_login) : {}),
+                             csrf_work: csrf_tag("/work"),
+                             work_by_key: (REVIEWS_ENABLED && tab == :issues ? Jobs.by_key(current_login, "work") : {}),
                              csrf_unsnooze: csrf_tag("/unsnooze"),
                              snooze: snooze},
         layout: false)

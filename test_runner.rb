@@ -113,19 +113,22 @@ check("the review is pinned to a model",
       toml.include?("--model opus") && toml.include?("--effort max"), true)
 # Without this the box refuses rspec, psql and ruby, and every finding comes
 # back read-only -- the harness cannot verify anything.
-check("both may actually run things",
-      toml.scan("--dangerously-skip-permissions").size, 2)
-check("so is the follow-up",
-      toml.scan("--model opus").size == 2 && toml.scan("--effort max").size == 2, true)
+check("all three may actually run things",
+      toml.scan("--dangerously-skip-permissions").size, 3)
+check("so are the follow-up and the work",
+      toml.scan("--model opus").size == 3 && toml.scan("--effort max").size == 3, true)
+check("it defines the work command", toml.include?("work ="), true)
+check("the work reads its own prompt", toml.include?(".rq/work-prompt.md"), true)
 check("the review reads the harness prompt", toml.include?(".rq/review-prompt.md"), true)
 check("the follow-up reads its question", toml.include?(".rq/followup.txt"), true)
 check("and says what was asked", toml.include?("== you asked"), true)
 # The review stamps its own start; the follow-up is stamped from here instead,
 # because the box takes a second or two to get going and the worker looks in
 # that gap. See the ask checks below.
-check("the review stamps its own start", toml.scan(Runner::RUN_MARK).size, 1)
-check("both after --, so a leading dash is text",
-      toml.scan(/ -- \\"\$\(cat/).size, 2)
+# The work is started by the worker too, so it stamps its own the same way.
+check("the review and the work stamp their own start", toml.scan(Runner::RUN_MARK).size, 2)
+check("all after --, so a leading dash is text",
+      toml.scan(/ -- \\"\$\(cat/).size, 3)
 check("and by a relative path, never /workspace", toml.include?("/workspace"), false)
 check("the key is written 0600",
       format("%o", File.stat(Runner.key_path("furkansahin")).mode & 0o777), "600")

@@ -38,13 +38,28 @@ def start_one(job)
 
   # Runner validates each field before it reaches a command line, and answers
   # with the reason if one is wrong.
-  res = Runner.run(box, "review #{job["repo"]} #{job["pr_number"]} #{job["box_name"]}")
+  verb = job["kind"] == "work" ? "work" : "review"
+  res = Runner.run(box, "#{verb} #{job["repo"]} #{job["pr_number"]} #{job["box_name"]}")
   if res[:ok]
-    log("started #{job["box_name"]} for #{job["login"]}")
+    Jobs.set_branch(job["id"], res[:branch]) if res[:branch]
+    log("started #{verb} #{job["box_name"]} for #{job["login"]}")
   else
-    Jobs.finish(job["id"], "failed", output: res[:output], error: res[:error] || "could not start the review")
+    what = verb == "work" ? "the work" : "the review"
+    Jobs.finish(job["id"], "failed", output: res[:output], error: res[:error] || "could not start #{what}")
     log("could not start #{job["box_name"]}: #{res[:error] || res[:output].to_s[0, 200]}")
   end
+end
+
+# After work on an issue stops -- finished, failed, or a follow-up answered --
+# note what the branch holds, so the page can show it before anyone opens a
+# pull request from it. Best effort: without it the page offers nothing to
+# open, which is the safe way to be wrong.
+def record_summary(job, box)
+  return unless job["kind"] == "work"
+  seen = Runner.run(box, "inspect #{job["box_name"]}")
+  Jobs.set_summary(job["id"], seen[:ok] ? seen[:output] : nil)
+rescue StandardError => e
+  log("could not inspect #{job["box_name"]}: #{e.class}: #{e.message}")
 end
 
 def poll_running
@@ -85,6 +100,7 @@ def poll_running
         Jobs.finish(job["id"], taken[:exit_code].to_i.zero? ? "done" : "failed",
           output: taken[:output],
           error: taken[:exit_code].to_i.zero? ? nil : "the run failed on the baybox")
+        record_summary(job, box)
         log("adopted #{job["box_name"]} and it was finished: #{taken[:exit_code]}")
       else
         Jobs.progress(job["id"], taken[:output], "reviewing")
@@ -110,6 +126,7 @@ def poll_running
       Jobs.finish(job["id"], state == "done" ? "done" : "failed",
         output: result[:output],
         error: state == "failed" ? "the run failed on the baybox\n#{detail}" : nil)
+      record_summary(job, box)
       log("#{job["box_name"]} finished: #{state}")
     when "building", "reviewing", "running"
       # result is claude's output only; bay's build noise stays in build.log and

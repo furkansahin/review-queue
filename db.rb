@@ -307,6 +307,26 @@ module DB
     -- denied" and takes every build with it. So this is a per-box fact, not a
     -- setting: no image, no line, cold builds that work.
     ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS base_image       text;
+
+    -- Working on an issue, as well as reviewing a pull request. They share this
+    -- table because everything about running one is the same -- the box, the
+    -- worker, the live trace, follow-ups -- and only the prompt and what
+    -- happens after differ. pr_number holds the issue's number for kind
+    -- 'work': GitHub numbers issues and pull requests from one sequence, so
+    -- the live index still cannot confuse the two.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS kind    text NOT NULL DEFAULT 'review';
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS branch  text;
+    -- What the branch holds when the work stopped: commits, files, whether it
+    -- touches CI. Read by the page before anyone presses Open PR, so it is
+    -- stored rather than fetched over ssh on every page load.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS summary text;
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS pr_url  text;
+    -- A second GitHub token, kept apart from github_token_enc on purpose. That
+    -- one is written into the box, where claude runs unattended over issue text
+    -- anyone can comment on. This one can push, so it never goes in: the
+    -- dashboard uses it itself, after a person has looked at what the branch
+    -- holds.
+    ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS github_write_token_enc text;
   SQL
 
   def setup!

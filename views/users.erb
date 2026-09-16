@@ -77,7 +77,8 @@
       <div>Person</div>
       <div>Signed in</div>
       <div><%= reviews_enabled ? "Baybox" : "Watching" %></div>
-      <div style="text-align: right;">Reviews</div>
+      <%# Reviews and work on issues both count: each is a session on a baybox. %>
+      <div style="text-align: right;">Sessions</div>
     </div>
 
     <% people.each do |p| %>

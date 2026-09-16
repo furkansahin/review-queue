@@ -33,16 +33,26 @@ class GitHubClient
     @idle = Hash.new { |h, k| h[k] = [] }
   end
 
-  def get(path)
-    uri = URI(path.start_with?("http") ? path : API + path)
-    res = request(uri)
-    @mutex.synchronize { @rate_remaining = res["x-ratelimit-remaining"] }
-    unless res.is_a?(Net::HTTPSuccess)
-      message = "GitHub #{res.code} on #{uri.path}: #{res.body.to_s[0, 200]}"
-      raise Unauthorized, message if res.code == "401"
-      raise message
-    end
-    JSON.parse(res.body)
+  def get(path) = call(:get, path)
+
+  # For the two writes this app makes -- opening a pull request, and asking
+  # GraphQL a question -- with the same pool, the same errors and the same
+  # retry as a read.
+  #
+  # The retry is safe for both. It only fires on a connection the far end had
+  # already dropped, which fails on write, before GitHub reads the request.
+  # And the one write that changes anything is guarded where it is made: a
+  # pull request is looked up by branch before one is created.
+  def post(path, body) = call(:post, path, body)
+
+  # One round trip for what REST would need one call per issue for. Raises on
+  # a GraphQL error as well as an HTTP one: GitHub answers a bad query with 200
+  # and an errors array, which would otherwise read as "no results".
+  def graphql(query, variables = {})
+    res = post("/graphql", {query: query, variables: variables})
+    errors = res["errors"]
+    raise "GitHub GraphQL: #{errors.map { |e| e["message"] }.join("; ")[0, 300]}" if errors && !errors.empty?
+    res["data"]
   end
 
   # Best-effort: nil instead of raising (used for optional data like check runs).
@@ -67,12 +77,24 @@ class GitHubClient
   # the caller's time once.
   DROPPED = [EOFError, Errno::ECONNRESET, Errno::EPIPE, IOError, Net::HTTPBadResponse].freeze
 
-  def request(uri)
+  def call(verb, path, body = nil)
+    uri = URI(path.start_with?("http") ? path : API + path)
+    res = request(uri, verb, body)
+    @mutex.synchronize { @rate_remaining = res["x-ratelimit-remaining"] }
+    unless res.is_a?(Net::HTTPSuccess)
+      message = "GitHub #{res.code} on #{uri.path}: #{res.body.to_s[0, 300]}"
+      raise Unauthorized, message if res.code == "401"
+      raise message
+    end
+    JSON.parse(res.body)
+  end
+
+  def request(uri, verb = :get, body = nil)
     fresh = false
     begin
       http = take(uri, fresh: fresh)
       begin
-        res = http.request(build_request(uri))
+        res = http.request(build_request(uri, verb, body))
       rescue StandardError
         finish(http)
         raise
@@ -86,8 +108,12 @@ class GitHubClient
     end
   end
 
-  def build_request(uri)
-    req = Net::HTTP::Get.new(uri)
+  def build_request(uri, verb = :get, body = nil)
+    req = verb == :post ? Net::HTTP::Post.new(uri) : Net::HTTP::Get.new(uri)
+    if body
+      req["Content-Type"] = "application/json"
+      req.body = JSON.generate(body)
+    end
     req["Authorization"] = "Bearer #{@token}"
     req["Accept"] = "application/vnd.github+json"
     req["X-GitHub-Api-Version"] = "2022-11-28"
@@ -184,8 +210,46 @@ class QueueService
     [{key: :all, label: "All"}] +
       buckets.map { |b| {key: b[:key], label: b[:label]} } +
       [{key: :quick, label: "Quick wins"}, {key: :snoozed, label: "Snoozed"},
-       {key: :merged, label: "Merged"}]
+       {key: :merged, label: "Merged"}, {key: :issues, label: "My issues"}]
   end
+
+  # Open issues assigned to you. Like Merged, a list of its own rather than a
+  # bucket: an issue has no reviewers, no CI and no head commit, so none of what
+  # a bucket entry is fetched for applies.
+  def issues_query = "#{@scope} is:open is:issue assignee:@me"
+
+  # The issues and, for each, the pull requests that address it -- in one
+  # round trip. REST would need a timeline call per issue to find those.
+  #
+  # Two kinds of link, because teams use both. closedByPullRequestsReferences
+  # is what GitHub itself treats as addressing an issue: "Fixes #n" in a pull
+  # request, or a link made in its Development panel. Cross-references catch
+  # the pull request that only mentions it, which is often how work on an issue
+  # starts before anyone writes "Fixes".
+  ISSUES_GRAPHQL = <<~GRAPHQL
+    query($q: String!, $first: Int!) {
+      search(query: $q, type: ISSUE, first: $first) {
+        nodes {
+          ... on Issue {
+            number title url updatedAt
+            author { login }
+            repository { nameWithOwner }
+            labels(first: 10) { nodes { name } }
+            closedByPullRequestsReferences(first: 5, includeClosedPrs: true) {
+              nodes { number title url state isDraft author { login } }
+            }
+            timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], last: 20) {
+              nodes {
+                ... on CrossReferencedEvent {
+                  source { ... on PullRequest { number title url state isDraft author { login } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  GRAPHQL
 
   # Merged pull requests you wrote. This is a separate list, not a bucket.
   # A bucket joins `entries`, and everything in `entries` is fetched in full,
@@ -269,9 +333,23 @@ class QueueService
       res = @gh.try("/search/issues?per_page=#{@merged_limit}&sort=updated&q=#{URI.encode_www_form_component(merged_query)}")
       [:__merged, (res && res["items"]) || []]
     }
+    # The same again for issues, and isolated the same way -- except that a
+    # failure here is kept, not dropped. An empty Merged tab is a fair answer
+    # when the search fails; an empty issues tab says "nothing assigned to
+    # you", which would be a lie.
+    tasks << -> {
+      begin
+        data = @gh.graphql(ISSUES_GRAPHQL, {q: issues_query, first: @per_page})
+        [:__issues, (data.dig("search", "nodes") || []).compact, nil]
+      rescue StandardError => e
+        [:__issues, nil, e.message]
+      end
+    }
     login, *found = threaded(tasks, &:call)
     merged_items = found.find { |r| r && r[0] == :__merged }&.at(1) || []
-    found = found.reject { |r| r && r[0] == :__merged }
+    _, issue_nodes, issues_error = found.find { |r| r && r[0] == :__issues }
+    issues_error ||= "could not read your issues" if issue_nodes.nil?
+    found = found.reject { |r| r && %i[__merged __issues].include?(r[0]) }
     raise failure if failure
     raise "GitHub did not say who is signed in" if login.nil?
 
@@ -295,7 +373,8 @@ class QueueService
     rows = prs.map { |pr| row(pr, login) }.sort_by { |r| r[:sort_key] }
 
     {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
-     counts: counts(rows), reviews_7d: weekly.value, merged: merged.value}
+     counts: counts(rows), reviews_7d: weekly.value, merged: merged.value,
+     issues: issue_nodes ? issue_rows(issue_nodes, login) : nil, issues_error: issues_error}
   end
 
   # Pull requests you reviewed in the last 7 days.
@@ -513,6 +592,75 @@ class QueueService
        # Newest merge first: this is a look back, so recency is the order.
        sort_key: [merged_at ? -merged_at.to_i : 0]}
     }.compact.sort_by { |r| r[:sort_key] }
+  end
+
+  # Rows for the issues tab. Nothing is fetched here: the query already carried
+  # everything, so this only decides what each issue's state is.
+  def issue_rows(nodes, login)
+    nodes.filter_map { |node|
+      full = node.dig("repository", "nameWithOwner").to_s
+      owner, repo = full.split("/", 2)
+      next nil unless repo && node["number"]
+
+      prs = issue_prs(node, login)
+      open_pr = prs.find { |p| %w[open draft].include?(p[:state]) }
+      merged_pr = prs.find { |p| p[:state] == "merged" && p[:linked] }
+      updated = begin
+        Time.parse(node["updatedAt"].to_s)
+      rescue StandardError
+        nil
+      end
+
+      # Someone is on it once there is an open pull request, whoever wrote it.
+      # A merged one that did not close the issue is its own state: the work
+      # landed, and the issue is still open, which usually means it was only
+      # part of it or nobody closed it.
+      state, bg, fg, rank =
+        if open_pr then ["PR open", "var(--state-them-bg)", "var(--state-them-fg)", 1]
+        elsif merged_pr then ["PR merged", "var(--state-merged-bg)", "var(--state-merged-fg)", 2]
+        else ["To do", "var(--state-yours-bg)", "var(--state-yours-fg)", 0]
+        end
+      settled = rank.positive?
+      bar, text = settled ? ["var(--age-idle-bar)", "var(--age-idle-fg)"] : ["var(--age-fresh-bar)", "var(--age-fresh-fg)"]
+
+      {key: "#{full}##{node["number"]}", repo: repo, repo_full: full, number: node["number"],
+       url: node["url"], title: node["title"], ref: "#{repo} ##{node["number"]}",
+       author: node.dig("author", "login") || "ghost",
+       state: state, state_bg: bg, state_color: fg,
+       row_bg: settled ? "var(--row-settled)" : "var(--row)", age_color: bar, age_text_color: text,
+       updated_at: updated, age: ago(updated), prs: prs,
+       chips: (node.dig("labels", "nodes") || []).map { |l| chip(l["name"], :faint) }.compact.first(4),
+       settled: settled, buckets: [],
+       # To do first, then in flight, then landed; newest activity first within
+       # each. Unlike the queue there is no one waiting on an issue, so age is
+       # not urgency -- recency is what you were last thinking about.
+       sort_key: [rank, updated ? -updated.to_i : 0]}
+    }.sort_by { |r| r[:sort_key] }
+  end
+
+  # The pull requests for one issue, linked ones first, each once. A mention
+  # that was closed without merging is dropped: it is a pull request that
+  # talked about this issue and then went nowhere, which is noise here. A
+  # linked one that was closed is kept, because it was an attempt at this
+  # issue and knowing it failed is worth something.
+  def issue_prs(node, login)
+    seen = {}
+    linked = (node.dig("closedByPullRequestsReferences", "nodes") || []).map { |p| [p, true] }
+    mentioned = (node.dig("timelineItems", "nodes") || []).map { |e| [e && e["source"], false] }
+    (linked + mentioned).filter_map { |pr, is_linked|
+      next nil unless pr && pr["number"] && pr["url"]
+      next nil if seen[pr["url"]]
+      seen[pr["url"]] = true
+      state = case pr["state"]
+              when "MERGED" then "merged"
+              when "CLOSED" then "closed"
+              else pr["isDraft"] ? "draft" : "open"
+              end
+      next nil if state == "closed" && !is_linked
+      who = pr.dig("author", "login").to_s
+      {number: pr["number"], url: pr["url"], title: pr["title"].to_s, state: state,
+       author: who == login ? "you" : (who.empty? ? "ghost" : who), linked: is_linked}
+    }.first(4)
   end
 
   # Who approved it. requested_reviewers is empty once a pull request is

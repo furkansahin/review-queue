@@ -14,22 +14,28 @@ module Jobs
 
   module_function
 
-  def enqueue(login:, repo:, pr_number:)
+  KINDS = %w[review work].freeze
+
+  # kind "work" is an issue being worked on, and pr_number is then the issue's
+  # number. See the schema for why they share a table.
+  def enqueue(login:, repo:, pr_number:, kind: "review")
+    return {ok: false, error: "unknown job kind #{kind.inspect}"} unless KINDS.include?(kind)
     box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [login])
     return {ok: false, error: "no baybox registered"} unless box
 
-    name = BayBox.box_name(repo, pr_number)
+    name = kind == "work" ? BayBox.issue_box_name(repo, pr_number) : BayBox.box_name(repo, pr_number)
     BayBox.validate!(repo: repo, pr_number: pr_number, box: name)
 
-    row = DB.row(<<~SQL, [login, box["id"], repo, pr_number, name])
-      INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name)
-      VALUES ($1, $2, $3, $4, $5) RETURNING *
+    row = DB.row(<<~SQL, [login, box["id"], repo, pr_number, name, kind])
+      INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, kind)
+      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
     SQL
     {ok: true, job: row}
   rescue PG::UniqueViolation
     # The partial unique index already refuses a second live job for this pull
     # request, so a double click is harmless.
-    {ok: false, error: "a review is already running for this pull request"}
+    {ok: false, error: kind == "work" ? "work on this issue is already running"
+                                      : "a review is already running for this pull request"}
   rescue BayBox::Error => e
     {ok: false, error: e.message}
   end
@@ -43,6 +49,7 @@ module Jobs
   # no bandwidth.
   LIST_COLUMNS = "id, login, baybox_id, repo, pr_number, box_name, state, phase, " \
                  "torn_down_at, error, created_at, started_at, finished_at, " \
+                 "kind, branch, summary, pr_url, " \
                  "octet_length(output) AS output_bytes"
 
   def for_user(login) = DB.rows(<<~SQL, [login])
@@ -111,16 +118,26 @@ module Jobs
   # The queue page reads only the state word off this, so the query returns
   # three columns rather than fifty whole reviews. The inner LIMIT keeps the
   # old window: the 50 newest jobs, then newest-per-pull-request within them.
-  def by_key(login)
-    DB.rows(<<~SQL, [login]).each_with_object({}) { |j, h| h["#{j["repo"]}##{j["pr_number"]}"] = j }
-      SELECT DISTINCT ON (repo, pr_number) repo, pr_number, state
+  #
+  # Per kind, so a review of a pull request never answers for work on an issue
+  # and the other way round.
+  def by_key(login, kind = "review")
+    DB.rows(<<~SQL, [login, kind]).each_with_object({}) { |j, h| h["#{j["repo"]}##{j["pr_number"]}"] = j }
+      SELECT DISTINCT ON (repo, pr_number) repo, pr_number, state, pr_url
       FROM (
-        SELECT repo, pr_number, state, torn_down_at, created_at
-        FROM review_jobs WHERE login = $1 ORDER BY created_at DESC LIMIT 50
+        SELECT repo, pr_number, state, pr_url, torn_down_at, created_at
+        FROM review_jobs WHERE login = $1 AND kind = $2 ORDER BY created_at DESC LIMIT 50
       ) recent
       WHERE torn_down_at IS NULL
       ORDER BY repo, pr_number, created_at DESC
     SQL
+  end
+
+  def set_branch(id, branch) = DB.exec("UPDATE review_jobs SET branch = $1 WHERE id = $2", [branch, id])
+  def set_summary(id, summary) = DB.exec("UPDATE review_jobs SET summary = $1 WHERE id = $2", [summary, id])
+
+  def set_pr(login, id, url)
+    DB.exec("UPDATE review_jobs SET pr_url = $1 WHERE login = $2 AND id = $3", [url, login, id])
   end
 
   # Marks every job that used this box, so the rows go back to offering Review.

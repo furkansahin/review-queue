@@ -79,6 +79,16 @@
         padding: 12px 14px; overflow-x: auto; font-size: 12px; line-height: 1.5;
         font-family: 'IBM Plex Mono', monospace; white-space: pre-wrap; word-break: break-word; }
   .ask { display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; }
+  /* What an issue's branch holds, above the button that pushes it. */
+  .branch { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border-soft);
+            border-radius: 8px; background: var(--bg); font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px; }
+  .branch .line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .branch .warn { color: var(--err-fg); }
+  .branch ul { margin: 6px 0 0; padding-left: 16px; }
+  .branch li { margin: 2px 0; }
+  .kind { font: 500 10px 'IBM Plex Mono', monospace; padding: 2px 6px; border-radius: 3px;
+          border: 1px solid var(--chip-blue-br); background: var(--chip-blue-bg); color: var(--chip-blue-fg); }
   .ask textarea { flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12px;
                   padding: 8px 10px; border-radius: 6px; resize: vertical;
                   border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); }
@@ -107,6 +117,17 @@
   chars = ->(j) { j["output_bytes"].to_i }
   has_output = ->(j) { chars.call(j).positive? }
   inline = ->(j) { outputs[j["id"]] }
+  # A work session is about an issue, and GitHub's /pull/ path does not
+  # redirect for one, so the link has to know.
+  gh_link = ->(j) { "https://github.com/#{j["repo"]}/#{j["kind"] == "work" ? "issues" : "pull"}/#{j["pr_number"]}" }
+  summary_of = ->(j) {
+    begin
+      j["summary"].to_s.empty? ? nil : JSON.parse(j["summary"])
+    rescue JSON::ParserError
+      nil
+    end
+  }
+  can_write = baybox && !baybox["github_write_token_enc"].to_s.empty?
   human = ->(n) {
     if n < 1024 then "#{n} bytes"
     elsif n < 1_048_576 then "#{(n / 1024.0).round} KB"
@@ -145,14 +166,16 @@
 
   <h2>Active<%= live.empty? ? "" : " (#{live.size})" %></h2>
   <% if live.empty? %>
-    <div class="empty">Nothing running. Press <span class="mono">Review</span> on a pull request.</div>
+    <div class="empty">Nothing running. Press <span class="mono">Review</span> on a pull request,
+      or <span class="mono">Work on it</span> on an issue.</div>
   <% end %>
   <% live.each do |j| %>
     <% bg, fg = colours.fetch(j["state"], ["var(--chip-grey-bg)", "var(--chip-grey-fg)"]) %>
     <div class="card">
       <div class="row1">
         <span class="pill <%= "live" if j["state"] == "running" %>" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
-        <a href="https://github.com/<%= j["repo"] %>/pull/<%= j["pr_number"] %>" target="_blank" rel="noreferrer"
+        <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
+        <a href="<%= gh_link.call(j) %>" target="_blank" rel="noreferrer"
            style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
         <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
         <div style="flex: 1;"></div>
@@ -182,14 +205,15 @@
 
   <h2>Previous<%= past.empty? ? "" : " (#{past.size})" %></h2>
   <% if past.empty? %>
-    <div class="empty">No finished reviews yet.</div>
+    <div class="empty">Nothing has finished yet.</div>
   <% end %>
   <% past.each do |j| %>
     <% bg, fg = colours.fetch(j["state"], ["var(--chip-grey-bg)", "var(--chip-grey-fg)"]) %>
     <div class="card">
       <div class="row1">
         <span class="pill" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
-        <a href="https://github.com/<%= j["repo"] %>/pull/<%= j["pr_number"] %>" target="_blank" rel="noreferrer"
+        <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
+        <a href="<%= gh_link.call(j) %>" target="_blank" rel="noreferrer"
            style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
         <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
         <div style="flex: 1;"></div>
@@ -207,7 +231,7 @@
           <% Transcript.sections(full).each_with_index do |sec, n| %>
             <details data-keep="sec-<%= j["id"] %>-<%= n %>" <%= sec.open ? "open" : "" %>>
               <summary <%= sec.kind == :answer ? "" : 'style="color: var(--muted-2);"' %>><%=
-                sec.title %> <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%=
+                j["kind"] == "work" ? sec.title.sub("the review", "the work") : sec.title %> <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%=
                 sec.kind == :question ? "" : human.call(sec.text.bytesize) %></span></summary>
               <% if sec.dropped %>
                 <div class="sub" style="padding: 6px 0 0;">… <%= sec.dropped %> earlier lines not shown</div>
@@ -227,11 +251,62 @@
         <% end %>
       <% end %>
 
+      <% if j["kind"] == "work" %>
+        <% sm = summary_of.call(j) %>
+        <div class="branch">
+          <div class="line">
+            <span>branch <strong><%= j["branch"] || "—" %></strong></span>
+            <% if sm %>
+              <span><%= sm["ahead"].to_i %> commit<%= sm["ahead"].to_i == 1 ? "" : "s" %></span>
+              <% unless sm["stat"].to_s.empty? %><span style="color: var(--muted);"><%= sm["stat"] %></span><% end %>
+              <% if sm["dirty"].to_i.positive? %><span class="warn"><%= sm["dirty"] %> uncommitted</span><% end %>
+              <%# A branch pushed to the repository runs CI with its secrets, so
+                  a change to the workflows is the first thing to read. %>
+              <% if sm["touches_ci"] %><span class="warn" title="CI runs this branch with the repository's secrets">changes .github/ — read it first</span><% end %>
+            <% else %>
+              <span style="color: var(--muted);">not inspected yet</span>
+            <% end %>
+            <div style="flex: 1;"></div>
+            <% if j["pr_url"] %>
+              <a href="<%= j["pr_url"] %>" target="_blank" rel="noreferrer">the pull request ↗</a>
+            <% end %>
+            <% if j["state"] == "done" && sm && sm["ahead"].to_i.positive? %>
+              <% if can_write %>
+                <form method="post" action="/sessions/publish" style="margin: 0;">
+                  <%== csrf_publish %>
+                  <input type="hidden" name="id" value="<%= j["id"] %>" />
+                  <button class="mini" type="submit"
+                          title="push <%= j["branch"] %> to GitHub and <%= j["pr_url"] ? "update the pull request" : "open a draft pull request" %>"><%= j["pr_url"] ? "Push changes" : "Open draft PR" %></button>
+                </form>
+              <% else %>
+                <a href="/baybox" title="a token that can push is needed to open a pull request">add a write token to open a PR</a>
+              <% end %>
+            <% end %>
+          </div>
+          <% if sm && (sm["commits"].to_a.any? || sm["files"].to_a.any? || sm["title"]) %>
+            <details data-keep="branch-<%= j["id"] %>">
+              <summary>what it will push</summary>
+              <% if sm["title"] %>
+                <div style="margin-top: 8px;"><strong><%= sm["title"] %></strong></div>
+                <% unless sm["body"].to_s.empty? %><pre style="margin-top: 6px;"><%= sm["body"] %></pre><% end %>
+              <% end %>
+              <% if sm["commits"].to_a.any? %>
+                <ul><% sm["commits"].each do |c| %><li><%= c %></li><% end %></ul>
+              <% end %>
+              <% if sm["files"].to_a.any? %>
+                <ul style="color: var(--muted);"><% sm["files"].first(60).each do |f| %><li class="<%= f.start_with?(".github/") ? "warn" : "" %>"><%= f %></li><% end %></ul>
+                <% if sm["files"].size > 60 %><div class="sub">and <%= sm["files"].size - 60 %> more</div><% end %>
+              <% end %>
+            </details>
+          <% end %>
+        </div>
+      <% end %>
+
       <form method="post" action="/sessions/ask" class="ask">
         <%== csrf_ask %>
         <input type="hidden" name="id" value="<%= j["id"] %>" />
         <textarea name="prompt" rows="2" maxlength="8192"
-                  placeholder="Ask a follow-up in this box — it still has the review in context. e.g. &quot;show me a failing input for finding 1&quot;"></textarea>
+                  placeholder="<%= j["kind"] == "work" ? %(Ask for a change in this box — it still has the work in context. e.g. "also cover the nil case, and commit") : %(Ask a follow-up in this box — it still has the review in context. e.g. "show me a failing input for finding 1") %>"></textarea>
         <button class="mini" type="submit">Send</button>
       </form>
     </div>
@@ -248,7 +323,8 @@
         <div class="card" style="opacity: 0.75;">
           <div class="row1">
             <span class="pill" style="background: var(--chip-grey-bg); color: var(--chip-grey-fg);">torn down</span>
-            <a href="https://github.com/<%= j["repo"] %>/pull/<%= j["pr_number"] %>" target="_blank" rel="noreferrer"
+            <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
+        <a href="<%= gh_link.call(j) %>" target="_blank" rel="noreferrer"
                style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
             <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
             <div style="flex: 1;"></div>

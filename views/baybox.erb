@@ -131,6 +131,34 @@
       </div>
 
       <div style="margin-top: 14px;">
+        <label for="github_write_token">GitHub write token <span class="note">(optional — to open pull requests from an issue)</span></label>
+        <input type="password" id="github_write_token" name="github_write_token" style="width: 100%;"
+               autocomplete="new-password"
+               placeholder="<%= box && box["github_write_token_enc"] ? "stored — leave blank to keep it, or - to remove it" : "github_pat_…" %>" />
+        <div class="note" style="margin-top: 6px;">
+          A second, separate
+          <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noreferrer">fine-grained token</a>
+          on
+          <% if scope_repos.empty? %>
+            the repositories you work on<%
+          %><% else %><%
+            %><% scope_repos.each_with_index do |repo, i| %><%
+              %><%= i.zero? ? "" : ", " %><span class="mono"><%= repo %></span><%
+            %><% end %><%
+          %><% end %>,
+          with <span class="mono">Contents: Read and write</span> and
+          <span class="mono">Pull requests: Read and write</span>.
+          <%# Workflows left off is a guard GitHub enforces for us: it refuses a
+              push that changes .github/workflows without it. %>
+          Leave <span class="mono">Workflows</span> off, and GitHub will refuse any push that changes CI.
+          <br />
+          It never goes into the box. Claude commits there with the read-only token above; this one is
+          used from the dashboard, and only when you press <span class="mono">Open draft PR</span> after
+          reading what the branch holds.
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
         <label for="skills_repo">skills repository <span class="note">(optional)</span></label>
         <input type="text" id="skills_repo" name="skills_repo" style="width: 100%;"
                value="<%= box ? box["skills_repo"] : "" %>"

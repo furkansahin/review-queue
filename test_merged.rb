@@ -102,7 +102,7 @@ check("the badge shows a plain total", page.include?(">2</span>"), true)
 puts "-- the tab is registered --"
 keys = svc.tabs.map { |t| t[:key] }
 check("merged is a tab", keys.include?(:merged), true)
-check("it comes after the queue tabs", keys.last, :merged)
+check("it comes after the queue tabs", keys.index(:merged) > keys.index(:snoozed), true)
 check("the label reads Merged", svc.tabs.find { |t| t[:key] == :merged }[:label], "Merged")
 
 puts "-- a failed lookup degrades, it does not raise --"

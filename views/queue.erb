@@ -6,8 +6,16 @@
   # Merged rows carry no CI, no waiting time and no action, so the tab drops
   # those columns instead of printing four empty cells on every line.
   mcols = "4px 132px 1fr 92px 132px 150px"
+  # Issues: state, the issue, the pull requests on it, when it last moved, and
+  # the one action.
+  icols = "4px 110px minmax(0, 1.25fr) minmax(0, 1fr) 84px 128px"
   snoozing = tab == :snoozed
   merged_tab = tab == :merged
+  issues_tab = tab == :issues
+  pr_tone = {"open" => ["var(--state-them-bg)", "var(--state-them-fg)"],
+             "draft" => ["var(--chip-grey-bg)", "var(--chip-grey-fg)"],
+             "merged" => ["var(--state-merged-bg)", "var(--state-merged-fg)"],
+             "closed" => ["var(--state-done-bg)", "var(--state-done-fg)"]}
 
   # A draft is listed but is not work for today, so it counts in neither
   # "to go" nor "done", and it never becomes Next up.
@@ -17,7 +25,7 @@
   total = active + done
   pct = total.zero? ? 100 : (done * 100.0 / total).round
   # Next up is the queue's question. Merged work has no next.
-  hero = (snoozing || merged_tab) ? nil : rows.find { |r| !r[:settled] && !r[:draft] }
+  hero = (snoozing || merged_tab || issues_tab) ? nil : rows.find { |r| !r[:settled] && !r[:draft] }
   reviews_7d = snap[:reviews_7d]
 %>
 <!DOCTYPE html>
@@ -201,6 +209,11 @@
   .tab.on .badge { background: var(--badge-on-bg); color: var(--badge-on-fg); }
   .grid { display: grid; grid-template-columns: <%= cols %>; align-items: center; }
   .grid.merged { grid-template-columns: <%= mcols %>; }
+  .grid.issues { grid-template-columns: <%= icols %>; }
+  .prs { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding-right: 14px; }
+  .pr { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+  .pr a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pr .pill { font-size: 10px; padding: 1px 5px; }
   .head { padding: 9px 24px 9px 20px; font-family: 'IBM Plex Mono', monospace; font-size: 10px;
           letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2);
           border-bottom: 1px solid var(--border-head); }
@@ -345,7 +358,7 @@
       bar. It rides in the space the tab row already had spare. The counts it
       dropped are on the bar itself, for when the number matters more than the
       shape. %>
-  <% unless merged_tab || (total.zero? && drafts.zero?) %>
+  <% unless merged_tab || issues_tab || (total.zero? && drafts.zero?) %>
     <div class="progress" title="<%= active %> to go<%= done.positive? ? ", #{done} done" : "" %><%= drafts.positive? ? ", #{drafts} draft" : "" %>">
       <span class="mono" style="font-size: 11px; color: var(--muted-2); white-space: nowrap;"><%= active %> to go</span>
       <div class="track"><div class="fill" style="width: <%= pct %>%;"></div></div>
@@ -361,7 +374,7 @@
 <% if review_error %>
   <div class="mono" style="margin: 14px 24px 0; padding: 10px 16px; border: 1px solid var(--err-border);
        background: var(--err-bg); border-radius: 8px; font-size: 12px; color: var(--err-fg);">
-    Could not start the review: <%= review_error %><%
+    Could not start <%= issues_tab ? "the work" : "the review" %>: <%= review_error %><%
       %><%= review_error.to_s.include?("baybox") ? " — " : "" %><%
       %><% if review_error.to_s.include?("baybox") %><a href="/baybox">register one</a><% end %>
   </div>
@@ -401,7 +414,84 @@
   <%# Merged work is a record, not a queue: no CI, no waiting, no action to
       take. It gets its own header and its own narrower grid rather than four
       empty cells per line. %>
-  <% if merged_tab %>
+  <% if issues_tab %>
+    <% if snap[:issues_error] %>
+      <div class="mono" style="margin: 16px 24px 0; padding: 10px 16px; border: 1px solid var(--err-border);
+           background: var(--err-bg); border-radius: 8px; font-size: 12px; color: var(--err-fg);">
+        Could not read your issues: <%= snap[:issues_error] %>
+      </div>
+    <% end %>
+    <div class="grid issues head">
+      <div></div><div>State</div><div>Issue</div><div>Pull requests</div><div>Updated</div><div></div>
+    </div>
+
+    <% rows.each do |r| %>
+      <div class="grid issues row" style="background: <%= r[:row_bg] %>;">
+        <div style="width: 4px; height: 30px; border-radius: 2px; background: <%= r[:age_color] %>;"></div>
+        <div style="padding-left: 12px;">
+          <span class="pill" style="background: <%= r[:state_bg] %>; color: <%= r[:state_color] %>;"><%= r[:state] %></span>
+        </div>
+        <div style="min-width: 0; padding-right: 24px;">
+          <div style="display: flex; align-items: baseline; gap: 8px; min-width: 0;">
+            <a class="title" href="<%= r[:url] %>" target="_blank" rel="noreferrer"><%= r[:title] %></a>
+            <span class="mono" style="font-size: 11px; color: var(--muted-3); flex: none;"><%= r[:ref] %></span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+            <span class="mono" style="font-size: 11px; color: var(--muted);"><%= r[:author] %></span>
+            <% r[:chips].each do |c| %>
+              <span class="chip" style="background: <%= c[:bg] %>; border-color: <%= c[:border] %>; color: <%= c[:color] %>;"><%= c[:text] %></span>
+            <% end %>
+          </div>
+        </div>
+        <div class="prs">
+          <% if r[:prs].empty? %>
+            <span class="mono" style="font-size: 11px; color: var(--muted-3);">none yet</span>
+          <% end %>
+          <% r[:prs].each do |p| %>
+            <% pbg, pfg = pr_tone.fetch(p[:state], pr_tone["closed"]) %>
+            <div class="pr" title="<%= p[:linked] ? "linked: merging it closes this issue" : "mentions this issue" %>">
+              <span class="pill" style="background: <%= pbg %>; color: <%= pfg %>;"><%= p[:state] %></span>
+              <a href="<%= p[:url] %>" target="_blank" rel="noreferrer">#<%= p[:number] %> <%= p[:title] %></a>
+              <span class="mono" style="font-size: 10px; color: var(--muted-3); flex: none;"><%= p[:linked] ? p[:author] : "mentions · #{p[:author]}" %></span>
+            </div>
+          <% end %>
+        </div>
+        <div class="cell"><%= r[:age] == "\u2014" ? "\u2014" : "#{r[:age]} ago" %></div>
+        <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
+          <% if reviews_enabled %>
+            <% job = work_by_key[r[:key]] %>
+            <% if job && %w[queued running].include?(job["state"]) %>
+              <a class="mini" href="/sessions" title="claude is working on this in your baybox"
+                 style="text-decoration: none;">working…</a>
+            <% elsif job && job["pr_url"] %>
+              <a class="mini" href="<%= job["pr_url"] %>" target="_blank" rel="noreferrer"
+                 title="the draft pull request opened from your baybox" style="text-decoration: none; color: var(--quick-fg);">your PR ↗</a>
+            <% elsif job && job["state"] == "done" %>
+              <a class="mini" href="/sessions" title="finished: look at what it did, then open a pull request"
+                 style="text-decoration: none; color: var(--quick-fg);">ready to check</a>
+            <% elsif has_baybox %>
+              <form method="post" action="/work?tab=issues" style="margin: 0;">
+                <%== csrf_work %>
+                <input type="hidden" name="repo" value="<%= r[:repo_full] %>" />
+                <input type="hidden" name="issue" value="<%= r[:number] %>" />
+                <button class="mini" type="submit"
+                        title="claude resolves it in a box on a new branch and commits; you open the pull request after reading what it did"><%= job && job["state"] == "failed" ? "Try again" : "Work on it" %></button>
+              </form>
+            <% else %>
+              <a class="mini" href="/baybox" style="text-decoration: none;"
+                 title="register a baybox to work on issues">Set up</a>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <% if rows.empty? && !snap[:issues_error] %>
+      <div style="padding: 72px 24px; text-align: center; color: var(--muted-2); font-size: 13px;">
+        No open issues are assigned to you under <span class="mono"><%= service.scope %></span>.
+      </div>
+    <% end %>
+  <% elsif merged_tab %>
     <div class="grid merged head">
       <div></div><div>State</div><div>Pull request</div><div>Size</div><div>Merged</div><div>Merged by</div>
     </div>
