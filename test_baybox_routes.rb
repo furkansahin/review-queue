@@ -60,6 +60,9 @@ check("private key is encrypted at rest", row["private_key_enc"].include?("BEGIN
 check("private key decrypts to a PEM", Crypto.decrypt(row["private_key_enc"]).start_with?("-----BEGIN"), true)
 
 get "/baybox"
+# A save that worked used to draw an empty red error banner: flash! turned the
+# nil "no error" into "", which is truthy, so the page's `if error` showed it.
+check("a save that worked shows no error banner", last_response.body.include?('class="banner err"'), false)
 # bay needs git and docker over this connection, so the key logs in. restrict
 # is what survives the move: no forwarding, no pty, none of which bay uses.
 check("the key line is restricted", last_response.body.include?("restrict ssh-ed25519"), true)

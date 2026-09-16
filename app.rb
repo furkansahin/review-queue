@@ -175,8 +175,12 @@ class ReviewQueue < Roda
   # the site can ask for, and it loses their snooze list on the way.
   FLASH_MAX = 200
 
+  # No message means no banner. to_s turned a nil "nothing went wrong" into "",
+  # and "" is truthy, so every page's `if error` drew an empty red box -- on
+  # every successful save of the baybox form, which reads as the save failing.
   def flash!(key, message)
     text = message.to_s.strip.gsub(/\s+/, " ")
+    return session.delete(key) if text.empty?
     session[key] = text.length > FLASH_MAX ? "#{text[0, FLASH_MAX - 1]}…" : text
   end
 
