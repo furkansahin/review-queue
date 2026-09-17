@@ -191,11 +191,6 @@ puts "-- publishing refuses what should not go out --"
 nowrite = Runner.publish(BOXROW.merge("github_write_token_enc" => nil), repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)
 check("no write token, no pull request", nowrite[:error].to_s.include?("write token"), true)
 
-File.write(File.join(WT, "lib", "thing.rb"), "x = 3\n")
-dirty = Runner.publish(BOXROW, repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)
-check("uncommitted work is refused", dirty[:error].to_s.include?("uncommitted"), true)
-sh "cd #{WT} && git checkout -q lib/thing.rb"
-
 sh "cd #{WT} && #{GIT} add -f .rq/run.log && #{GIT} commit -qm 'oops'"
 leaked = Runner.publish(BOXROW, repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)
 check("a branch that commits .rq/ is refused", leaked[:error].to_s.include?(".rq/run.log"), true)
@@ -226,8 +221,20 @@ puts "-- pressing it again updates, never duplicates --"
 sh "cd #{WT} && echo 'y' >> spec/thing_spec.rb && #{GIT} commit -qam 'Cover the nil case'"
 $posts.clear
 $open_prs = [{"html_url" => "https://github.com/ubicloud/ubicloud/pull/6500", "number" => 6500}]
+# What box setup does to mise.lock in nearly every box: a tracked file changed
+# and never committed. It used to refuse the whole push.
+File.write(File.join(WT, "lib", "thing.rb"), "x = 3\n")
+dirty_view = Runner.inspect_branch(BOXROW, BOX)[:summary]
+check("an uncommitted file is seen", dirty_view[:dirty], 1)
+check("and named", dirty_view[:dirty_files], ["lib/thing.rb"])
 again = Runner.publish(BOXROW, repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)
 check("it succeeds", again[:ok], true)
+check("it says what was left out", again[:left_out], ["lib/thing.rb"])
+# A push sends commits. The uncommitted edit must not be on GitHub.
+check("the pushed file is the committed one",
+      sh("git --git-dir=#{BARE} show refs/heads/#{BRANCH}:lib/thing.rb"), "x = 2\n")
+check("and the box keeps its uncommitted edit", File.read(File.join(WT, "lib", "thing.rb")), "x = 3\n")
+sh "cd #{WT} && git checkout -q lib/thing.rb"
 check("the new commit is pushed", sh("git --git-dir=#{BARE} rev-parse refs/heads/#{BRANCH}").strip,
       sh("git -C #{WT} rev-parse HEAD").strip)
 check("no second pull request", $posts.size, 0)

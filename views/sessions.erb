@@ -259,7 +259,15 @@
             <% if sm %>
               <span><%= sm["ahead"].to_i %> commit<%= sm["ahead"].to_i == 1 ? "" : "s" %></span>
               <% unless sm["stat"].to_s.empty? %><span style="color: var(--muted);"><%= sm["stat"] %></span><% end %>
-              <% if sm["dirty"].to_i.positive? %><span class="warn"><%= sm["dirty"] %> uncommitted</span><% end %>
+              <%# Named, and not in red: box setup rewrites files like mise.lock
+                  in nearly every box, so this is usually noise. It is shown
+                  because it is sometimes work claude forgot to commit, and
+                  only the person reading can tell which. %>
+              <% if sm["dirty"].to_i.positive? %>
+                <% left = Array(sm["dirty_files"]) %>
+                <span style="color: var(--muted);" title="a push sends commits only; these stay in the box">not included, uncommitted: <%=
+                  left.empty? ? "#{sm["dirty"]} file#{sm["dirty"].to_i == 1 ? "" : "s"}" : left.first(3).join(", ") + (left.size > 3 ? " +#{left.size - 3}" : "") %></span>
+              <% end %>
               <%# A branch pushed to the repository runs CI with its secrets, so
                   a change to the workflows is the first thing to read. %>
               <% if sm["touches_ci"] %><span class="warn" title="CI runs this branch with the repository's secrets">changes .github/ — read it first</span><% end %>

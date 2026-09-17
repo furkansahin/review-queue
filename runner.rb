@@ -662,6 +662,7 @@ module Runner
       echo "__HEAD $(git symbolic-ref --quiet --short HEAD)"
       echo "__AHEAD $(git rev-list --count #{BayBox.sh_quote("origin/#{base}..HEAD")} 2>/dev/null || echo 0)"
       echo "__DIRTY $(git status --porcelain | wc -l)"
+      git status --porcelain | head -50 | cut -c4- | sed 's/^/__DIRTYFILE /'
       echo "__STAT $(git diff --shortstat #{BayBox.sh_quote("origin/#{base}...HEAD")} 2>/dev/null)"
       git diff --name-only #{BayBox.sh_quote("origin/#{base}...HEAD")} 2>/dev/null | head -200 | sed 's/^/__FILE /'
       git log --format='__COMMIT %h %s' #{BayBox.sh_quote("origin/#{base}..HEAD")} 2>/dev/null | head -20
@@ -678,7 +679,7 @@ module Runner
   end
 
   def parse_inspection(text)
-    out = {head: nil, ahead: 0, dirty: 0, stat: "", files: [], commits: [], title: nil, body: nil}
+    out = {head: nil, ahead: 0, dirty: 0, dirty_files: [], stat: "", files: [], commits: [], title: nil, body: nil}
     pr = nil
     text.to_s.each_line do |line|
       line = line.chomp
@@ -692,6 +693,7 @@ module Runner
       when /\A__HEAD (.*)\z/ then out[:head] = $1.strip
       when /\A__AHEAD (\d+)/ then out[:ahead] = $1.to_i
       when /\A__DIRTY\s+(\d+)/ then out[:dirty] = $1.to_i
+      when /\A__DIRTYFILE (.+)\z/ then out[:dirty_files] << $1
       when /\A__STAT (.*)\z/ then out[:stat] = $1.strip
       when /\A__FILE (.+)\z/ then out[:files] << $1
       when /\A__COMMIT (.+)\z/ then out[:commits] << $1
@@ -742,8 +744,13 @@ module Runner
     problem =
       if summary[:head] != branch then "the box is on #{summary[:head].inspect}, not #{branch}"
       elsif summary[:ahead].zero? then "nothing is committed on #{branch} yet"
-      elsif summary[:dirty].positive?
-        "#{summary[:dirty]} uncommitted change#{summary[:dirty] == 1 ? "" : "s"} in the box; ask it to commit or discard them"
+      # Not uncommitted changes. This used to refuse on any, on the theory that
+      # one meant claude had forgotten to commit part of the work -- and the
+      # first real run was refused over mise.lock, which the box's own setup
+      # rewrites a minute before claude is started, in nearly every box. A push
+      # sends commits and nothing else, so an uncommitted file cannot reach the
+      # pull request either way. The page names what was left out instead, and
+      # the person pressing the button decides whether that matters.
       elsif summary[:rq_files].any? then "the branch commits the run's own files (#{summary[:rq_files].first(3).join(", ")})"
       end
     return {ok: false, output: "", exit_code: nil, error: "not opening a pull request: #{problem}", summary: summary} if problem
@@ -752,7 +759,8 @@ module Runner
     return pushed.merge(summary: summary) unless pushed[:ok]
 
     pr = open_pull_request(token, repo, issue_number, branch, summary)
-    pr.merge(summary: summary, output: [pushed[:output], pr[:output]].compact.join("\n").strip)
+    pr.merge(summary: summary, left_out: summary[:dirty_files],
+             output: [pushed[:output], pr[:output]].compact.join("\n").strip)
   rescue BayBox::Error, Error, Crypto::Error => e
     {ok: false, output: "", exit_code: nil, error: e.message}
   end

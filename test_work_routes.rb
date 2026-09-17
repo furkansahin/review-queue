@@ -173,6 +173,12 @@ check("shows the branch", body.include?("issue-6458-issue"), true)
 check("and the commits", body.include?("2 commits"), true)
 check("warns that it changes CI", body.include?("changes .github/"), true)
 check("offers to open a draft pull request", body.include?("Open draft PR"), true)
+DB.exec("UPDATE review_jobs SET summary = $1 WHERE id = $2",
+        [JSON.generate(summary.merge(dirty: 1, dirty_files: ["mise.lock"])), job["id"]])
+get "/sessions"
+check("an uncommitted file does not take the button away", last_response.body.include?("Open draft PR"), true)
+check("it is named as not included", last_response.body.include?("not included, uncommitted: mise.lock"), true)
+body = last_response.body
 check("asks for changes, not follow-up questions", body.include?("Ask for a change in this box"), true)
 check("the placeholder is not double-escaped", body.include?("&amp;quot;"), false)
 
@@ -197,19 +203,21 @@ follow_redirect!
 check("a review cannot open a pull request", last_response.body.include?("only work on an issue"), true)
 check("and nothing was run", $commands, [])
 
-$answers["publish"] = {ok: false, error: "not opening a pull request: 1 uncommitted change in the box", summary: summary}
+$answers["publish"] = {ok: false, error: "not opening a pull request: nothing is committed on issue-6458-issue yet", summary: summary}
 post "/sessions/publish", {"id" => job["id"].to_s, "_csrf" => tok}
 follow_redirect!
-check("a refusal is shown", last_response.body.include?("1 uncommitted change"), true)
+check("a refusal is shown", last_response.body.include?("nothing is committed on issue-6458-issue yet"), true)
 check("and no pull request is recorded", DB.row("SELECT pr_url FROM review_jobs WHERE id = $1", [job["id"]])["pr_url"], nil)
 
 $commands.clear
-$answers["publish"] = {ok: true, pr_url: "https://github.com/#{REPO}/pull/6500", updated: false, summary: summary}
+$answers["publish"] = {ok: true, pr_url: "https://github.com/#{REPO}/pull/6500", updated: false, summary: summary,
+                       left_out: ["mise.lock"]}
 post "/sessions/publish", {"id" => job["id"].to_s, "_csrf" => tok}
 check("it asks the machine to publish that branch",
       $commands, ["publish #{REPO} 6458 rq-ubicloud-ubicloud-issue-6458 issue-6458-issue"])
 follow_redirect!
 check("says where the pull request is", last_response.body.include?("opened a draft pull request: https://github.com/#{REPO}/pull/6500"), true)
+check("and names what it left out", last_response.body.include?("Not included, because uncommitted: mise.lock."), true)
 check("records it", DB.row("SELECT pr_url FROM review_jobs WHERE id = $1", [job["id"]])["pr_url"],
       "https://github.com/#{REPO}/pull/6500")
 check("the card now pushes changes instead", last_response.body.include?("Push changes"), true)

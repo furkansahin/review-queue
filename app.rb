@@ -602,8 +602,11 @@ class ReviewQueue < Roda
           Jobs.set_summary(job["id"], JSON.generate(res[:summary])) if res[:summary]
           if res[:ok]
             Jobs.set_pr(current_login, job["id"], res[:pr_url])
-            flash!("sessions_notice", res[:updated] ? "pushed the branch; #{res[:pr_url]} is up to date."
-                                                    : "opened a draft pull request: #{res[:pr_url]}")
+            left = Array(res[:left_out])
+            note = left.empty? ? "" : " Not included, because uncommitted: #{left.first(3).join(", ")}" \
+                                      "#{left.size > 3 ? " and #{left.size - 3} more" : ""}."
+            flash!("sessions_notice", (res[:updated] ? "pushed the branch; #{res[:pr_url]} is up to date."
+                                                     : "opened a draft pull request: #{res[:pr_url]}") + note)
           else
             flash!("sessions_error", (res[:error] || res[:output]).to_s.strip[0, 500])
           end
