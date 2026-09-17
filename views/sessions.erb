@@ -230,7 +230,10 @@
               answer is open: the rest are there to open, not to scroll past. %>
           <% Transcript.sections(full).each_with_index do |sec, n| %>
             <details data-keep="sec-<%= j["id"] %>-<%= n %>" <%= sec.open ? "open" : "" %>>
-              <summary <%= sec.kind == :answer ? "" : 'style="color: var(--muted-2);"' %>><%=
+              <%# <%== : these are fixed attribute strings. With <%= their quotes were
+                  escaped, and the browser read class=&quot;tail&quot; as no tail
+                  class at all -- a 200-line trace with no scroll box. %>
+              <summary <%== sec.kind == :answer ? "" : 'style="color: var(--muted-2);"' %>><%=
                 j["kind"] == "work" ? sec.title.sub("the review", "the work") : sec.title %> <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%=
                 sec.kind == :question ? "" : human.call(sec.text.bytesize) %></span></summary>
               <% if sec.dropped %>
@@ -239,7 +242,7 @@
               <% if sec.kind == :answer %>
                 <div class="md"><%== Markdown.render(sec.text) %></div>
               <% else %>
-                <pre <%= sec.kind == :trace || sec.kind == :build ? 'class="tail"' : "" %>><%= sec.text %></pre>
+                <pre <%== sec.kind == :trace || sec.kind == :build ? 'class="tail"' : "" %>><%= sec.text %></pre>
               <% end %>
             </details>
           <% end %>
@@ -443,9 +446,26 @@
   });
 })();
 
+// A log is read from its end: that is where a live run is, and a finished
+// trace keeps its newest lines for the same reason. Every one starts there, and
+// one opened later is taken there when it opens -- a closed panel has no height
+// to scroll while it is shut.
+(function () {
+  document.querySelectorAll("pre.tail").forEach(function (pre) {
+    pre.scrollTop = pre.scrollHeight;
+    var d = pre.closest("details");
+    if (d) {
+      d.addEventListener("toggle", function () { if (d.open) { pre.scrollTop = pre.scrollHeight; } });
+    }
+  });
+})();
+
 (function () {
   var POLL = 2000;
-  document.querySelectorAll("pre.tail").forEach(function (pre) {
+  // Only panels that follow a job. A finished trace is a pre.tail too, and
+  // without data-job this would have polled /sessions/tail?id=undefined every
+  // six seconds, for every finished trace, for as long as the page was open.
+  document.querySelectorAll("pre.tail[data-job]").forEach(function (pre) {
     var id = pre.dataset.job;
     var status = document.getElementById("s-" + id);
     var offset = new Blob([pre.textContent]).size;   // bytes, to match the server

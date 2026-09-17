@@ -401,6 +401,32 @@ puts "        banner: #{banner[0,90]}"
 check("the user is told why", banner.include?("already running for that pull request"), true)
 DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
 
+puts "-- log panels --"
+# A finished run whose trace overflows its panel, and one still running.
+trace = "worktree ready\n#{StreamRender::RUN}\n" + (1..60).map { |i| "$ rspec spec/x_#{i}_spec.rb\n" }.join +
+        "#{StreamRender::MARKER}\nAll good.\n"
+DB.exec(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 777, "rq-a-777", boxid, trace])
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, baybox_id, output, state, finished_at)
+  VALUES ($1,$2,$3,$4,$5,$6,'done',now())
+SQL
+DB.exec(<<~SQL, ["furkansahin", "ubicloud/ubicloud", 778, "rq-a-778", boxid])
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, baybox_id, output, state, started_at)
+  VALUES ($1,$2,$3,$4,$5,'line 1\nline 2\n','running',now())
+SQL
+get "/sessions"
+b = last_response.body
+# These were written with <%= and came out as class=&quot;tail&quot;, which a
+# browser reads as no tail class at all: a finished trace had no scroll box.
+check("a finished trace is a real tail panel", b.include?('<pre class="tail">'), true)
+check("and its heading keeps its colour", b.include?('<summary style="color: var(--muted-2);">'), true)
+check("no attribute is escaped into the markup", b.include?("=&quot;"), false)
+# With the class fixed, a finished trace matches pre.tail -- and streaming for
+# every pre.tail would poll /sessions/tail?id=undefined for each of them.
+check("only panels that follow a job stream", b.include?('querySelectorAll("pre.tail[data-job]")'), true)
+check("the live panel carries its job", b.match?(/<pre class="tail" id="t-\d+" data-job="\d+">/), true)
+check("every log panel starts at its end", b.include?("pre.scrollTop = pre.scrollHeight;"), true)
+DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
