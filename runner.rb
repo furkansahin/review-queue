@@ -487,10 +487,18 @@ module Runner
     File.write(File.join(dir, "build.log"), "")
 
     prepare!(box_row)
-    align_pr_branch(box_row, repo, pr_number)
+    branch = review_branch(pr_number)
+    prep = prepare_review_branch(box_row, pr_number, box)
+    File.write(File.join(dir, "build.log"), prep[:output].to_s)
+    unless prep[:ok]
+      File.write(state, "failed\n")
+      detail = (prep[:error] || prep[:output]).to_s.strip.lines.last(3).join.strip
+      return {ok: false, output: prep[:output].to_s, exit_code: nil,
+              error: "could not check out the pull request: #{detail}"}
+    end
     detach(box_row, dir, <<~SH)
       set -o pipefail
-      "$BAY" up #{box} --pr #{pr_number} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
+      "$BAY" up #{box} --branch #{BayBox.sh_quote(branch)} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
       #{place_prompt(box_row, box)}
       echo reviewing > "$DIR/state"
       if "$BAY" run #{box} review >> "$DIR/log" 2>&1; then
@@ -909,61 +917,63 @@ module Runner
     {ok: false, output: "", exit_code: nil, error: e.message, finished: false}
   end
 
-  # bay checks a pull request out with `gh pr checkout`, which updates a local
-  # branch named after the pull request's own head branch. A previous review of
-  # the same pull request leaves that branch behind, so once the author force
-  # pushes, the update is no longer a fast forward and bay up stops dead:
+  # A review's code: the pull request's head, on a branch of the review's own.
   #
-  #   ! [rejected] refs/pull/5886/head -> gcp-service-account-mode (non-fast-forward)
+  # bay's --pr ran `gh pr checkout`, which checks a pull request out under its
+  # author's branch name, and a branch can be checked out in one worktree at a
+  # time. So reviewing a pull request whose branch was already out somewhere on
+  # the machine stopped dead -- and a work box is exactly that, since it is where
+  # a pull request opened from here comes from:
   #
-  # Move the branch to where the pull request is now, before bay looks at it.
-  # Only when it has actually diverged, and never when it is checked out
-  # somewhere -- a branch someone is working on is left alone, and bay reports
-  # the real error rather than this quietly rewriting it.
+  #   fatal: 'issue-6458-...' is already used by worktree at '.../rq-ubicloud-ubicloud-issue-6458'
   #
-  # Best effort on purpose: a review whose branch needs no repair must not fail
-  # because GitHub was slow. If the repair was needed and did not happen, bay
-  # says so in its own words a moment later.
-  def align_pr_branch(box_row, repo, pr_number)
-    token = decrypt_or_nil(box_row["github_token_enc"])
-    return unless token
-    pull = GitHubClient.new(token).try("/repos/#{repo}/pulls/#{pr_number}")
-    ref = pull && pull.dig("head", "ref").to_s
-    # A branch name reaches a shell on the box, so it is checked, not quoted
-    # away: git's own rules are narrower than this and anything else is a sign
-    # something is wrong.
-    return if ref.to_s.empty? || !ref.match?(%r{\A[A-Za-z0-9._/-]{1,200}\z}) || ref.include?("..")
+  # review/pr-<n> is a name nothing else uses, so it cannot collide. It also
+  # retires the repair the author's name needed: after a force push gh's update
+  # was no longer a fast forward, and this simply moves the branch.
+  def review_branch(pr_number) = "review/pr-#{Integer(pr_number.to_s, 10)}"
 
+  # bay reuses a worktree that already exists exactly as it finds it. A review
+  # that failed after its worktree was made leaves one detached at main -- #6466
+  # did -- and without this the next attempt would have reviewed main and found
+  # it fine. So an existing worktree is put on the pull request here, and what an
+  # earlier review changed in it is discarded: review boxes are throwaway.
+  #
+  # gh finds a branch's pull request from its merge ref, which gh pr checkout
+  # used to set. Setting it here keeps `gh pr view` and `gh pr diff` working in
+  # the box.
+  def prepare_review_branch(box_row, pr_number, box)
+    return bad_box unless box.to_s.match?(BOX_RE)
+    n = Integer(pr_number.to_s, 10)
+    branch = review_branch(n)
     path = (box_row["repo_path"] || "ubicloud").to_s
+    wt = ".worktrees/#{box}"
+    q = ->(v) { BayBox.sh_quote(v) }
     script = <<~SH
-      cd #{BayBox.sh_quote(path)} || exit 0
+      cd #{q.call(path)} || { echo "no checkout at ~/#{path}; prepare the box first"; exit 1; }
+      git fetch --quiet origin #{q.call("refs/pull/#{n}/head")} \
+        || { echo "could not fetch pull request ##{n} from GitHub"; exit 1; }
+      head=$(git rev-parse FETCH_HEAD) || exit 1
 
-      # A branch lives in one worktree at a time. If the base clone is sitting
-      # on the very branch this review needs, the review's own worktree cannot
-      # have it, and bay stops with:
-      #   refusing to fetch into branch '...' checked out at '/workspace'
-      # A previous review leaves it there, so put the base clone back on its
-      # base branch first. git carries uncommitted work across, and if it
-      # cannot, this gives up rather than forcing anything.
-      if [ "$(git symbolic-ref --quiet --short HEAD)" = #{BayBox.sh_quote(ref)} ]; then
-        base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
-        base=${base#origin/}
-        git checkout --quiet "${base:-main}" 2>/dev/null \
-          && echo "moved the base clone off #{ref}" \
-          || echo "the base clone is on #{ref} and would not move"
+      # Its own worktree, not a stray directory inside the base clone: git -C
+      # on one of those walks up and would check out in the base clone instead.
+      if [ -d #{q.call(wt)} ] \
+         && [ "$(git -C #{q.call(wt)} rev-parse --show-toplevel 2>/dev/null)" = "$(cd #{q.call(wt)} && pwd -P)" ]; then
+        git -C #{q.call(wt)} checkout --quiet --force -B #{q.call(branch)} "$head" \
+          || { echo "could not put #{box} on pull request ##{n}"; exit 1; }
+        echo "moved the existing #{box} to pull request ##{n} at $(printf %.12s "$head")"
+      else
+        other=$(git for-each-ref --format='%(worktreepath)' #{q.call("refs/heads/#{branch}")})
+        [ -z "$other" ] || { echo "#{branch} is checked out at $other"; exit 1; }
+        git branch --force --no-track #{q.call(branch)} "$head" || exit 1
+        echo "#{branch} at pull request ##{n}, $(printf %.12s "$head")"
       fi
-
-      git rev-parse --verify --quiet refs/heads/#{ref} >/dev/null || exit 0
-      git fetch -q origin refs/pull/#{pr_number}/head || exit 0
-      git merge-base --is-ancestor refs/heads/#{ref} FETCH_HEAD && exit 0
-      [ -n "$(git for-each-ref --format='%(worktreepath)' refs/heads/#{ref})" ] && exit 0
-      git update-ref refs/heads/#{ref} FETCH_HEAD
-      echo "moved #{ref} to the pull request head"
+      git config #{q.call("branch.#{branch}.remote")} origin
+      git config #{q.call("branch.#{branch}.merge")} #{q.call("refs/pull/#{n}/head")}
     SH
     capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), script],
-            env_for(box_row), timeout: 60)
-  rescue StandardError
-    nil
+            env_for(box_row), timeout: 120)
+  rescue ArgumentError
+    {ok: false, output: "", exit_code: nil, error: "bad pull request number #{pr_number.inspect}"}
   end
 
   # --- helpers ---------------------------------------------------------------

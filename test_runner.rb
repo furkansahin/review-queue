@@ -226,7 +226,12 @@ sleep 0.1 until File.read(File.join(Runner.state_dir("furkansahin", "rq-ubicloud
 state_now = Runner.run(BOXROW, "status rq-ubicloud-6172")[:output]
 puts "        (waited #{(Time.now - (deadline - 60)).round(1)}s)" if state_now != "done"
 check("it reaches done", state_now, "done")
-check("bay was asked to bring the box up on the pr", calls.include?("up rq-ubicloud-6172 --pr 6172"), true)
+# On a branch of the review's own, not gh pr checkout under the author's name,
+# which collided with a work box holding that branch. test_work.rb runs the
+# branch preparation against real git.
+check("bay was asked to bring the box up on the review branch",
+      calls.include?("up rq-ubicloud-6172 --branch review/pr-6172"), true)
+check("and not with gh pr checkout", calls.include?("--pr"), false)
 check("and then to run the review", calls.include?("run rq-ubicloud-6172 review"), true)
 
 # The prompt has to reach the worktree, or the review runs with no
@@ -241,7 +246,17 @@ check("with the prompt's own text",
       File.read("#{ROOT}/ssh.stdin").include?("run the specs"), true)
 
 # And when it cannot be placed, the review must fail rather than run blind.
+# Only the placement fails: taking ssh away entirely now stops the review one
+# step earlier, at checking out the pull request, and this would no longer test
+# what it is for.
 File.rename(File.join(ROOT, "bin", "ssh"), File.join(ROOT, "bin", "ssh.off"))
+File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
+  #!/usr/bin/env bash
+  args=("$@"); remote="${args[${#args[@]}-1]}"
+  case "$remote" in *review-prompt.md*) exit 1 ;; esac
+  exit 0
+SH
+File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
 res = Runner.run(BOXROW, "review ubicloud/ubicloud 6173 rq-ubicloud-6173")
 d6173 = Runner.state_dir("furkansahin", "rq-ubicloud-6173")
 deadline = Time.now + 60
@@ -251,55 +266,17 @@ check("a prompt that cannot be placed fails the review",
 check("and says why", File.read(File.join(d6173, "build.log")).include?("could not place the review prompt"), true)
 check("without ever running the review",
       calls.include?("run rq-ubicloud-6173 review"), false)
+File.delete(File.join(ROOT, "bin", "ssh"))
 File.rename(File.join(ROOT, "bin", "ssh.off"), File.join(ROOT, "bin", "ssh"))
 check("a bad repo never reaches bay",
       Runner.run(BOXROW, "review notarepo 1 rq-x-1")[:ok], false)
 
-puts "-- a stale branch from a previous review is realigned --"
-# gh pr checkout updates a branch named after the pull request's head. A second
-# review of the same pull request, after a force push, is rejected as
-# non-fast-forward and bay up dies. The repair runs before bay is called.
-File.write(File.join(ROOT, "bin", "ssh"), <<~SH)
-  #!/usr/bin/env bash
-  args=("$@"); printf '%s' "${args[${#args[@]}-1]}" >> "#{ROOT}/align.sh"
-  exit 0
-SH
-File.chmod(0o755, File.join(ROOT, "bin", "ssh"))
-GitHubClient.class_eval { define_method(:try) { |_p| {"head" => {"ref" => "gcp-service-account-mode"}} } }
-
-File.delete("#{ROOT}/align.sh") if File.exist?("#{ROOT}/align.sh")
-Runner.align_pr_branch(BOXROW, "ubicloud/ubicloud", 5886)
-sent = File.read("#{ROOT}/align.sh")
-check("it works in the box's checkout", sent.include?("cd 'ubicloud'"), true)
-check("only when the branch is actually there",
-      sent.include?("git rev-parse --verify --quiet refs/heads/gcp-service-account-mode"), true)
-check("and only when it has diverged",
-      sent.include?("git merge-base --is-ancestor refs/heads/gcp-service-account-mode FETCH_HEAD && exit 0"), true)
-check("never while somebody has it checked out", sent.include?("worktreepath"), true)
-check("it moves the branch to the pull request head",
-      sent.include?("git update-ref refs/heads/gcp-service-account-mode FETCH_HEAD"), true)
-# A branch lives in one worktree at a time. A previous review leaves the base
-# clone sitting on the pull request's branch, and then the review's own
-# worktree cannot have it: "refusing to fetch into branch ... checked out at
-# /workspace".
-check("it frees the branch from the base clone",
-      sent.include?("git symbolic-ref --quiet --short HEAD") && sent.include?("git checkout --quiet"), true)
-check("onto whatever the base branch is, not a guess",
-      sent.include?("refs/remotes/origin/HEAD"), true)
-check("and gives up rather than forcing it",
-      sent.include?("would not move"), true)
-
-# A branch name reaches a shell on the box, so it is checked rather than trusted.
-["a;id", "../../etc", "a b", "$(id)", "", "a..b"].each do |bad|
-  GitHubClient.class_eval { define_method(:try) { |_p| {"head" => {"ref" => bad}} } }
-  File.delete("#{ROOT}/align.sh") if File.exist?("#{ROOT}/align.sh")
-  Runner.align_pr_branch(BOXROW, "ubicloud/ubicloud", 1)
-  check("refuses branch name #{bad.inspect}", File.exist?("#{ROOT}/align.sh"), false)
-end
-GitHubClient.class_eval { define_method(:try) { |_p| nil } }
-File.delete("#{ROOT}/align.sh") if File.exist?("#{ROOT}/align.sh")
-Runner.align_pr_branch(BOXROW, "ubicloud/ubicloud", 1)
-check("and does nothing when GitHub cannot be asked", File.exist?("#{ROOT}/align.sh"), false)
+puts "-- the review branch --"
+check("is named for the pull request", Runner.review_branch(6172), "review/pr-6172")
+check("and the name is a valid branch", BayBox::BRANCH_RE.match?(Runner.review_branch(6172)), true)
+check("a number that is not one is refused",
+      Runner.prepare_review_branch(BOXROW, "1;id", "rq-x-1")[:error].to_s.include?("bad pull request number"), true)
+check("so is a bad box name", Runner.prepare_review_branch(BOXROW, 1, "a;b")[:error], "bad box name")
 
 puts "-- preparing a box actually runs --"
 # This is the one that got away. prepare_box builds a shell script, and the

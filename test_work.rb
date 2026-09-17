@@ -259,6 +259,75 @@ check("touching .github/ is noticed", Runner.inspect_branch(BOXROW, BOX)[:summar
 puts "-- a worktree that is gone --"
 check("says so", Runner.inspect_branch(BOXROW, "rq-nope-1")[:error].to_s.include?("gone"), true)
 
+puts "-- reviewing a pull request whose branch a work box holds --"
+# What happened to #6466: the pull request opened from the work box above, then
+# reviewed while that box still had its branch checked out. gh pr checkout
+# used the author's branch name and git refused it.
+BASECLONE = File.join(VM, "ubicloud")
+sh "git -C #{WT} push -q #{BARE} HEAD:refs/pull/6466/head"
+pr_head = sh("git --git-dir=#{BARE} rev-parse refs/pull/6466/head").strip
+author_before = sh("git -C #{BASECLONE} rev-parse refs/heads/#{BRANCH}").strip
+RBOX = BayBox.box_name(REPO, 6466)
+rev = Runner.prepare_review_branch(BOXROW, 6466, RBOX)
+check("it succeeds with the author's branch checked out elsewhere", rev[:ok], true)
+check("the review branch is at the pull request head",
+      sh("git -C #{BASECLONE} rev-parse refs/heads/review/pr-6466").strip, pr_head)
+check("the author's branch is untouched",
+      sh("git -C #{BASECLONE} rev-parse refs/heads/#{BRANCH}").strip, author_before)
+check("and still checked out in the work box", sh("git -C #{WT} symbolic-ref --short HEAD").strip, BRANCH)
+check("gh can still find the pull request from the branch",
+      sh("git -C #{BASECLONE} config branch.review/pr-6466.merge").strip, "refs/pull/6466/head")
+check("against origin", sh("git -C #{BASECLONE} config branch.review/pr-6466.remote").strip, "origin")
+# What bay up --branch does next. The collision was here.
+RWT = File.join(BASECLONE, ".worktrees", RBOX)
+sh "git -C #{BASECLONE} worktree add -q .worktrees/#{RBOX} review/pr-6466"
+check("bay can now make the review's worktree", sh("git -C #{RWT} rev-parse HEAD").strip, pr_head)
+
+puts "-- the pull request moves while its review box exists --"
+sh "cd #{WT} && echo 'z' >> spec/thing_spec.rb && #{GIT} commit -qam 'Address review' && git push -q #{BARE} +HEAD:refs/pull/6466/head"
+new_head = sh("git --git-dir=#{BARE} rev-parse refs/pull/6466/head").strip
+# A throwaway spec the last review wrote, and a file box setup rewrote.
+File.write(File.join(RWT, "lib", "thing.rb"), "scribbled on by the last review\n")
+moved = Runner.prepare_review_branch(BOXROW, 6466, RBOX)
+check("it succeeds", moved[:ok], true)
+check("the existing worktree is moved to the new head", sh("git -C #{RWT} rev-parse HEAD").strip, new_head)
+check("on the review branch", sh("git -C #{RWT} symbolic-ref --short HEAD").strip, "review/pr-6466")
+check("and the last review's edits are gone", File.read(File.join(RWT, "lib", "thing.rb")), "x = 2\n")
+
+puts "-- a worktree left on main by a failed attempt --"
+# The exact state #6466's box was left in: bay made the worktree detached at
+# main, then gh pr checkout failed. bay reuses a worktree as it finds it, so
+# without this the next review would have read main.
+sh "git -C #{BASECLONE} worktree remove --force .worktrees/#{RBOX}"
+sh "git -C #{BASECLONE} worktree add -q --detach .worktrees/#{RBOX} origin/main"
+check("(it starts on main)", sh("git -C #{RWT} rev-parse HEAD").strip, main_sha)
+fixed = Runner.prepare_review_branch(BOXROW, 6466, RBOX)
+check("it succeeds", fixed[:ok], true)
+check("the worktree now holds the pull request, not main", sh("git -C #{RWT} rev-parse HEAD").strip, new_head)
+
+puts "-- a stray directory is not mistaken for a worktree --"
+# git -C on a plain directory inside the base clone walks up to the base clone,
+# and a checkout there would move the base clone instead.
+sh "git -C #{BASECLONE} worktree remove --force .worktrees/#{RBOX}"
+FileUtils.mkdir_p(RWT)
+base_head_before = sh("git -C #{BASECLONE} rev-parse HEAD").strip
+base_branch_before = sh("git -C #{BASECLONE} symbolic-ref --short HEAD").strip
+stray = Runner.prepare_review_branch(BOXROW, 6466, RBOX)
+check("it succeeds", stray[:ok], true)
+check("the base clone did not move", sh("git -C #{BASECLONE} rev-parse HEAD").strip, base_head_before)
+check("nor change branch", sh("git -C #{BASECLONE} symbolic-ref --short HEAD").strip, base_branch_before)
+check("the branch was set instead", sh("git -C #{BASECLONE} rev-parse refs/heads/review/pr-6466").strip, new_head)
+FileUtils.rm_rf(RWT)
+
+puts "-- what cannot be done is said --"
+missing = Runner.prepare_review_branch(BOXROW, 9999, BayBox.box_name(REPO, 9999))
+check("a pull request GitHub does not have", missing[:ok], false)
+check("says so", missing[:output].include?("could not fetch pull request #9999"), true)
+sh "git -C #{BASECLONE} worktree add -q .worktrees/elsewhere review/pr-6466"
+held = Runner.prepare_review_branch(BOXROW, 6466, RBOX)
+check("a review branch out somewhere unexpected is not taken", held[:ok], false)
+check("and it says where", held[:output].include?("review/pr-6466 is checked out at"), true)
+
 FileUtils.rm_rf(ROOT)
 puts($fail.zero? ? "\nALL PASS" : "\n#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)
