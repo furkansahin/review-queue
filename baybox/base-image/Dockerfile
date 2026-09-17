@@ -6,18 +6,17 @@
 # nothing. Baking the toolchain and the gems here moves that work to image build
 # time, where it happens once.
 #
-#   build:  docker build -t ubicloud-bay-base:latest \
-#             --build-arg RUBY=4.0.5 --build-arg NODE=24.12.0 --build-arg GO=1.24.0 .
+#   build:  docker build -t ubicloud-bay-base:latest - < Dockerfile
 #   use:    bay.toml -> [box] baseImage = "ubicloud-bay-base:latest"
 #
-# Rebuild it when mise.toml or Gemfile.lock move. A stale bundle is not a
-# problem: bundle install then only fetches the difference.
+# Rebuild it when ubicloud's mise.toml or Gemfile.lock move, with the versions
+# below set to what mise.toml says. A stale image still gives a correct box --
+# bay runs commands in the worktree, where mise reads the repository's own
+# mise.toml and installs what it asks for -- but a slow one: a Ruby that does
+# not match is downloaded again in every new box, and the gems baked for the
+# old one go unused.
 FROM debian:trixie-slim
 
-ARG RUBY=4.0.5
-ARG NODE=24.12.0
-ARG GO=1.24.0
-ARG VICTORIA=v1.148.0
 ENV DEBIAN_FRONTEND=noninteractive
 
 # What bay's Dockerfile installs, plus what Clover's native gems need. Keeping
@@ -56,7 +55,17 @@ ENV MISE_RUBY_COMPILE=0
 # which this download exceeded on a small VM. Raise it, and install ruby in its
 # own layer so a retry does not redo node/go/victoria-metrics.
 ENV MISE_HTTP_TIMEOUT=600
+
+# Each version is declared right before the step that uses it. Every RUN after
+# an ARG gets it in its environment, so a version declared at the top made a
+# Ruby bump miss the cache for apt and everything after it -- the whole image.
+# Here it rebuilds Ruby and the gems, which is what actually changed.
+ARG NODE=24.12.0
+ARG GO=1.24.0
+ARG VICTORIA=v1.148.0
 RUN mise use -g node@${NODE} go@${GO} victoria-metrics@${VICTORIA} && mise install
+
+ARG RUBY=4.0.7
 RUN for i in 1 2 3; do mise use -g ruby@${RUBY} && mise install ruby@${RUBY} && break; \
       echo "ruby install attempt $i failed, retrying"; sleep 5; done \
     && mise which ruby \
