@@ -44,7 +44,12 @@ box_stub = Module.new do
     case command
     when "list" then {ok: true, output: "rq-ubicloud-6172\tdeepak/x\tUp 2 minutes\n"}
     when /\Ateardown / then STUB[:teardown]
-    when /\Aask / then STUB[:asked] = stdin; {ok: true, output: "asked"}
+    when /\Aask /
+      STUB[:asked] = stdin
+      # What the worker would poll if its tick landed now, while the question
+      # is still being copied to the box. See the follow-up checks below.
+      STUB[:worker_sees] = Jobs.running.map { |j| j["id"].to_s }
+      {ok: true, output: "asked"}
     else {ok: true, output: "started"}
     end
   end
@@ -211,6 +216,18 @@ post "/sessions/ask", {"id" => job_id, "prompt" => "why is finding 1 exploitable
 check("the question goes over stdin, not the command line", STUB[:asked], "why is finding 1 exploitable?")
 check("the job goes back to running", DB.row("SELECT state FROM review_jobs WHERE id=$1", [job_id])["state"], "running")
 check("and back to the reviewing phase", DB.row("SELECT phase FROM review_jobs WHERE id=$1", [job_id])["phase"], "reviewing")
+# The race that lost follow-ups: the row was running before the run was, and
+# a worker tick in between read the previous run's "done" and closed the job
+# with the old answer -- in production, 0.1s after the question was sent.
+check("while the question is being set up, the worker cannot see the job",
+      STUB[:worker_sees].include?(job_id.to_s), false)
+check("once it is, the worker watches it", Jobs.running.map { |j| j["id"].to_s }.include?(job_id.to_s), true)
+# If the web process dies between the two, the job is not stuck: past the
+# grace the worker takes it anyway.
+DB.exec("UPDATE review_jobs SET phase = 'starting', started_at = now() - interval '3 minutes' WHERE id = $1", [job_id])
+check("a start that never finished is picked up after the grace",
+      Jobs.running.map { |j| j["id"].to_s }.include?(job_id.to_s), true)
+DB.exec("UPDATE review_jobs SET phase = 'reviewing', started_at = now() WHERE id = $1", [job_id])
 
 # a follow-up while it is already running must be refused
 post "/sessions/ask", {"id" => job_id, "prompt" => "again", "_csrf" => atok}

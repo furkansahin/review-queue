@@ -586,6 +586,8 @@ class ReviewQueue < Roda
           else
             # The question goes over stdin, so it is never part of a command line.
             res = Runner.run(box, "ask #{job["box_name"]}", stdin: prompt)
+            # Only now can the worker trust what it reads about this box.
+            Jobs.started(job["id"]) if res[:ok]
             unless res[:ok]
               detail = (res[:error] || res[:output]).to_s.strip
               Jobs.finish(job["id"], "failed", error: "could not ask: #{detail[0, 400]}")

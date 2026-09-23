@@ -179,7 +179,17 @@ module Jobs
     SQL
   end
 
-  def running = DB.rows("SELECT * FROM review_jobs WHERE state = 'running' ORDER BY started_at")
+  # What the worker polls. Not a follow-up that is still starting: see reopen.
+  # Past the grace it is polled anyway, so a web process that died between
+  # reopening a row and starting its run cannot leave the row running forever.
+  STARTING_GRACE = "2 minutes"
+
+  def running = DB.rows(<<~SQL)
+    SELECT * FROM review_jobs
+    WHERE state = 'running'
+      AND (phase IS DISTINCT FROM 'starting' OR started_at < now() - interval '#{STARTING_GRACE}')
+    ORDER BY started_at
+  SQL
 
   def baybox(job) = DB.row("SELECT * FROM bayboxes WHERE id = $1", [job["baybox_id"]])
 
@@ -207,15 +217,33 @@ module Jobs
 
   # A follow-up puts a finished job back to work in the same box, so the page
   # streams the answer the way it streamed the review.
+  #
+  # 'starting', not 'reviewing', until the run is actually going -- started()
+  # says when. The row is reopened before the question is copied to the box,
+  # which is two ssh round trips, and the state file this host keeps for the
+  # box still says the last run's "done" until the new run is detached. A
+  # worker tick landing in that gap read "done", finished the job with the
+  # previous answer, and stopped watching it: the page showed no live output,
+  # and the new answer sat on the box until the next question reopened the
+  # row. It happened in production -- a follow-up marked done 0.1s after it
+  # was asked.
   def reopen(id, login)
     DB.row(<<~SQL, [login, id])
       UPDATE review_jobs
       -- started_at drives the staleness timeout, so a follow-up on a job from
       -- last week would be given up on at the first blip, discarding the answer.
-      SET state = 'running', phase = 'reviewing', finished_at = NULL, error = NULL,
+      SET state = 'running', phase = 'starting', finished_at = NULL, error = NULL,
           started_at = now()
       WHERE login = $1 AND id = $2 AND state IN ('done', 'failed')
       RETURNING *
+    SQL
+  end
+
+  # The follow-up's run is going on the box: the worker may watch it now.
+  def started(id)
+    DB.exec(<<~SQL, [id])
+      UPDATE review_jobs SET phase = 'reviewing'
+      WHERE id = $1 AND state = 'running' AND phase = 'starting'
     SQL
   end
 
