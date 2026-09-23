@@ -11,6 +11,7 @@ require_relative "snooze"
 REVIEWS_ENABLED = !ENV["DATABASE_URL"].to_s.empty?
 if REVIEWS_ENABLED
   require_relative "db"
+  require_relative "queue_store"
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
@@ -41,6 +42,9 @@ REGISTRY_IDLE_TTL = ENV.fetch("RQ_IDLE_TTL", "43200").to_i
 
 REGISTRY = ServiceRegistry.new(
   idle_ttl: REGISTRY_IDLE_TTL,
+  # With a database, each person's last queue is kept there, so a deploy or a
+  # new sign-in shows it at once instead of waiting out a rebuild.
+  store: (REVIEWS_ENABLED ? QueueStore : nil),
   max_users: ENV.fetch("RQ_MAX_USERS", "25").to_i,
   scope: ENV.fetch("RQ_SCOPE", "repo:ubicloud/ubicloud"),
   warn_days: ENV.fetch("RQ_WARN_DAYS", "2").to_i,
@@ -309,6 +313,17 @@ class ReviewQueue < Roda
       REGISTRY.forget(current_login) if current_login
       session.clear
       r.redirect "/login"
+    end
+
+    # The allowlist is checked at sign-in, and again here. A session outlives
+    # removal from the list, and until the queue was saved it was a working
+    # token that stopped a removed person seeing anything, because every page
+    # needed GitHub. A saved queue is shown before GitHub is asked anything,
+    # so the list has to be the gate itself.
+    if current_login && !allowed?(current_login)
+      REGISTRY.forget(current_login)
+      session.clear
+      next r.redirect "/login"
     end
 
     next r.redirect "/login" unless current_login && current_token
@@ -895,7 +910,7 @@ class ReviewQueue < Roda
       hide = r.params["hide"] == "1"
 
       # sweep first: it wakes every row that expired or that has new activity.
-      snooze = Snooze.new(session["snoozed"]).sweep(snap[:rows])
+      snooze = Snooze.new(session["snoozed"]).sweep(snap[:rows], fetched_at: snap[:fetched_at])
       session["snoozed"] = snooze.to_h
 
       awake = snap[:rows].reject { |row| snooze.hidden?(row) }

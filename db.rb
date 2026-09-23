@@ -337,6 +337,18 @@ module DB
     -- did nothing there, and the first request to read the label failed with
     -- "column watch_label does not exist".
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS watch_label text NOT NULL DEFAULT '';
+
+    -- The last queue each person saw, so a restart shows it at once instead of
+    -- making them wait out a rebuild. One row per person, replaced by every
+    -- clean rebuild. key says which question it answers; see
+    -- QueueService#saved_key. The queue is SnapshotCodec's JSON, as text:
+    -- jsonb would decode an escaped NUL in a title and refuse the row.
+    CREATE TABLE IF NOT EXISTS saved_queues (
+      login    text        PRIMARY KEY,
+      key      text        NOT NULL,
+      queue    text        NOT NULL,
+      saved_at timestamptz NOT NULL DEFAULT now()
+    );
   SQL
 
   def setup!

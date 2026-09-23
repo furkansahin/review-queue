@@ -13,8 +13,10 @@ def check(name, got, want)
   $stdout.puts format("  %s  %-52s got=%-22s want=%s", ok ? "ok  " : "FAIL", name, got.inspect[0,22], want.inspect[0,22])
 end
 
-DB.exec("DROP TABLE IF EXISTS review_jobs, runners, bayboxes, user_settings CASCADE")
+DB.exec("DROP TABLE IF EXISTS review_jobs, runners, bayboxes, user_settings, saved_queues CASCADE")
 check("setup! applies the schema", DB.setup!, true)
+check("including the table each person's last queue is kept in",
+      DB.row("SELECT to_regclass('public.saved_queues')::text AS t")["t"], "saved_queues")
 check("setup! is idempotent", DB.setup!, true)
 
 # An EXISTING table must gain new columns. CREATE TABLE IF NOT EXISTS does

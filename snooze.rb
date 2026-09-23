@@ -40,12 +40,18 @@ class Snooze
   #   - the snooze time is complete, or
   #   - the row has activity that is newer than the snooze, or
   #   - the pull request is not in the queue any more.
-  def sweep(rows, now: Time.now)
+  #
+  # fetched_at is when the rows were fetched. A pull request missing from rows
+  # fetched before it was snoozed says nothing about it -- it may simply have
+  # arrived since -- so its entry stays. That matters for a queue saved long
+  # ago and shown while a new one builds: taken at its word, it would clear
+  # every snooze on a pull request newer than itself.
+  def sweep(rows, now: Time.now, fetched_at: nil)
     by_key = rows.each_with_object({}) { |r, h| h[r[:key]] = r }
     @store.delete_if do |key, (wake_at, snoozed_at)|
-      row = by_key[key]
-      next true if row.nil?
       next true if wake_at <= now.to_i
+      row = by_key[key]
+      next fetched_at.nil? || fetched_at.to_i > snoozed_at if row.nil?
       last = row[:last_at]
       !last.nil? && last.to_i > snoozed_at
     end

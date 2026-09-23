@@ -40,6 +40,15 @@ check("row with no last_at stays hidden", s.hidden?(none), true)
 # --- the pull request leaves the queue --------------------------------------
 s = Snooze.new({}).add("o/r#1", 7 * 86_400, now: NOW).sweep([], now: NOW)
 check("entry is dropped when the PR leaves", s.count, 0)
+# ...but only rows fetched after the snooze can say it left. A queue saved
+# yesterday, shown while today's builds, never had a pull request that
+# arrived this morning -- and taken at its word would clear its snooze.
+s = Snooze.new({}).add("o/r#1", 7 * 86_400, now: NOW).sweep([], now: NOW, fetched_at: NOW - 86_400)
+check("rows older than the snooze keep it", s.count, 1)
+s = Snooze.new({}).add("o/r#1", 7 * 86_400, now: NOW).sweep([], now: NOW, fetched_at: NOW + 60)
+check("rows fetched after it drop it", s.count, 0)
+s = Snooze.new({}).add("o/r#1", 60, now: NOW - 3600).sweep([], now: NOW, fetched_at: NOW - 86_400)
+check("an expired one goes regardless", s.count, 0)
 
 # --- unsnooze ----------------------------------------------------------------
 s = Snooze.new({}).add("o/r#1", 7 * 86_400, now: NOW).remove("o/r#1")

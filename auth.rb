@@ -55,9 +55,12 @@ end
 class ServiceRegistry
   Entry = Struct.new(:service, :token, :label, :last_used, :first_seen)
 
-  def initialize(idle_ttl:, max_users:, **service_opts)
+  # store: where each person's last queue is kept between restarts
+  # (QueueStore), or nil to keep nothing.
+  def initialize(idle_ttl:, max_users:, store: nil, **service_opts)
     @idle_ttl = idle_ttl
     @max_users = max_users
+    @store = store
     @service_opts = service_opts
     @entries = {}
     @lock = Mutex.new
@@ -74,7 +77,7 @@ class ServiceRegistry
       # changes the search queries. Either one needs a new service, because the
       # cached snapshot no longer answers the right question.
       if entry.nil? || entry.token != token || entry.label != label
-        service = QueueService.new(token: token, label: label, **@service_opts)
+        service = QueueService.new(token: token, label: label, saved: @store&.for(login), **@service_opts)
         # first_seen carries across a new token or a changed label: those make
         # a new service, not a new person at the keyboard.
         entry = Entry.new(service, token, label, nil, entry&.first_seen || Time.now)

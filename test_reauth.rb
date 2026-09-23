@@ -55,6 +55,16 @@ end
 include Rack::Test::Methods
 def app = ReviewQueue.app
 
+# Waits for a rebuild running behind the page to land.
+def settle(limit = 3.0)
+  deadline = Time.now + limit
+  until yield || Time.now > deadline
+    sleep 0.05
+  end
+end
+# Each run starts with nothing saved, whatever the last one left.
+DB.exec("DELETE FROM saved_queues") if REVIEWS_ENABLED
+
 def sign_in
   get "/auth/start"
   state = last_response.location[/state=([^&]+)/, 1]
@@ -74,6 +84,16 @@ sleep 2.2
 WORLD[:queue_dead] = true
 REGISTRY.forget("furkansahin")
 get "/"
+if REVIEWS_ENABLED
+  # With the last queue kept in the database, a restart shows it at once, and
+  # the dead token is found by the rebuild behind it -- so the page's own
+  # reload, seconds later, is the one that goes through GitHub.
+  check("the saved queue is shown first", last_response.status, 200)
+  # (Whether this page still says "refreshing…" depends on whether the stub's
+  # instant failure beat the render; test_saved_queue checks the note with a
+  # build that takes time, as a real one does.)
+  settle { get "/"; last_response.status == 302 }
+end
 check("no banner, a redirect", last_response.status, 302)
 check("to the sign-in", last_response.location, "/auth/start")
 check("the dead token is dropped", last_request.session["token"], nil)
@@ -87,6 +107,8 @@ before = WORLD[:exchanges]
 sign_in
 check("the callback lands on the queue", last_response.location, "/")
 get "/"
+# The saved queue again first, and the failure one load later.
+settle { get "/"; last_response.body.include?("Bad credentials") } if REVIEWS_ENABLED
 check("the banner stands this time", last_response.status, 200)
 check("saying what GitHub said", last_response.body.include?("Bad credentials"), true)
 check("and GitHub was asked exactly once", WORLD[:exchanges] - before, 1)

@@ -165,8 +165,14 @@ class QueueService
 
   # quick_lines: churn at or below which a PR counts as a "quick win".
   # lines_per_min: rough review-reading rate behind the "~3m" estimate.
+  # Part of the key a queue is saved under, so a queue saved by an older build
+  # of this file is not restored into a newer one. Bump it whenever a row
+  # gains, loses or renames a field: an old row would draw blank cells, and
+  # the snooze sweep reads rows by field.
+  SAVED_FORMAT = 1
+
   def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 10, per_page: 50,
-    quick_lines: 50, lines_per_min: 20, merged_limit: 10)
+    quick_lines: 50, lines_per_min: 20, merged_limit: 10, saved: nil)
     @gh = GitHubClient.new(token)
     @scope = scope
     @label = self.class.clean_label(label)
@@ -185,6 +191,9 @@ class QueueService
     # waits behind the rebuild itself, which holds @lock for seconds.
     @state = Mutex.new
     @refreshing = false
+    # Where this person's last queue is kept between restarts, if anywhere.
+    @saved = saved
+    @restored = false
   end
 
   attr_reader :scope, :label, :quick_lines
@@ -279,7 +288,7 @@ class QueueService
 
   def snapshot(force: false)
     asked_at = Time.now
-    current = @snapshot
+    current = @snapshot || restore
     # Anything to show, and not asked for fresh: show it now. An old one is
     # rebuilt behind the request instead of in front of it.
     #
@@ -289,12 +298,16 @@ class QueueService
     # GitHub, 6.8 seconds -- before a byte came back. Whichever page you
     # happened to open next paid it: a tab, a reload, the queue itself.
     if current && !force
-      refresh_in_background if stale?(current)
+      # A restored queue is rebuilt behind the page however young it is: it
+      # came from before the restart, so it was built by the previous code
+      # and never checked against the token this session holds now -- a
+      # dead one should send you to sign in within seconds, not five minutes.
+      refresh_in_background if stale?(current) || current.equal?(@restored_snapshot)
       return current
     end
 
-    # Nothing to show yet -- the first visit, or after a restart -- or Refresh
-    # was pressed. This request has to wait.
+    # Nothing to show yet -- the first visit ever, or nothing saved that fits
+    # -- or Refresh was pressed. This request has to wait.
     @lock.synchronize do
       # A rebuild that finished while this waited for the lock -- one running
       # in the background, or another tab's first load -- is the answer, and
@@ -321,6 +334,29 @@ class QueueService
 
   def stale?(snap) = Time.now - snap[:fetched_at] >= @ttl
 
+  # What a saved queue must match to be restored: the shape of a row, and the
+  # question it answers.
+  def saved_key = "#{SAVED_FORMAT}\n#{@scope}\n#{@label}"
+
+  # The queue saved by this person's last rebuild, for a service with nothing in
+  # memory -- after a deploy, a restart, a new sign-in. Old is fine: it is
+  # served marked as old, and rebuilt behind the page like any other. Asked
+  # once per service, so a person with nothing saved is not a database read
+  # on every page.
+  def restore
+    return nil unless @saved
+    @state.synchronize do
+      return nil if @restored
+      @restored = true
+    end
+    snap = @saved.load(saved_key)
+    @restored_snapshot = snap
+    # A rebuild that finished meanwhile is newer; keep it.
+    @snapshot ||= snap
+  rescue StandardError
+    nil
+  end
+
   # One rebuild at a time per person. A second stale read while one is running
   # is served what exists, like any other.
   def refresh_in_background
@@ -329,7 +365,7 @@ class QueueService
       @refreshing = true
     end
     Thread.new do
-      @lock.synchronize { rebuild_now if stale?(@snapshot) }
+      @lock.synchronize { rebuild_now if stale?(@snapshot) || @snapshot.equal?(@restored_snapshot) }
     ensure
       @state.synchronize { @refreshing = false }
     end
@@ -337,6 +373,9 @@ class QueueService
 
   def rebuild_now
     @snapshot = build
+    # A clean one only -- this line is not reached for a failure -- so a
+    # restart never brings back an error that has long since passed.
+    @saved&.save(saved_key, @snapshot)
   rescue StandardError => e
     @snapshot = (@snapshot || {rows: [], login: nil, fetched_at: Time.now}).merge(
       error: e.message, fetched_at: Time.now, rate: @gh.rate_remaining,
