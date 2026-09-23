@@ -211,6 +211,11 @@ DB.exec("UPDATE review_jobs SET state='done' WHERE id=$1", [job_id])
 DB.exec("UPDATE review_jobs SET state='done', finished_at=now() WHERE id=$1", [job_id])
 get "/sessions"
 check("finished job offers a follow-up box", last_response.body.include?('name="prompt"'), true)
+# Enter sends and Ctrl+Enter adds a line. The keys themselves were checked in
+# Chrome; this holds that the page still says so and still carries the handler.
+check("the box says how to send", last_response.body.include?("Enter sends, Ctrl+Enter adds a line."), true)
+check("and the page handles Enter in it",
+      last_response.body.include?('querySelectorAll("form.ask textarea")') && last_response.body.include?("requestSubmit"), true)
 atok = csrf_for(last_response.body, "/sessions/ask")
 post "/sessions/ask", {"id" => job_id, "prompt" => "why is finding 1 exploitable?", "_csrf" => atok}
 check("the question goes over stdin, not the command line", STUB[:asked], "why is finding 1 exploitable?")

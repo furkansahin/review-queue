@@ -317,8 +317,8 @@
         <%== csrf_ask %>
         <input type="hidden" name="id" value="<%= j["id"] %>" />
         <textarea name="prompt" rows="2" maxlength="8192"
-                  placeholder="<%= j["kind"] == "work" ? %(Ask for a change in this box — it still has the work in context. e.g. "also cover the nil case, and commit") : %(Ask a follow-up in this box — it still has the review in context. e.g. "show me a failing input for finding 1") %>"></textarea>
-        <button class="mini" type="submit">Send</button>
+                  placeholder="<%= j["kind"] == "work" ? %(Ask for a change in this box — it still has the work in context, e.g. "also cover the nil case, and commit". Enter sends, Ctrl+Enter adds a line.) : %(Ask a follow-up in this box — it still has the review in context, e.g. "show me a failing input for finding 1". Enter sends, Ctrl+Enter adds a line.) %>"></textarea>
+        <button class="mini" type="submit" title="or press Enter · Ctrl+Enter adds a line">Send</button>
       </form>
     </div>
   <% end %>
@@ -407,6 +407,34 @@
     d.addEventListener("toggle", function () {
       saved[k] = d.open;
       try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* full or blocked */ }
+    });
+  });
+})();
+
+// Enter sends a follow-up; Ctrl+Enter starts a new line. So does Shift+Enter,
+// the habit most chat boxes teach, so it never sends by surprise.
+(function () {
+  document.querySelectorAll("form.ask textarea").forEach(function (ta) {
+    ta.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      // An Enter that confirms an input method's composition is not a send.
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.shiftKey) return;                 // the browser adds the line itself
+      e.preventDefault();
+      if (e.ctrlKey) {
+        // Ctrl+Enter adds nothing on its own in a textarea, so add the line
+        // here -- within maxlength, which setRangeText does not enforce.
+        var picked = ta.selectionEnd - ta.selectionStart;
+        if (ta.maxLength > 0 && ta.value.length - picked >= ta.maxLength) return;
+        ta.setRangeText("\n", ta.selectionStart, ta.selectionEnd, "end");
+        return;
+      }
+      var form = ta.form;
+      // Nothing to send is not a send, and a second Enter while the first is
+      // on its way would only earn "wait for the review to finish first".
+      if (!ta.value.trim() || form.dataset.sending) return;
+      form.dataset.sending = "1";
+      if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
     });
   });
 })();
