@@ -97,7 +97,11 @@ puts "-- the registry is what it claims, and no more --"
 # page says so, because a number that looks authoritative and is not is worse
 # than no number.
 check("the page explains the limit", body.include?("deploy resets it"), true)
-check("and names the window", body.include?("#{REGISTRY_IDLE_TTL / 60} minutes"), true)
+# In hours once it is hours: the window grew from one hour to twelve, and
+# "720 minutes" is a number nobody reads.
+window = REGISTRY_IDLE_TTL >= 7200 ? "#{REGISTRY_IDLE_TTL / 3600} hours" : "#{REGISTRY_IDLE_TTL / 60} minutes"
+check("and names the window", body.include?(window), true)
+check("which is twelve hours unless configured", REGISTRY_IDLE_TTL, ENV["RQ_IDLE_TTL"] ? ENV["RQ_IDLE_TTL"].to_i : 43_200)
 
 puts "-- forgetting a user takes them off it --"
 REGISTRY.forget("mohi-kalantari")

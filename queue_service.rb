@@ -165,7 +165,7 @@ class QueueService
 
   # quick_lines: churn at or below which a PR counts as a "quick win".
   # lines_per_min: rough review-reading rate behind the "~3m" estimate.
-  def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 5, per_page: 50,
+  def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 10, per_page: 50,
     quick_lines: 50, lines_per_min: 20, merged_limit: 10)
     @gh = GitHubClient.new(token)
     @scope = scope
@@ -181,6 +181,10 @@ class QueueService
     @merged_limit = merged_limit
     @lock = Mutex.new
     @snapshot = nil
+    # Guards @refreshing alone, so asking whether a rebuild is under way never
+    # waits behind the rebuild itself, which holds @lock for seconds.
+    @state = Mutex.new
+    @refreshing = false
   end
 
   attr_reader :scope, :label, :quick_lines
@@ -274,38 +278,35 @@ class QueueService
   def merged_query = "#{@scope} is:pr is:merged author:@me"
 
   def snapshot(force: false)
-    # A rebuild takes seconds and holds the lock for all of them. A request that
-    # arrives meanwhile -- a second tab, the page's own three-minute refresh,
-    # anything -- used to queue behind it and pay the entire wait to be handed
-    # a snapshot that was about to exist anyway. If there is already one to
-    # show, show it, and let the rebuild in flight finish for the next caller.
-    #
-    # Refresh is exempt: pressing it means asking for the fetch, so it waits.
+    asked_at = Time.now
     current = @snapshot
-    unless @lock.try_lock
-      return current if current && !force
-      @lock.lock
+    # Anything to show, and not asked for fresh: show it now. An old one is
+    # rebuilt behind the request instead of in front of it.
+    #
+    # That wait was the slowness. Measured on the live dashboard: every page
+    # answered in about 40ms, except the first one after the snapshot's five
+    # minutes ran out, which sat through the whole rebuild -- 163 calls to
+    # GitHub, 6.8 seconds -- before a byte came back. Whichever page you
+    # happened to open next paid it: a tab, a reload, the queue itself.
+    if current && !force
+      refresh_in_background if stale?(current)
+      return current
     end
 
-    begin
-      fresh = @snapshot && (Time.now - @snapshot[:fetched_at] < @ttl)
-      return @snapshot if fresh && !force
-
-      begin
-        @snapshot = build
-      rescue StandardError => e
-        @snapshot = (@snapshot || {rows: [], login: nil, fetched_at: Time.now}).merge(
-          error: e.message, fetched_at: Time.now, rate: @gh.rate_remaining,
-          # The page turns this into a fresh sign-in rather than a banner
-          # nobody can act on.
-          unauthorized: e.is_a?(GitHubClient::Unauthorized)
-        )
-      end
+    # Nothing to show yet -- the first visit, or after a restart -- or Refresh
+    # was pressed. This request has to wait.
+    @lock.synchronize do
+      # A rebuild that finished while this waited for the lock -- one running
+      # in the background, or another tab's first load -- is the answer, and
+      # doing it again would only pay the wait twice.
+      rebuild_now unless @snapshot && @snapshot[:fetched_at] >= asked_at
       @snapshot
-    ensure
-      @lock.unlock
     end
   end
+
+  # Whether a rebuild is running behind the snapshot being shown, so the page
+  # can say so and come back for the new one.
+  def refreshing? = @state.synchronize { @refreshing }
 
   def counts(rows)
     out = {all: {open: rows.count { |r| !r[:settled] }, total: rows.size}}
@@ -317,6 +318,34 @@ class QueueService
   end
 
   private
+
+  def stale?(snap) = Time.now - snap[:fetched_at] >= @ttl
+
+  # One rebuild at a time per person. A second stale read while one is running
+  # is served what exists, like any other.
+  def refresh_in_background
+    @state.synchronize do
+      return if @refreshing
+      @refreshing = true
+    end
+    Thread.new do
+      @lock.synchronize { rebuild_now if stale?(@snapshot) }
+    ensure
+      @state.synchronize { @refreshing = false }
+    end
+  end
+
+  def rebuild_now
+    @snapshot = build
+  rescue StandardError => e
+    @snapshot = (@snapshot || {rows: [], login: nil, fetched_at: Time.now}).merge(
+      error: e.message, fetched_at: Time.now, rate: @gh.rate_remaining,
+      # The page turns this into a fresh sign-in rather than a banner
+      # nobody can act on. From a background rebuild it reaches the next
+      # page load, which is the first one that can act on it.
+      unauthorized: e.is_a?(GitHubClient::Unauthorized)
+    )
+  end
 
   def build
     # /user and the bucket searches do not depend on one another -- the search

@@ -37,7 +37,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta http-equiv="refresh" content="180" />
+<%# Shown while a rebuild runs behind it: come back once it has had time to
+    finish, rather than three minutes on with a queue minutes old. %>
+<meta http-equiv="refresh" content="<%= service.refreshing? ? 10 : 180 %>" />
 <title><%= active.zero? ? "" : "(#{active}) " %>Review queue</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
@@ -307,7 +309,7 @@
       if reviews_7d
         meta << "#{reviews_7d[:count]}#{reviews_7d[:complete] ? "" : "+"} reviewed this week"
       end
-      meta << "updated #{service.send(:ago, snap[:fetched_at])} ago" if snap[:fetched_at]
+      meta << "updated #{service.send(:ago, snap[:fetched_at])} ago#{service.refreshing? ? " · refreshing…" : ""}" if snap[:fetched_at]
     %>
     <span title="<%= snap[:rate] ? "#{snap[:rate]} GitHub API calls left this hour" : "" %>"><%= meta.join("  ·  ") %></span>
   </div>

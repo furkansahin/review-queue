@@ -412,22 +412,53 @@ module Runner
   LIST_TTL = Integer(ENV.fetch("RQ_BOX_LIST_TTL", "15"))
   @list_cache = {}
   @list_lock = Mutex.new
+  @list_refreshing = {}
+  # Bumped by forget_box_list, so a refresh that was already running when a
+  # box was torn down cannot write the list from before the teardown back.
+  @list_gen = Hash.new(0)
 
+  # What the machine had a moment ago is what the page shows; an old answer is
+  # refreshed behind the request. Asking is an ssh round trip to the baybox and
+  # a bay list -- measured at about a second, paid by every visit to the
+  # sessions page more than LIST_TTL after the last one.
   def box_list(box_row)
-    key = box_row["id"]
-    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    hit = @list_lock.synchronize { @list_cache[key] }
-    return hit[:boxes] if hit && (now - hit[:at]) < LIST_TTL
-
-    res = list(box_row)
-    return [] unless res[:ok]
-    boxes = res[:output].to_s.lines.map { |l| l.strip.split("\t") }.reject(&:empty?)
-    @list_lock.synchronize { @list_cache[key] = {boxes: boxes, at: now} }
-    boxes
+    hit = @list_lock.synchronize { @list_cache[box_row["id"]] }
+    return fetch_box_list(box_row) || [] unless hit
+    refresh_box_list(box_row) if Process.clock_gettime(Process::CLOCK_MONOTONIC) - hit[:at] >= LIST_TTL
+    hit[:boxes]
   end
 
   def forget_box_list(box_row)
-    @list_lock.synchronize { @list_cache.delete(box_row["id"]) }
+    @list_lock.synchronize do
+      @list_cache.delete(box_row["id"])
+      @list_gen[box_row["id"]] += 1
+    end
+  end
+
+  def fetch_box_list(box_row)
+    key = box_row["id"]
+    gen = @list_lock.synchronize { @list_gen[key] }
+    at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    res = list(box_row)
+    return nil unless res[:ok]
+    boxes = res[:output].to_s.lines.map { |l| l.strip.split("\t") }.reject(&:empty?)
+    @list_lock.synchronize { @list_cache[key] = {boxes: boxes, at: at} if @list_gen[key] == gen }
+    boxes
+  end
+
+  def refresh_box_list(box_row)
+    key = box_row["id"]
+    @list_lock.synchronize do
+      return if @list_refreshing[key]
+      @list_refreshing[key] = true
+    end
+    Thread.new do
+      fetch_box_list(box_row)
+    rescue StandardError
+      nil
+    ensure
+      @list_lock.synchronize { @list_refreshing.delete(key) }
+    end
   end
 
   # Proves the whole chain in one call: the key reaches the machine, its Docker

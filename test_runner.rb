@@ -16,7 +16,8 @@ File.write(File.join(ROOT, "bin", "bay"), <<~SH)
   echo "$@" >> "#{ROOT}/calls"
   env | grep -E '^(BAY_HOME|BAY_CONFIG|DOCKER_HOST|CLAUDE_CODE_OAUTH_TOKEN|GITHUB_TOKEN)=' >> "#{ROOT}/env.seen"
   case "$1" in
-    list) echo "/home/ubi/ubicloud                            abc123 [main]"
+    list) [ -f "#{ROOT}/slow-list" ] && sleep 1
+          echo "/home/ubi/ubicloud                            abc123 [main]"
           echo "/home/ubi/ubicloud/.worktrees/rq-x-1          def456 [jesse/rq-x-1]" ;;
     down) echo "torn down $2" ;;
     up)   echo "box up $2" ;;
@@ -181,6 +182,34 @@ puts "-- the verbs --"
 check("ping proves the chain", Runner.run(BOXROW, "ping")[:ok], true)
 boxes = Runner.box_list(BOXROW)
 check("list names only worktrees", boxes.map(&:first), ["rq-x-1"])
+
+# The sessions page asks for this on every visit, and asking is an ssh round
+# trip and a bay list -- about a second. An answer already here is shown at
+# once; an old one is refreshed behind the page.
+lists = -> { calls.lines.count { |l| l.strip == "list" } }
+cache = Runner.instance_variable_get(:@list_cache)
+settle = ->(n) { deadline = Time.now + 5; sleep 0.02 until lists.() >= n || Time.now > deadline }
+before = lists.()
+Runner.box_list(BOXROW)
+check("a visit soon after asks nobody", lists.(), before)
+cache[BOXROW["id"]][:at] -= Runner::LIST_TTL + 1
+t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+FileUtils.touch("#{ROOT}/slow-list")          # the machine now takes a second to answer
+old_list = Runner.box_list(BOXROW)
+waited = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+check("an old answer is shown without waiting for the machine", waited < 0.5, true)
+check("and it is the answer that was there", old_list.map(&:first), ["rq-x-1"])
+settle.(before + 1)
+check("the machine is asked again behind the page", lists.(), before + 1)
+# Torn down while that refresh is still out: the list from before the
+# teardown must not land after it and bring the box back.
+Runner.forget_box_list(BOXROW)
+sleep 1.3                                     # the refresh finishes
+check("a refresh from before a teardown is not kept", cache.key?(BOXROW["id"]), false)
+FileUtils.rm_f("#{ROOT}/slow-list")
+n = lists.()
+Runner.box_list(BOXROW)
+check("so the next visit asks the machine, and waits for it", lists.(), n + 1)
 check("teardown asks bay to go down",
       Runner.run(BOXROW, "teardown rq-x-1")[:ok] && calls.include?("down rq-x-1 --force"), true)
 check("a bad box name is refused", Runner.run(BOXROW, "teardown ../etc")[:ok], false)

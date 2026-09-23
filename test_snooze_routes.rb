@@ -61,6 +61,17 @@ check("and what, and when, beneath", last_response.body.match?(%r{<div class="su
 # line at all, rather than an empty one under "never".
 check("never stands alone", last_response.body.include?('<div class="sub" title=""></div>'), false)
 
+# While a rebuild runs behind the page, it says so, and comes back for the new
+# queue in seconds rather than the usual three minutes.
+QueueService.class_eval { define_method(:refreshing?) { true } }
+get "/"
+check("a page served mid-rebuild says so", last_response.body.include?("ago · refreshing…"), true)
+check("and reloads itself in seconds", last_response.body.include?('<meta http-equiv="refresh" content="10" />'), true)
+QueueService.class_eval { define_method(:refreshing?) { false } }
+get "/"
+check("otherwise the usual three minutes", last_response.body.include?('<meta http-equiv="refresh" content="180" />'), true)
+check("and no refreshing note", last_response.body.include?("refreshing…"), false)
+
 # CSRF is required
 post "/snooze", "key" => "o/r#1"
 check("snooze without CSRF is blocked", last_response.status, 403)

@@ -68,7 +68,7 @@
         number looking impressive: it is one process's memory, so a deploy
         empties it and it forgets anyone idle. %>
     That count comes from the running process, so a deploy resets it and anyone
-    idle for more than <%= idle_ttl / 60 %> minutes drops off it. What each person
+    idle for more than <%= idle_ttl >= 7200 ? "#{idle_ttl / 3600} hours" : "#{idle_ttl / 60} minutes" %> drops off it. What each person
     has actually done is from the database and does not.
   </div>
 

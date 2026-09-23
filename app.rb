@@ -33,7 +33,11 @@ PALETTE = File.read(File.expand_path("views/_palette.erb", __dir__)).freeze
 # Global defaults: every signed-in user watches the same scope and label.
 # Named, because the people page has to say how long "signed in" lasts before
 # the registry forgets someone.
-REGISTRY_IDLE_TTL = ENV.fetch("RQ_IDLE_TTL", "3600").to_i
+# How long someone's queue is kept after their last page load. It was an
+# hour, and past it the next visit started from nothing and waited out a
+# whole rebuild -- coming back from lunch was a cold start. A day's gap is the
+# normal one, and what is kept is a snapshot of a few dozen rows.
+REGISTRY_IDLE_TTL = ENV.fetch("RQ_IDLE_TTL", "43200").to_i
 
 REGISTRY = ServiceRegistry.new(
   idle_ttl: REGISTRY_IDLE_TTL,
@@ -46,8 +50,10 @@ REGISTRY = ServiceRegistry.new(
   # How many pull requests are fetched at once. Each one then fans out again
   # for its own timeline, so the real number of requests in flight is a few
   # times this. Raise it to make a rebuild faster, at the cost of asking
-  # GitHub harder -- past a point that earns a secondary rate limit.
-  concurrency: ENV.fetch("RQ_CONCURRENCY", "5").to_i,
+  # GitHub harder -- past a point that earns a secondary rate limit, which
+  # GitHub sets at 100 concurrent requests. 10 puts about 40 in flight.
+  # Measured against the real queue: 5 took 7.0s, 10 took 3.8-4.3s.
+  concurrency: ENV.fetch("RQ_CONCURRENCY", "10").to_i,
   quick_lines: ENV.fetch("RQ_QUICK_LINES", "50").to_i,
   lines_per_min: ENV.fetch("RQ_LINES_PER_MIN", "20").to_i,
   # How many of your merged pull requests the Merged tab lists. Each one costs

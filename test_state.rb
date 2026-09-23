@@ -99,6 +99,68 @@ check("and did not start a second build", builds, 2)
 release << true
 check("the rebuild still produced a new snapshot", rebuild.value.equal?(first), false)
 
+puts "-- an old snapshot is served at once, and rebuilt behind it --"
+# The slowness: every page answered in ~40ms except the first after the five
+# minutes ran out, which waited out the whole rebuild -- 6.8s on the live site.
+swr = QueueService.new(token: "x", scope: "s", label: "", ttl: 300)
+made = 0
+starts = Queue.new
+gate = Queue.new
+fail_with = nil
+swr.define_singleton_method(:build) do
+  made += 1
+  starts << made
+  gate.pop
+  raise fail_with if fail_with
+  {rows: [{key: "o/r##{made}"}], login: ME, fetched_at: Time.now, rate: nil, error: nil, counts: {}, reviews_7d: nil, built: made}
+end
+wait_until = lambda do |limit = 2.0, &cond|
+  deadline = Time.now + limit
+  sleep 0.01 until cond.call || Time.now > deadline
+  cond.call
+end
+
+gate << true
+first = swr.snapshot
+starts.pop
+check("the very first load waits for its build", first[:built], 1)
+old = first.merge(fetched_at: Time.now - 600)
+swr.instance_variable_set(:@snapshot, old)
+# In a thread with a deadline: if a stale read ever waits on the build again,
+# this fails instead of hanging on the gate.
+reader = Thread.new { swr.snapshot }
+got = reader.join(0.2) && reader.value
+check("an old snapshot is served without waiting", !got.nil?, true)
+gate << true unless got   # let a blocked read go, so the rest can report
+check("the one that was there", got.equal?(old), true)
+check("and a rebuild starts behind it", starts.pop, 2)
+check("which the page can see", swr.refreshing?, true)
+3.times { swr.snapshot }
+sleep 0.05
+check("more loads meanwhile start no second rebuild", made, 2)
+# Refresh pressed while that rebuild runs: it waits -- it asked for fresh --
+# but for the rebuild already under way, not a second one.
+forced = Thread.new { swr.snapshot(force: true) }
+sleep 0.05
+gate << true
+check("Refresh gets the rebuild that was running", forced.value[:built], 2)
+check("without building again", made, 2)
+check("the page stops saying refreshing", wait_until.call { !swr.refreshing? }, true)
+check("and the next load has the new rows", swr.snapshot[:built], 2)
+
+# A rebuild behind the page that fails keeps the rows it had, and carries the
+# failure to the next load -- which is the first that can act on it.
+fail_with = GitHubClient::Unauthorized.new("GitHub 401 on /user: Bad credentials")
+swr.instance_variable_set(:@snapshot, swr.snapshot.merge(fetched_at: Time.now - 600))
+swr.snapshot
+starts.pop
+gate << true
+wait_until.call { !swr.refreshing? }
+after = swr.snapshot
+check("a failed rebuild keeps the rows", after[:rows], [{key: "o/r#2"}])
+check("and says why", after[:error].to_s.include?("401"), true)
+check("so the next load sends you to sign in again", after[:unauthorized], true)
+
 puts "-- approved: waiting to be merged --"
 # GitHub's own decision, under the repository's rules. nil means it could not
 # be asked.
