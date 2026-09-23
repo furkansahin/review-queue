@@ -226,6 +226,21 @@ class QueueService
   # request, or a link made in its Development panel. Cross-references catch
   # the pull request that only mentions it, which is often how work on an issue
   # starts before anyone writes "Fixes".
+  # Whether each pull request is approved, as GitHub decides it: under the
+  # repository's own rules -- how many approvals, whether a push dismisses one,
+  # whose approval counts. Reading the reviews and deciding here got it wrong
+  # on five of six approved pull requests in the real queue: four approvals
+  # were thrown away because a commit came after them, which this repository
+  # does not do, and one was counted that the rules did not.
+  #
+  # mergeable rides along, because "waiting to merge" on a pull request that
+  # cannot merge for conflicts would be half the story.
+  DECISIONS_GRAPHQL = <<~GRAPHQL
+    query($ids: [ID!]!) {
+      nodes(ids: $ids) { ... on PullRequest { id reviewDecision mergeable } }
+    }
+  GRAPHQL
+
   ISSUES_GRAPHQL = <<~GRAPHQL
     query($q: String!, $first: Int!) {
       search(query: $q, type: ISSUE, first: $first) {
@@ -368,8 +383,15 @@ class QueueService
     # three more serial round trips tacked onto the end of every rebuild.
     weekly = Thread.new { reviews_this_week(login) }
     merged = Thread.new { merged_rows(merged_items, login) }
+    decisions = Thread.new { review_decisions(entries.values.map { |e| e[:item]["node_id"] }) }
 
     prs = threaded(entries.values) { |entry| detail(entry, login) }.compact
+    decided = decisions.value
+    prs.each do |pr|
+      d = decided[pr[:node_id]] || {}
+      pr[:review_decision] = d[:decision]
+      pr[:mergeable] = d[:mergeable]
+    end
     rows = prs.map { |pr| row(pr, login) }.sort_by { |r| r[:sort_key] }
 
     {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
@@ -543,8 +565,12 @@ class QueueService
       latest_by_reviewer[who] = {state: r["state"], at: at} if cur.nil? || at >= cur[:at]
     end
     approved = latest_by_reviewer.any? { |_, r| r[:state] == "APPROVED" && r[:at] >= commit_at }
+    # How long an approved pull request has waited to be merged is measured
+    # from its newest approval.
+    approved_at = latest_by_reviewer.values.select { |r| r[:state] == "APPROVED" }.map { |r| r[:at] }.max
 
     {
+      node_id: item["node_id"], approved_at: approved_at,
       url: item["html_url"], title: item["title"], number: n, repo: repo, owner: owner,
       author: pull.dig("user", "login") || "?", draft: !!pull["draft"], ci: ci,
       labels: (item["labels"] || []).map { |l| l["name"] },
@@ -592,6 +618,25 @@ class QueueService
        # Newest merge first: this is a look back, so recency is the order.
        sort_key: [merged_at ? -merged_at.to_i : 0]}
     }.compact.sort_by { |r| r[:sort_key] }
+  end
+
+  # {node_id => {decision:, mergeable:}} for every pull request in the queue.
+  #
+  # Never raises. {} means GitHub could not be asked, and every row then
+  # decides exactly as it did before this existed -- nothing is called ready
+  # to merge on a guess, because a wrong "waiting to merge" takes a pull request
+  # off your list while it still needs you.
+  DECISIONS_PER_QUERY = 100
+
+  def review_decisions(ids)
+    ids.compact.uniq.each_slice(DECISIONS_PER_QUERY).each_with_object({}) do |batch, out|
+      (@gh.graphql(DECISIONS_GRAPHQL, {ids: batch})["nodes"] || []).each do |node|
+        next unless node && node["id"]
+        out[node["id"]] = {decision: node["reviewDecision"], mergeable: node["mergeable"]}
+      end
+    end
+  rescue StandardError
+    {}
   end
 
   # Rows for the issues tab. Nothing is fetched here: the query already carried
@@ -672,23 +717,46 @@ class QueueService
   end
 
   def row(pr, login)
+    # GitHub's own decision when it could be read; nil when it could not, and
+    # then everything below falls back to what the reviews say, as it did
+    # before GitHub was asked.
+    decision = pr[:review_decision]
+    approved = decision ? decision == "APPROVED" : pr[:approved]
+    # Approved and only waiting for someone to press merge. Only ever from
+    # GitHub's decision, never the fallback: calling a pull request ready on a
+    # guess takes it off your list while it may still need you. A draft cannot
+    # be merged whatever its reviews say.
+    ready = decision == "APPROVED" && !pr[:draft]
+
     # settled means "nothing here for me". It drives the state word, the sort
     # order, Hide settled, and the progress bar, so it must carry the whole
     # decision and not only the label.
     settled =
       if pr[:mine]
-        # Waiting on them only while somebody is actually on the hook and has
-        # not already approved.
-        pr[:awaiting_review] && !pr[:approved]
+        # Yours and approved is yours to merge, so never settled. Otherwise
+        # waiting on them only while somebody is on the hook and has not
+        # already approved.
+        !ready && pr[:awaiting_review] && !approved
       else
-        pr[:i_acted]
+        # Someone else's and approved: its author merges it, not you.
+        ready || pr[:i_acted]
       end
-    wait_from = settled ? pr.dig(:my_last, :at) : (pr.dig(:last_other, :at) || pr.dig(:last, :at))
+    wait_from =
+      if ready then pr[:approved_at] || pr.dig(:last, :at)
+      elsif settled then pr.dig(:my_last, :at)
+      else pr.dig(:last_other, :at) || pr.dig(:last, :at)
+      end
     days = wait_from ? (Time.now - wait_from) / 86_400.0 : 0
     bar, text = age_colors(days, settled)
 
     state, state_bg, state_color =
-      if settled && pr[:mine]
+      if ready && pr[:mine]
+        ["Ready to merge", "var(--state-ready-bg)", "var(--state-ready-fg)"]
+      elsif ready
+        # Not "Waiting to merge": measured with the page's font, that pill is
+        # 120px in a state cell that holds 120, and touched the title beside it.
+        ["To be merged", "var(--state-ready-bg)", "var(--state-ready-fg)"]
+      elsif settled && pr[:mine]
         ["Waiting on them", "var(--state-them-bg)", "var(--state-them-fg)"]
       elsif settled
         ["Reviewed", "var(--state-done-bg)", "var(--state-done-fg)"]
@@ -707,6 +775,8 @@ class QueueService
     chips << chip(pr[:draft] ? "draft" : nil, :grey)
     pr[:labels].select { |l| l.downcase == @label.downcase }.each { |l| chips << chip(l, :blue) }
     chips << chip("@#{login}", :violet) if pr[:buckets].include?(:mention)
+    # Approved but not mergeable as it stands: someone has to rebase first.
+    chips << chip("conflicts", :grey) if ready && pr[:mergeable] == "CONFLICTING"
     chips.compact!
 
     {
@@ -726,7 +796,7 @@ class QueueService
       sort_key: [settled ? 2 : (pr[:draft] ? 1 : 0), wait_from ? wait_from.to_i : Float::INFINITY],
       draft: pr[:draft],
       url: pr[:url], title: pr[:title], ref: "#{pr[:repo]} ##{pr[:number]}", author: pr[:author],
-      state: state, state_bg: state_bg, state_color: state_color, chips: chips,
+      state: state, state_bg: state_bg, state_color: state_color, chips: chips, ready: ready,
       row_bg: settled ? "var(--row-settled)" : "var(--row)",
       age_color: bar, age_text_color: text, age: ago(wait_from),
       # Who acted last on one line, what they did and when on the next. The page

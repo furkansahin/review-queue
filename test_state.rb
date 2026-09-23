@@ -99,6 +99,60 @@ check("and did not start a second build", builds, 2)
 release << true
 check("the rebuild still produced a new snapshot", rebuild.value.equal?(first), false)
 
+puts "-- approved: waiting to be merged --"
+# GitHub's own decision, under the repository's rules. nil means it could not
+# be asked.
+ready = lambda do |mine:, decision:, i_acted: false, awaiting: false, approved: false, draft: false, mergeable: nil|
+  x = pr(mine: mine, i_acted: i_acted, awaiting: awaiting, approved: approved, draft: draft)
+  x[:review_decision] = decision
+  x[:mergeable] = mergeable
+  x[:approved_at] = NOW - 5 * 86_400
+  SVC.send(:row, x, ME)
+end
+r = ready.(mine: false, decision: "APPROVED")
+check("someone else's, approved -> To be merged", r[:state], "To be merged")
+check("which is not your work", r[:settled], true)
+check("and sinks with the settled rows", r[:sort_key][0], 2)
+check("its wait is counted from the approval", r[:age], "5d")
+r = ready.(mine: false, decision: "APPROVED", awaiting: true)
+check("even with you still requested", r[:state], "To be merged")
+r = ready.(mine: true, decision: "APPROVED")
+check("yours, approved -> Ready to merge", r[:state], "Ready to merge")
+check("which is yours to do", r[:settled], false)
+check("so it is work, at the top", r[:sort_key][0], 0)
+check("and the page knows it is ready", r[:ready], true)
+r = ready.(mine: true, decision: "APPROVED", awaiting: true)
+check("approved beats a pending reviewer", r[:state], "Ready to merge")
+check("a draft is never ready, whatever its reviews", ready.(mine: false, decision: "APPROVED", draft: true)[:state], "To review")
+check("changes requested is not ready", ready.(mine: false, decision: "CHANGES_REQUESTED")[:state], "To review")
+check("review required is not ready", ready.(mine: false, decision: "REVIEW_REQUIRED")[:state], "To review")
+# GitHub's decision over the reviews' own story, both ways: the reviews said
+# approved on a pull request the rules did not count as approved...
+check("GitHub says review required, reviews say approved -> Waiting on them",
+      ready.(mine: true, decision: "REVIEW_REQUIRED", awaiting: true, approved: true)[:state], "Waiting on them")
+# ...and when GitHub cannot be asked, nothing is called ready on a guess --
+# that would take a pull request off your list while it may still need you.
+check("no decision, reviews say approved: not ready", ready.(mine: false, decision: nil, approved: true)[:state], "To review")
+check("and yours falls back to what it was", ready.(mine: true, decision: nil, approved: true, awaiting: true)[:state], "Your turn")
+chips = ->(row) { row[:chips].map { |c| c[:text] } }
+check("approved with conflicts says so", chips.(ready.(mine: false, decision: "APPROVED", mergeable: "CONFLICTING")), ["conflicts"])
+check("approved and mergeable does not", chips.(ready.(mine: false, decision: "APPROVED", mergeable: "MERGEABLE")), [])
+check("conflicts are not flagged on unapproved work", chips.(ready.(mine: false, decision: "REVIEW_REQUIRED", mergeable: "CONFLICTING")), [])
+
+puts "-- asking GitHub for the decisions --"
+asked = []
+gh = SVC.instance_variable_get(:@gh)
+gh.define_singleton_method(:graphql) do |_q, vars|
+  asked << vars[:ids].size
+  {"nodes" => vars[:ids].map { |id| {"id" => id, "reviewDecision" => "APPROVED", "mergeable" => "MERGEABLE"} } + [nil]}
+end
+got = SVC.send(:review_decisions, (1..150).map { |i| "PR_#{i}" } + [nil, "PR_1"])
+check("in batches of a hundred", asked, [100, 50])
+check("one answer per pull request", got.size, 150)
+check("keyed by node id", got["PR_7"], {decision: "APPROVED", mergeable: "MERGEABLE"})
+gh.define_singleton_method(:graphql) { |*_| raise "GitHub 502" }
+check("a failure is an empty answer, never an exception", SVC.send(:review_decisions, ["PR_1"]), {})
+
 puts "-- the activity columns --"
 # Who and what used to share one line, "someone · changes requested", and
 # were cut short on most rows. Now who is one line and what-and-when the next.
