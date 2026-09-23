@@ -327,6 +327,16 @@ module DB
     -- dashboard uses it itself, after a person has looked at what the branch
     -- holds.
     ALTER TABLE bayboxes   ADD COLUMN IF NOT EXISTS github_write_token_enc text;
+
+    -- The watched label, kept against the login: in the session cookie alone,
+    -- clearing cookies turned it off without a word.
+    --
+    -- An ALTER on the user_settings created above, not a table of its own.
+    -- That one dates from the per-user dev boxes, was never written to, and is
+    -- in production -- so a second CREATE TABLE IF NOT EXISTS for the same name
+    -- did nothing there, and the first request to read the label failed with
+    -- "column watch_label does not exist".
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS watch_label text NOT NULL DEFAULT '';
   SQL
 
   def setup!

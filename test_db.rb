@@ -36,6 +36,20 @@ end
 check("setup! adds last_ok_at to an existing bayboxes",
       DB.row("SELECT count(*)::int AS n FROM information_schema.columns WHERE table_name='bayboxes' AND column_name='last_ok_at'")["n"], 1)
 
+# The same trap with a whole table. user_settings existed, unused, long before
+# the watched label was kept in it, and production has it in its old shape --
+# so the label's first version, a second CREATE TABLE IF NOT EXISTS, did nothing
+# there and every page would have failed reading a column that was not there.
+# Build it exactly as production has it, and check setup! gives it the column.
+DB.exec("DROP TABLE IF EXISTS user_settings")
+DB.exec("CREATE TABLE user_settings (login text PRIMARY KEY, updated_at timestamptz NOT NULL DEFAULT now())")
+DB.setup!
+check("setup! adds watch_label to the user_settings production has",
+      DB.row("SELECT count(*)::int AS n FROM information_schema.columns WHERE table_name='user_settings' AND column_name='watch_label'")["n"], 1)
+DB.exec("INSERT INTO user_settings (login) VALUES ('someone')")
+check("an existing row reads as watching nothing", DB.row("SELECT watch_label FROM user_settings WHERE login = 'someone'")["watch_label"], "")
+DB.exec("DELETE FROM user_settings")
+
 # and every column the code selects must actually exist
 %w[phase torn_down_at box_name baybox_id output error].each do |col|
   ok = begin

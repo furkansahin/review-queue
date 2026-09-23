@@ -184,6 +184,36 @@ class ReviewQueue < Roda
     session[key] = text.length > FLASH_MAX ? "#{text[0, FLASH_MAX - 1]}…" : text
   end
 
+  # The label you watch. Kept against your login when there is a database, so
+  # it survives cleared cookies and follows you to another browser. It used to
+  # live in the session cookie alone, where clearing cookies -- which a bug here
+  # once made necessary -- turned it off without a word.
+  #
+  # Without a database it stays in the cookie, as it always did.
+  def watch_label
+    return QueueService.clean_label(session["label"]) unless REVIEWS_ENABLED
+    row = DB.row("SELECT watch_label FROM user_settings WHERE login = $1", [current_login])
+    return row["watch_label"].to_s if row
+    # A label chosen before this existed is still in the cookie. Adopt it once.
+    legacy = QueueService.clean_label(session.delete("label"))
+    save_watch_label(legacy) unless legacy.empty?
+    legacy
+  end
+
+  def save_watch_label(value)
+    label = QueueService.clean_label(value)
+    if REVIEWS_ENABLED
+      DB.exec(<<~SQL, [current_login, label])
+        INSERT INTO user_settings (login, watch_label) VALUES ($1, $2)
+        ON CONFLICT (login) DO UPDATE SET watch_label = EXCLUDED.watch_label, updated_at = now()
+      SQL
+      session.delete("label")
+    else
+      session["label"] = label
+    end
+    label
+  end
+
   # The part of a run's output that says what happened.
   def last_line(detail)
     detail.to_s.lines.map(&:strip).reject(&:empty?).last.to_s
@@ -277,7 +307,7 @@ class ReviewQueue < Roda
 
     next r.redirect "/login" unless current_login && current_token
 
-    service = REGISTRY.for(current_login, current_token, label: session["label"].to_s)
+    service = REGISTRY.for(current_login, current_token, label: watch_label)
 
     r.post "refresh" do
       check_csrf!
@@ -811,7 +841,7 @@ class ReviewQueue < Roda
 
     r.post "settings" do
       check_csrf!
-      session["label"] = QueueService.clean_label(r.params["label"])
+      save_watch_label(r.params["label"])
       r.redirect "/?#{r.query_string}"
     end
 

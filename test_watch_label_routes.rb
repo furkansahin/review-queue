@@ -38,6 +38,11 @@ def sign_in
   get "/auth/callback?code=c&state=#{st}"
 end
 
+# With a database the label is kept against the login, so a run must start
+# from nobody having chosen one -- or a label left by the last run would pass
+# as this one's.
+DB.exec("DELETE FROM user_settings") if REVIEWS_ENABLED
+
 sign_in
 get "/"
 check("new user gets NO label tab despite RQ_LABEL", tabs(last_response.body).include?("label"), false)
@@ -78,6 +83,48 @@ check("second user does not inherit the first's label",
 WHO[:login] = "furkansahin"
 get "/"
 check("first user still has their label", tabs(last_response.body).include?("label"), true)
+
+if REVIEWS_ENABLED
+  puts "-- it is kept against your login --"
+  saved = DB.row("SELECT watch_label FROM user_settings WHERE login = $1", ["furkansahin"])
+  check("the label is in the database", saved && saved["watch_label"], "clickhouse")
+  # What used to turn it off without a word: clearing cookies, or another browser.
+  clear_cookies
+  sign_in
+  get "/"
+  check("it survives cleared cookies", tabs(last_response.body).include?("label"), true)
+  fresh = Rack::Test::Session.new(Rack::MockSession.new(app))
+  fresh.get "/auth/start"; st3 = fresh.last_response.location[/state=([^&]+)/, 1]
+  fresh.get "/auth/callback?code=c&state=#{st3}"
+  fresh.get "/"
+  check("and follows you to another browser", tabs(fresh.last_response.body).include?("label"), true)
+  # The cookie is encrypted, so it cannot be read here to say what it holds.
+  # What it holds shows instead: save a label in this session, take the saved
+  # row away, and one left in the cookie would be adopted straight back.
+  post "/settings", {"label" => "clickhouse", "_csrf" => csrf_for(last_response.body, "/settings")}
+  DB.exec("DELETE FROM user_settings WHERE login = $1", ["furkansahin"])
+  get "/"
+  check("the cookie no longer carries it", tabs(last_response.body).include?("label"), false)
+
+  puts "-- a label chosen before this is adopted, once --"
+  # Set one the old way: with no database, the cookie is where it goes.
+  DB.exec("DELETE FROM user_settings")
+  Object.send(:remove_const, :REVIEWS_ENABLED); Object.const_set(:REVIEWS_ENABLED, false)
+  clear_cookies
+  sign_in
+  get "/"
+  post "/settings", {"label" => "dependencies", "_csrf" => csrf_for(last_response.body, "/settings")}
+  get "/"
+  check("without a database it lives in the cookie", tabs(last_response.body).include?("label"), true)
+  check("and nothing was written", DB.row("SELECT 1 FROM user_settings WHERE login = $1", ["furkansahin"]), nil)
+  # Then the database arrives, as it did for this dashboard.
+  Object.send(:remove_const, :REVIEWS_ENABLED); Object.const_set(:REVIEWS_ENABLED, true)
+  get "/"
+  check("the cookie's label is still watched", tabs(last_response.body).include?("label"), true)
+  adopted = DB.row("SELECT watch_label FROM user_settings WHERE login = $1", ["furkansahin"])
+  check("and is now kept against the login", adopted && adopted["watch_label"], "dependencies")
+  DB.exec("DELETE FROM user_settings")
+end
 
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
