@@ -25,8 +25,8 @@ def mkrow(repo, n)
    title: "PR #{n}", ref: "#{repo} ##{n}", author: "someone", state: "To review",
    state_bg: "var(--state-todo-bg)", state_color: "var(--state-todo-fg)", chips: [],
    row_bg: "var(--row)", age_color: "var(--age-stale-bar)", age_text_color: "var(--age-stale-fg)",
-   age: "3d", read_est: "~2m", size_sub: "±20 · 2f", last_activity: "3d ago", last_actor: "someone",
-   my_action: "never", my_action_kind: "no activity from you", ci: "pass", ci_color: "var(--ci-pass)"}
+   age: "3d", read_est: "~2m", size_sub: "±20 · 2f", last_who: "someone", last_what: "comment · 3d ago",
+   my_action: "never", my_action_kind: nil, ci: "pass", ci_color: "var(--ci-pass)"}
 end
 QueueService.class_eval do
   define_method(:snapshot) do |force: false|

@@ -729,10 +729,17 @@ class QueueService
       state: state, state_bg: state_bg, state_color: state_color, chips: chips,
       row_bg: settled ? "var(--row-settled)" : "var(--row)",
       age_color: bar, age_text_color: text, age: ago(wait_from),
-      last_activity: "#{ago(pr.dig(:last, :at))} ago",
-      last_actor: pr[:last] ? "#{pr[:last][:who] == login ? "you" : pr[:last][:who]} · #{pr[:last][:kind]}" : "—",
+      # Who acted last on one line, what they did and when on the next. The page
+      # used to put the time on top and "who · what" underneath, and at 26 to 35
+      # characters that second line was cut short on most rows of a column
+      # built for 18 -- while the line above it held "4d ago" and sat half
+      # empty. One fact per line fits.
+      last_who: pr[:last] ? (pr[:last][:who] == login ? "you" : pr[:last][:who]) : "—",
+      last_what: pr[:last] ? "#{pr[:last][:kind]} · #{ago(pr[:last][:at])} ago" : "",
       my_action: pr[:my_last] ? "#{ago(pr[:my_last][:at])} ago" : "never",
-      my_action_kind: pr[:my_last] ? pr[:my_last][:kind] : "no activity from you",
+      # Nothing under "never": it already says it. "no activity from you" was
+      # the widest thing in its column, and said the same thing twice.
+      my_action_kind: pr[:my_last] && pr[:my_last][:kind],
       quick: quick, churn: churn, changed: pr[:changed].to_i,
       read_est: churn.positive? ? "~#{[(churn / @lines_per_min.to_f).ceil, 1].max}m" : "—",
       size_sub: churn.positive? ? "±#{churn} · #{pr[:changed].to_i}f" : "no diff data",

@@ -44,8 +44,8 @@ QueueService.class_eval do
              sort_key: [0, 0], draft: false, url: "u", title: "t", ref: "ubicloud #1",
              author: "someone", state: "To review", state_bg: "x", state_color: "y",
              row_bg: "z", age_color: "a", age_text_color: "b", age: "1h",
-             last_activity: "1h ago", last_actor: "someone", my_action: "never",
-             my_action_kind: "no activity from you", quick: false, churn: 10, changed: 1,
+             last_who: "someone", last_what: "comment · 1h ago", my_action: "never",
+             my_action_kind: nil, quick: false, churn: 10, changed: 1,
              read_est: "~1m", size_sub: "±10 · 1f", ci: "pass", ci_color: "c", chips: []}]
     {rows: rows, counts: counts(rows), login: WORLD[:login], fetched_at: Time.now, rate: 5000,
      error: nil, reviews_7d: {count: 0, complete: true}}

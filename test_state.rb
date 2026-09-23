@@ -99,6 +99,24 @@ check("and did not start a second build", builds, 2)
 release << true
 check("the rebuild still produced a new snapshot", rebuild.value.equal?(first), false)
 
+puts "-- the activity columns --"
+# Who and what used to share one line, "someone · changes requested", and
+# were cut short on most rows. Now who is one line and what-and-when the next.
+other = pr(mine: false, i_acted: false, awaiting: true)
+other[:last] = {at: NOW - 12 * 86_400, who: "macieksarnowicz", kind: "changes requested"}
+r = SVC.send(:row, other, ME)
+check("who acted last is a line of its own", r[:last_who], "macieksarnowicz")
+check("and what they did, and when, the next", r[:last_what], "changes requested · 12d ago")
+check("when it was you, it says so", SVC.send(:row, pr(mine: true, i_acted: true, awaiting: false), ME)[:last_who], "you")
+never = pr(mine: false, i_acted: false, awaiting: true)
+never[:my_last] = nil
+nr = SVC.send(:row, never, ME)
+check("never acted reads never", nr[:my_action], "never")
+# "never" and then "no activity from you" said the same thing twice, and the
+# second was the widest text in its column.
+check("with nothing repeated under it", nr[:my_action_kind], nil)
+check("the old combined fields are gone", r.key?(:last_actor) || r.key?(:last_activity), false)
+
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")
 exit($fail.zero? ? 0 : 1)

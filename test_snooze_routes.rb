@@ -21,8 +21,8 @@ def mkrow(key, days)
    state: "To review", state_bg: "var(--state-todo-bg)", state_color: "var(--state-todo-fg)",
    chips: [], row_bg: "var(--row)", age_color: "var(--age-stale-bar)",
    age_text_color: "var(--age-stale-fg)", age: "#{days}d", read_est: "~1m", size_sub: "±5 · 1f",
-   last_activity: "#{days}d ago", last_actor: "someone", my_action: "never",
-   my_action_kind: "no activity from you", ci: "pass", ci_color: "var(--ci-pass)"}
+   last_who: "someone", last_what: "comment · #{days}d ago", my_action: "never",
+   my_action_kind: nil, ci: "pass", ci_color: "var(--ci-pass)"}
 end
 
 GitHubOAuth.class_eval { define_method(:exchange) { |_| "gho_x" } }
@@ -53,6 +53,13 @@ get "/auth/callback?code=c&state=#{st}"
 get "/"
 check("both rows visible before snooze", rows_on_page(last_response.body).sort, ["o/r#1", "o/r#2"])
 check("All tab count is 2", last_response.body[/All<\/span>\s*<span class="badge">(\d+)\/(\d+)/m, 2], "2")
+# The activity columns, as drawn: who on one line, what and when on the next,
+# and nothing under "never".
+check("last activity names who", last_response.body.include?('<div title="someone">someone</div>'), true)
+check("and what, and when, beneath", last_response.body.match?(%r{<div class="sub" title="comment · \d+d ago">comment · \d+d ago</div>}), true)
+# row() leaves the kind nil when you never acted; the view must then draw no
+# line at all, rather than an empty one under "never".
+check("never stands alone", last_response.body.include?('<div class="sub" title=""></div>'), false)
 
 # CSRF is required
 post "/snooze", "key" => "o/r#1"

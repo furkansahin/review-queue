@@ -2,7 +2,11 @@
   tabs = service.tabs
   counts = snap[:counts] || {}
   qs = ->(t, h) { "/?tab=#{t}#{h ? "&hide=1" : ""}" }
-  cols = "4px 132px 1fr 92px 132px 150px 84px 76px 168px"
+  # Sized from what the cells hold, measured in a browser with the page's own
+  # fonts, and in total the same as before, so the pull request column keeps
+  # the width it had: Last activity takes the room CI, Waiting and the buttons
+  # had to spare. Its longest line, "changes requested · 10mo ago", is 185px.
+  cols = "4px 132px 1fr 92px 204px 130px 76px 56px 144px"
   # Merged rows carry no CI, no waiting time and no action, so the tab drops
   # those columns instead of printing four empty cells on every line.
   mcols = "4px 132px 1fr 92px 132px 150px"
@@ -557,12 +561,15 @@
         <div class="sub"><%= r[:size_sub] %></div>
       </div>
       <div class="cell">
-        <div><%= r[:last_activity] %></div>
-        <div class="sub" title="<%= r[:last_actor] %>"><%= r[:last_actor] %></div>
+        <%# title=, so a login longer than any on this team still reads in full. %>
+        <div title="<%= r[:last_who] %>"><%= r[:last_who] %></div>
+        <div class="sub" title="<%= r[:last_what] %>"><%= r[:last_what] %></div>
       </div>
       <div class="cell">
         <div><%= r[:my_action] %></div>
-        <div class="sub" title="<%= r[:my_action_kind] %>"><%= r[:my_action_kind] %></div>
+        <% if r[:my_action_kind] %>
+          <div class="sub" title="<%= r[:my_action_kind] %>"><%= r[:my_action_kind] %></div>
+        <% end %>
       </div>
       <div class="cell" style="display: flex; align-items: center; gap: 6px;">
         <span class="dot" style="background: <%= r[:ci_color] %>;"></span>
