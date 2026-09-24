@@ -110,14 +110,53 @@ check("and carries the skills repo", toml.include?("furkansahin/skills"), true)
 # unpinned, on the default model, with none of the harness prompt.
 check("it defines the review command", toml.include?("[commands]") && toml.include?("review ="), true)
 check("and the follow-up command", toml.include?("ask ="), true)
-check("the review is pinned to a model",
-      toml.include?("--model opus") && toml.include?("--effort max"), true)
+check("the review is pinned to an exact model, not an alias",
+      toml.include?("--model 'claude-opus-5-5'") && toml.include?("--effort max"), true)
+check("which is Opus 5.5 unless configured", Runner::MODEL, ENV.fetch("RQ_CLAUDE_MODEL", "claude-opus-5-5"))
 # Without this the box refuses rspec, psql and ruby, and every finding comes
 # back read-only -- the harness cannot verify anything.
 check("all three may actually run things",
       toml.scan("--dangerously-skip-permissions").size, 3)
 check("so are the follow-up and the work",
-      toml.scan("--model opus").size == 3 && toml.scan("--effort max").size == 3, true)
+      toml.scan("--model 'claude-opus-5-5'").size == 3 && toml.scan("--effort max").size == 3, true)
+check("and each first brings Claude Code up to date", toml.scan("claude update").size, 3)
+
+# The commands themselves, run in bash against a claude that records how it
+# was called -- whether the update really runs first, whether a failed one
+# stops anything, and whose exit code the run records.
+Dir.mktmpdir("rq-cmd") do |wt|
+  fakebin = File.join(wt, "fakebin")
+  FileUtils.mkdir_p([fakebin, File.join(wt, ".rq")])
+  File.write(File.join(wt, ".rq", "review-prompt.md"), "review it\n")
+  File.write(File.join(fakebin, "claude"), <<~SH)
+    #!/usr/bin/env bash
+    echo "$*" >> "#{wt}/claude.calls"
+    if [ "$1" = update ]; then echo "Updating to 9.9.9..."; [ -f "#{wt}/update-fails" ] && exit 7; exit 0; fi
+    echo '{"type":"result","result":"done"}'
+    [ -f "#{wt}/run-fails" ] && exit 3
+    exit 0
+  SH
+  File.chmod(0o755, File.join(fakebin, "claude"))
+  run = lambda do
+    FileUtils.rm_f(File.join(wt, "claude.calls"))
+    system({"PATH" => "#{fakebin}:#{ENV["PATH"]}"}, "bash", "-c", Runner::REVIEW_CMD, chdir: wt, out: File::NULL, err: File::NULL)
+    [File.read(File.join(wt, "claude.calls")).lines.map(&:strip), File.read(File.join(wt, ".rq", "run.log"))]
+  end
+  calls, log = run.call
+  check("the update runs before the review", calls.map { |c| c.split.first }, ["update", "-p"])
+  check("and the review asks for Opus 5.5", calls.last.include?("--model claude-opus-5-5"), true)
+  check("the update's chatter stays out of the trace", log.include?("Updating to"), false)
+  check("it is kept beside it instead", File.read(File.join(wt, ".rq", "update.log")).include?("Updating to 9.9.9"), true)
+  check("a clean run stamps 0", log.include?("#{Runner::EXIT_MARK}0"), true)
+  FileUtils.touch(File.join(wt, "update-fails"))
+  calls, log = run.call
+  check("a failed update does not stop the review", calls.size, 2)
+  check("nor lend it its exit code", log.include?("#{Runner::EXIT_MARK}0"), true)
+  FileUtils.rm_f(File.join(wt, "update-fails"))
+  FileUtils.touch(File.join(wt, "run-fails"))
+  _, log = run.call
+  check("a failed review is stamped with the review's own code", log.include?("#{Runner::EXIT_MARK}3"), true)
+end
 check("it defines the work command", toml.include?("work ="), true)
 check("the work reads its own prompt", toml.include?(".rq/work-prompt.md"), true)
 check("the review reads the harness prompt", toml.include?(".rq/review-prompt.md"), true)

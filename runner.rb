@@ -188,10 +188,28 @@ module Runner
   # merges the commands map across config layers, so the repo's own commands
   # (pry, agent, seed-account, the dataplane pair) are still there.
   #
-  # Both are pinned. Unpinned, a review runs on whatever the box's account
-  # happens to default to, which moves between releases -- so the same pull
-  # request could be reviewed at two depths, unattended, with nobody to notice
-  # a shallow answer.
+  # All pinned, to an exact model rather than an alias. Unpinned, a review runs
+  # on whatever the box's account happens to default to, which moves between
+  # releases -- so the same pull request could be reviewed at two depths,
+  # unattended, with nobody to notice a shallow answer. "opus" was a pin in
+  # name only: it is an alias the Claude Code release decides, and moved from
+  # one Opus to the next without anyone here choosing it.
+  #
+  # Overridable -- claude-opus-5-5[1m] for the whole million-token window,
+  # say. Checked, because it lands in a shell command.
+  MODEL = ENV.fetch("RQ_CLAUDE_MODEL", "claude-opus-5-5").tap do |m|
+    raise ArgumentError, "RQ_CLAUDE_MODEL #{m.inspect} is not a model name" unless m.match?(/\A[a-z0-9][a-z0-9.\-]*(\[[a-z0-9]+\])?\z/)
+  end
+
+  # Each run brings Claude Code up to date before it starts. bay installs it in
+  # a cached layer of the box image, so every box gets whatever version was
+  # current when that layer was first built on the machine -- 2.1.274, which
+  # refuses claude-opus-5-5 with "update required". Measured in a box: six
+  # seconds when there is a release to fetch, one when there is not. Its
+  # output goes to a file, not the trace, and a failed update never stops the
+  # run: the run then says what it needs, in claude's own words.
+  UPDATE = "claude update > .rq/update.log 2>&1 || true"
+  CLAUDE = "#{UPDATE}; claude -p --model #{BayBox.sh_quote(MODEL)} --effort max"
   #
   # Both read their text from a file in the worktree rather than a command
   # line: free text never gets parsed by a shell, and the path is relative
@@ -244,14 +262,14 @@ module Runner
   end
 
   REVIEW_CMD = wrapped(
-    %(claude -p --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/review-prompt.md)"),
+    %(#{CLAUDE} #{PERMS} #{FORMAT} -- "$(cat .rq/review-prompt.md)"),
     truncate: true)
   # Working on an issue. Same model, same effort, same unattended permissions as
   # a review, for the same reasons -- it has to run the specs -- and the same
   # container is all it can reach. What it cannot do is push: the box's GitHub
   # token is read-only, and the one that can write never enters it. See publish.
   WORK_CMD = wrapped(
-    %(claude -p --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/work-prompt.md)"),
+    %(#{CLAUDE} #{PERMS} #{FORMAT} -- "$(cat .rq/work-prompt.md)"),
     truncate: true)
 
   # The question is echoed into the run, so the trace says what was asked. It
@@ -261,7 +279,7 @@ module Runner
   # No start stamp in this one: ask writes it from the dashboard, before the
   # run is detached. See mark_run.
   ASK_CMD = wrapped(
-    %(claude -p --continue --model opus --effort max #{PERMS} #{FORMAT} -- "$(cat .rq/followup.txt)"),
+    %(#{CLAUDE} --continue #{PERMS} #{FORMAT} -- "$(cat .rq/followup.txt)"),
     truncate: false, stamp: false,
     preamble: %(printf '\\n== you asked\\n%s\\n\\n' "$(cat .rq/followup.txt)"))
 
