@@ -277,6 +277,38 @@ check("the new commit is pushed", sh("git --git-dir=#{BARE} rev-parse refs/heads
 check("no second pull request", $posts.size, 0)
 check("it says it updated the existing one", again[:updated], true)
 
+puts "-- a rewritten branch replaces what it pushed, and nothing else --"
+# What happened on #6518: the branch was pushed, a follow-up then re-split the
+# work into new commits, and the plain push was refused as non-fast-forward.
+$open_prs = [{"html_url" => "https://github.com/ubicloud/ubicloud/pull/6500", "number" => 6500}]
+before = sh("git --git-dir=#{BARE} rev-parse refs/heads/#{BRANCH}").strip
+sh "cd #{WT} && git reset -q --soft #{main_sha} && #{GIT} commit -qm 'All of it, split differently'"
+rewritten = sh("git -C #{WT} rev-parse HEAD").strip
+check("(the branch no longer continues from GitHub's)", system("git -C #{WT} merge-base --is-ancestor #{before} HEAD"), false)
+res = Runner.publish(BOXROW, repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)
+check("the rewritten branch is pushed", res[:ok], true)
+check("GitHub now has it", sh("git --git-dir=#{BARE} rev-parse refs/heads/#{BRANCH}").strip, rewritten)
+check("and it says what it replaced", res[:output].to_s.include?("rewritten since the last push: replacing #{before[0, 12]}"), true)
+
+# A colleague pushes to the branch on GitHub. The box did not make their
+# commit, so nothing it pushes may replace it.
+colleague = File.join(ROOT, "colleague")
+sh "#{GIT} clone -q #{BARE} #{colleague} && cd #{colleague} && git checkout -q #{BRANCH} && echo theirs > theirs.txt && " \
+   "#{GIT} add theirs.txt && #{GIT} commit -qm 'Their fix' && git push -q origin #{BRANCH}"
+theirs = sh("git --git-dir=#{BARE} rev-parse refs/heads/#{BRANCH}").strip
+sh "cd #{WT} && #{GIT} commit -q --allow-empty -m 'Mine, after theirs'"
+# Not even once a fetch has brought it into the box: having it is not
+# having made it.
+sh "cd #{WT} && git fetch -q origin #{BRANCH}"
+check("(the box has their commit now)", system("git -C #{WT} cat-file -e #{theirs}"), true)
+refused = Runner.publish(BOXROW, repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)
+check("a branch someone else pushed to is not overwritten", refused[:ok], false)
+check("it says why", refused[:error].to_s.include?("did not make -- someone else has pushed to it"), true)
+check("their commit is still there", sh("git --git-dir=#{BARE} rev-parse refs/heads/#{BRANCH}").strip, theirs)
+# Back to one history, for what follows.
+sh "cd #{WT} && git reset -q --hard HEAD~1"
+sh "git --git-dir=#{BARE} update-ref refs/heads/#{BRANCH} #{rewritten}"
+
 puts "-- a pull request without Fixes still gets one --"
 $open_prs = []
 $posts.clear

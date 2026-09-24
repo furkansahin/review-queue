@@ -868,18 +868,42 @@ module Runner
   def push_branch(box_row, box, repo, branch, token)
     wt = worktree(box_row, box)
     url = "https://github.com/#{repo}.git"
+    ref = "refs/heads/#{branch}"
+    q = ->(v) { BayBox.sh_quote(v) }
     # An empty extraheader first: the setting is a list, and anything already
     # configured on the machine would otherwise be sent alongside this one.
+    #
+    # A branch rewritten since its last push -- a follow-up asking for the work
+    # split into commits, say -- no longer continues from what GitHub has, and a
+    # plain push is refused as non-fast-forward. It has to be forced, but only
+    # over the box's own work: the commit GitHub holds must be one this worktree
+    # once stood on. Its HEAD's reflog keeps every commit it made or moved to,
+    # so a rewrite's old tip is there; someone else's push is not, even once a
+    # fetch has brought it into the object store. Even then the force is leased
+    # on exactly that commit, so a push landing between the look and the push
+    # is not lost.
     script = <<~SH
       IFS= read -r T || exit 9
-      cd #{BayBox.sh_quote(wt)} || exit 3
+      cd #{q.call(wt)} || exit 3
       auth=$(printf 'x-access-token:%s' "$T" | base64 | tr -d '\\n')
       unset T
-      GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=3 \
-        GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
-        GIT_CONFIG_KEY_1=http.https://github.com/.extraheader GIT_CONFIG_VALUE_1= \
-        GIT_CONFIG_KEY_2=http.https://github.com/.extraheader GIT_CONFIG_VALUE_2="AUTHORIZATION: basic $auth" \
-        git push --porcelain #{BayBox.sh_quote(url)} #{BayBox.sh_quote("HEAD:refs/heads/#{branch}")} 2>&1
+      g() {
+        GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=3 \
+          GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= \
+          GIT_CONFIG_KEY_1=http.https://github.com/.extraheader GIT_CONFIG_VALUE_1= \
+          GIT_CONFIG_KEY_2=http.https://github.com/.extraheader GIT_CONFIG_VALUE_2="AUTHORIZATION: basic $auth" \
+          git "$@"
+      }
+      there=$(g ls-remote #{q.call(url)} #{q.call(ref)} 2>/dev/null | cut -f1)
+      if [ -z "$there" ] || git merge-base --is-ancestor "$there" HEAD 2>/dev/null; then
+        g push --porcelain #{q.call(url)} #{q.call("HEAD:#{ref}")} 2>&1
+      elif git reflog show --format=%H HEAD 2>/dev/null | grep -qx "$there"; then
+        echo "rewritten since the last push: replacing $(printf %.12s "$there") on GitHub"
+        g push --porcelain --force-with-lease=#{q.call(ref)}:"$there" #{q.call(url)} #{q.call("HEAD:#{ref}")} 2>&1
+      else
+        echo "the branch on GitHub has commits this box did not make -- someone else has pushed to it -- so it is not overwritten"
+        exit 4
+      fi
     SH
     res = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), script],
                   env_for(box_row), timeout: 180, stdin: "#{token}\n")
