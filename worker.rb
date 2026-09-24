@@ -58,6 +58,7 @@ def record_summary(job, box)
   return unless job["kind"] == "work"
   seen = Runner.run(box, "inspect #{job["box_name"]}")
   Jobs.set_summary(job["id"], seen[:ok] ? seen[:output] : nil)
+  Jobs.set_diff(job["id"], seen[:diff]) if seen[:ok]
 rescue StandardError => e
   log("could not inspect #{job["box_name"]}: #{e.class}: #{e.message}")
 end

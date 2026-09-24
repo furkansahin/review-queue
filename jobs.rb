@@ -1,3 +1,4 @@
+require "json"
 require_relative "db"
 require_relative "baybox"
 
@@ -123,9 +124,9 @@ module Jobs
   # and the other way round.
   def by_key(login, kind = "review")
     DB.rows(<<~SQL, [login, kind]).each_with_object({}) { |j, h| h["#{j["repo"]}##{j["pr_number"]}"] = j }
-      SELECT DISTINCT ON (repo, pr_number) repo, pr_number, state, pr_url
+      SELECT DISTINCT ON (repo, pr_number) id, repo, pr_number, state, pr_url
       FROM (
-        SELECT repo, pr_number, state, pr_url, torn_down_at, created_at
+        SELECT id, repo, pr_number, state, pr_url, torn_down_at, created_at
         FROM review_jobs WHERE login = $1 AND kind = $2 ORDER BY created_at DESC LIMIT 50
       ) recent
       WHERE torn_down_at IS NULL
@@ -135,6 +136,15 @@ module Jobs
 
   def set_branch(id, branch) = DB.exec("UPDATE review_jobs SET branch = $1 WHERE id = $2", [branch, id])
   def set_summary(id, summary) = DB.exec("UPDATE review_jobs SET summary = $1 WHERE id = $2", [summary, id])
+  def set_diff(id, diff) = DB.exec("UPDATE review_jobs SET diff = $1 WHERE id = $2", [diff && JSON.generate(diff), id])
+
+  # The diff for one job, parsed; nil when none has been recorded.
+  def diff(login, id)
+    raw = DB.row("SELECT diff FROM review_jobs WHERE login = $1 AND id = $2", [login, id])&.fetch("diff")
+    raw && JSON.parse(raw, symbolize_names: true)
+  rescue JSON::ParserError
+    nil
+  end
 
   def set_pr(login, id, url)
     DB.exec("UPDATE review_jobs SET pr_url = $1 WHERE login = $2 AND id = $3", [url, login, id])

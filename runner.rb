@@ -1,6 +1,7 @@
 require "open3"
 require "fileutils"
 require "json"
+require "securerandom"
 require_relative "crypto"
 require_relative "baybox"
 require_relative "queue_service"
@@ -709,10 +710,18 @@ module Runner
   # What the branch holds, read from the machine rather than the container: git
   # in the worktree is the same either way, and this works when the box is
   # stopped. Never changes anything.
+  # Past this, a branch's diff is cut rather than stored whole -- the page says so.
+  DIFF_MAX = Integer(ENV.fetch("RQ_DIFF_MAX_BYTES", "1000000"))
+
   def inspect_branch(box_row, box)
     return bad_box unless box.to_s.match?(BOX_RE)
     wt = worktree(box_row, box)
     base = BASE_BRANCH
+    # Marks where the diff starts and how it is laid out. Random per run, so
+    # nothing on the branch -- a commit message, a file -- can forge one: the
+    # summary above it is read by prefixes that such text could otherwise hit.
+    tag = "__RQ#{SecureRandom.hex(6)}"
+    q = ->(v) { BayBox.sh_quote(v) }
     script = <<~SH
       cd #{BayBox.sh_quote(wt)} 2>/dev/null || { echo "__MISSING"; exit 0; }
       git fetch --quiet origin #{BayBox.sh_quote(base)} 2>/dev/null
@@ -724,15 +733,49 @@ module Runner
       git diff --name-only #{BayBox.sh_quote("origin/#{base}...HEAD")} 2>/dev/null | head -200 | sed 's/^/__FILE /'
       git log --format='__COMMIT %h %s' #{BayBox.sh_quote("origin/#{base}..HEAD")} 2>/dev/null | head -20
       if [ -f .rq/pr.md ]; then echo "__PR_BEGIN"; head -c 20000 .rq/pr.md; echo; echo "__PR_END"; fi
+      # The whole branch against its base, then each commit's own patch, for
+      # the changes page. Committed work only: it is what a push would send.
+      echo "#{tag}_SHA $(git rev-parse HEAD) $(git merge-base #{q.call("origin/#{base}")} HEAD 2>/dev/null)"
+      echo "#{tag}_DIFF"
+      git -c core.quotepath=off diff --no-color --no-ext-diff --find-renames #{q.call("origin/#{base}...HEAD")} 2>/dev/null | head -c #{DIFF_MAX}
+      echo; echo "#{tag}_LOG"
+      git -c core.quotepath=off log --reverse --no-color --no-ext-diff --find-renames -p \
+        --format='#{tag}_C %H%n#{tag}_S %s%n#{tag}_B%n%b%n#{tag}_P' #{q.call("origin/#{base}..HEAD")} 2>/dev/null | head -c #{DIFF_MAX}
+      echo; echo "#{tag}_END"
     SH
     res = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), script],
                   env_for(box_row), timeout: 90)
     return res unless res[:ok]
-    summary = parse_inspection(res[:output])
+    # A branch can hold bytes that are not UTF-8; they would make the JSON
+    # below raise.
+    text = res[:output].to_s.dup.force_encoding(Encoding::UTF_8).scrub("\uFFFD")
+    head_part, marker, diff_part = text.partition("#{tag}_SHA ")
+    summary = parse_inspection(head_part)
     return {ok: false, output: "", exit_code: nil, error: "the worktree for #{box} is gone"} if summary[:missing]
-    {ok: true, output: JSON.generate(summary), exit_code: 0, summary: summary}
+    diff = marker.empty? ? nil : parse_diff_block(tag, diff_part)
+    {ok: true, output: JSON.generate(summary), exit_code: 0, summary: summary, diff: diff}
   rescue Error, Crypto::Error => e
     {ok: false, output: "", exit_code: nil, error: e.message}
+  end
+
+  # {head:, base:, branch: <unified diff>, commits: [{sha:, subject:, body:, patch:}], truncated:}
+  def parse_diff_block(tag, text)
+    sha_line, rest = text.split("\n", 2)
+    head, base = sha_line.to_s.split
+    rest = rest.to_s
+    branch = rest[/\A#{tag}_DIFF\n(.*?)\n?#{tag}_LOG\n/m, 1].to_s
+    log = rest[/#{tag}_LOG\n(.*?)\n?#{tag}_END/m, 1].to_s
+    commits = log.split(/^#{tag}_C /).drop(1).map do |chunk|
+      sha, after = chunk.split("\n", 2)
+      after = after.to_s
+      {sha: sha.to_s.strip,
+       subject: after[/\A#{tag}_S (.*)$/, 1].to_s,
+       body: after[/^#{tag}_B\n(.*?)^#{tag}_P$/m, 1].to_s.strip,
+       patch: after.split(/^#{tag}_P\n/, 2)[1].to_s.sub(/\A\n+/, "")}
+    end
+    # head -c cuts without a word. Hitting the limit is the only sign.
+    cut = branch.bytesize >= DIFF_MAX - 1 || log.bytesize >= DIFF_MAX - 1
+    {head: head, base: base, branch: branch, commits: commits, truncated: cut}
   end
 
   def parse_inspection(text)
@@ -886,6 +929,10 @@ module Runner
     gh&.close_idle
   end
 
+  # A typed question is capped at 8 KB by its route; a review from the changes
+  # page, with a comment per line, is longer. This is the ceiling for both.
+  FOLLOWUP_MAX = 65_536
+
   def ask(box_row, box, prompt)
     return bad_box unless box.to_s.match?(BOX_RE)
     return {ok: false, output: "", exit_code: nil, error: "empty follow-up"} if prompt.to_s.strip.empty?
@@ -899,7 +946,7 @@ module Runner
     prepare!(box_row)
     # Into the worktree on the machine, because the bay command reads it from
     # inside the container. Bounded: a prompt is a question, not a payload.
-    placed = put_file(box_row, "#{worktree(box_row, box)}/.rq/followup.txt", prompt.to_s.byteslice(0, 8192))
+    placed = put_file(box_row, "#{worktree(box_row, box)}/.rq/followup.txt", prompt.to_s.byteslice(0, FOLLOWUP_MAX))
     return placed unless placed[:ok]
 
     # Stamp the new run here, not inside the box.

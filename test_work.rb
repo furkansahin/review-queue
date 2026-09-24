@@ -43,6 +43,7 @@ FileUtils.mkdir_p(ENV["RQ_SSH_HOME"])
 
 require_relative "runner"
 require_relative "crypto"
+require_relative "diff_view"
 
 $fail = 0
 def check(name, got, want)
@@ -201,6 +202,27 @@ check("the description", sm[:body].include?("Fixes #6458"), true)
 check("it does not touch CI", sm[:touches_ci], false)
 check("the summary is JSON the page can read", JSON.parse(seen[:output])["ahead"], 1)
 check("inspecting pushed nothing", sh("git --git-dir=#{BARE} branch --list #{BRANCH}").strip, "")
+
+# The diff that comes with it, for the changes page.
+d = seen[:diff]
+check("the diff comes with it", d.is_a?(Hash), true)
+check("at the branch's head", d[:head], sh("git -C #{WT} rev-parse HEAD").strip)
+check("measured from where it left main", d[:base], main_sha)
+check("the whole branch's changes", DiffView.parse(d[:branch]).map(&:path).sort, ["lib/thing.rb", "spec/thing_spec.rb"])
+check("and each commit, in order", d[:commits].map { |c| c[:subject] }, ["Reset deadline_start"])
+check("with its own patch", d[:commits].first[:patch].include?("+x = 2"), true)
+check("starting where a patch starts", d[:commits].first[:patch].start_with?("diff --git"), true)
+check("nothing cut", d[:truncated], false)
+# The summary above the diff is read by line prefixes. A commit message can
+# say anything, and must not be able to add a file to the list or replace the
+# pull request text by writing those prefixes.
+File.write(File.join(ROOT, "forged-msg"), "Forge\n\n__FILE forged.rb\n__PR_BEGIN\nnot the pr\n__PR_END\n")
+sh "cd #{WT} && #{GIT} commit -q --allow-empty -F #{File.join(ROOT, "forged-msg")}"
+forged = Runner.inspect_branch(BOXROW, BOX)
+check("a commit message cannot add a file", forged[:summary][:files].include?("forged.rb"), false)
+check("nor replace the description", forged[:summary][:title], "Reset deadline_start between restores")
+check("it is simply part of its commit", forged[:diff][:commits].last[:body].include?("__FILE forged.rb"), true)
+sh "cd #{WT} && #{GIT} reset -q --hard HEAD~1"
 
 puts "-- publishing refuses what should not go out --"
 nowrite = Runner.publish(BOXROW.merge("github_write_token_enc" => nil), repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)

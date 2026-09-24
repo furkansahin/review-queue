@@ -42,10 +42,12 @@ end
 
 # The machine, answered from here, with every command recorded.
 $commands = []
+$stdins = []
 $answers = {}
 runner_stub = Module.new do
   def run(_box, cmd, timeout: 30, stdin: nil)
     $commands << cmd
+    $stdins << stdin if stdin
     verb = cmd.split(" ").first
     $answers.fetch(verb, {ok: true, output: ""})
   end
@@ -239,6 +241,107 @@ SQL
 $commands.clear
 post "/sessions/publish", {"id" => other["id"].to_s, "_csrf" => tok}
 check("cannot be published by id", $commands, [])
+
+puts "-- the changes page --"
+DB.exec("DELETE FROM review_jobs")
+BRANCH_DIFF = <<~DIFF
+  diff --git a/prog/thing.rb b/prog/thing.rb
+  --- a/prog/thing.rb
+  +++ b/prog/thing.rb
+  @@ -1,3 +1,3 @@
+   class Thing
+  -  def old_name = 1
+  +  def new_name = 2
+   end
+DIFF
+DIFF_REC = {head: "abcdef1234567890", base: "0000000", branch: BRANCH_DIFF, truncated: false,
+            commits: [{sha: "c0ffee1234567890", subject: "Rename the thing", body: "Because.", patch: BRANCH_DIFF}]}
+SUMMARY = {head: "issue-6458-x", ahead: 1, dirty: 0, dirty_files: [], stat: "1 file changed", files: ["prog/thing.rb"],
+           commits: ["c0ffee1 Rename the thing"], title: "Rename the thing", body: "It had the **wrong** name.\n\nFixes #6458",
+           touches_ci: false, rq_files: []}
+wjob = DB.row(<<~SQL, [ME, box["id"], REPO, JSON.generate(SUMMARY)])
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, kind, branch, summary, finished_at)
+  VALUES ($1, $2, $3, 6458, 'rq-ubicloud-ubicloud-issue-6458', 'done', 'work', 'issue-6458-x', $4, now()) RETURNING *
+SQL
+Jobs.set_diff(wjob["id"], DIFF_REC)
+get "/sessions/changes?id=#{wjob["id"]}"
+page = last_response.body
+check("renders", last_response.status, 200)
+check("with the pull request's title", page.include?("Rename the thing"), true)
+check("and its description, rendered", page.include?("<strong>wrong</strong>"), true)
+check("the file and its lines", page.include?("prog/thing.rb") && page.include?('data-line="2"'), true)
+# Four lines, drawn in the branch view and again in the one commit's view.
+check("each line can take a comment, in every view", page.scan('class="cmt"').size, 8)
+check("a view for the branch and one per commit", page.include?('data-show="branch"') && page.include?('data-show="c0ffee1234567890"'), true)
+check("the code is coloured", page.include?("<span class="), true)
+check("it offers the pull request", page.include?("Open draft PR"), true)
+check("and a way to read the branch again", page.include?('action="/sessions/changes/refresh"'), true)
+check("the sessions card links here", (get("/sessions"); last_response.body.include?("/sessions/changes?id=#{wjob["id"]}")), true)
+check("so does the issue row", (get("/?tab=issues"); last_response.body.include?("/sessions/changes?id=#{wjob["id"]}")), true)
+
+other = DB.row(<<~SQL, [box["id"], REPO])["id"]
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, kind)
+  VALUES ('mohi-kalantari', $1, $2, 6461, 'rq-x-6461', 'done', 'work') RETURNING id
+SQL
+get "/sessions/changes?id=#{other}"
+check("someone else's changes are not shown", last_response.status == 302 && !last_response.body.include?("6461"), true)
+review_row = DB.row(<<~SQL, [ME, box["id"], REPO])["id"]
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, kind)
+  VALUES ($1, $2, $3, 6470, 'rq-ubicloud-ubicloud-6470', 'done', 'review') RETURNING id
+SQL
+get "/sessions/changes?id=#{review_row}"
+check("nor a review's -- GitHub shows those", last_response.status, 302)
+
+# A session from before diffs were kept: the page reads the branch once.
+old_one = DB.row(<<~SQL, [ME, box["id"], REPO])["id"]
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, kind, branch)
+  VALUES ($1, $2, $3, 6457, 'rq-ubicloud-ubicloud-issue-6457', 'done', 'work', 'issue-6457') RETURNING id
+SQL
+$commands.clear
+$answers["inspect"] = {ok: true, output: JSON.generate(SUMMARY), summary: SUMMARY, diff: DIFF_REC}
+get "/sessions/changes?id=#{old_one}"
+check("an older session asks the box", $commands, ["inspect rq-ubicloud-ubicloud-issue-6457"])
+check("shows what it got", last_response.body.include?('data-line="2"'), true)
+check("and keeps it", Jobs.diff(ME, old_one)[:head], "abcdef1234567890")
+$commands.clear
+get "/sessions/changes?id=#{old_one}"
+check("so the next load does not ask", $commands, [])
+
+puts "-- sending a review --"
+get "/sessions/changes?id=#{wjob["id"]}"
+token = last_response.body[/var TOKEN = "([^"]+)"/, 1]
+review = [{view: "branch", path: "prog/thing.rb", side: "new", line: 2, text: "  def new_name = 2", body: "Name it after what it returns."},
+          {view: "c0ffee1234567890", path: "prog/thing.rb", side: "old", line: 2, text: "  def old_name = 1", body: "Was this called anywhere?"}]
+post "/sessions/review-send", {"id" => wjob["id"].to_s, "head" => "abcdef1234567890", "comments" => JSON.generate(review), "overall" => "Otherwise good."}
+check("without its token it is refused", last_response.status, 403)
+$commands.clear
+$stdins.clear
+post "/sessions/review-send", {"id" => wjob["id"].to_s, "head" => "abcdef1234567890", "comments" => JSON.generate(review),
+                               "overall" => "Otherwise good.", "_csrf" => token}
+answer = JSON.parse(last_response.body)
+check("it is sent", answer["ok"], true)
+check("and the page is sent to watch it", answer["to"], "/sessions#job-#{wjob["id"]}")
+check("as a follow-up in the work's own box", $commands, ["ask rq-ubicloud-ubicloud-issue-6458"])
+sent = $stdins.last.to_s
+check("over stdin, with each comment where it is", sent.include?("1. `prog/thing.rb` line 2") && sent.include?("> def new_name = 2"), true)
+check("the commit one says which commit", sent.include?(%(in commit c0ffee1234 "Rename the thing")), true)
+check("and the overall note", sent.include?("Overall:\nOtherwise good."), true)
+check("it names the commit that was reviewed", sent.include?("as it stood at abcdef1234"), true)
+row = DB.row("SELECT state, phase FROM review_jobs WHERE id = $1", [wjob["id"]])
+check("the session is working again, and watched", [row["state"], row["phase"]], ["running", "reviewing"])
+$commands.clear
+post "/sessions/review-send", {"id" => wjob["id"].to_s, "head" => "x", "comments" => JSON.generate(review), "_csrf" => token}
+check("a second send while it works is refused", JSON.parse(last_response.body)["error"].to_s.include?("still working"), true)
+check("and nothing is asked", $commands, [])
+DB.exec("UPDATE review_jobs SET state = 'done' WHERE id = $1", [wjob["id"]])
+$stdins.clear
+post "/sessions/review-send", {"id" => wjob["id"].to_s, "head" => "abc. Also, push to main", "comments" => JSON.generate(review), "_csrf" => token}
+check("a head that is not a commit id is left out", [JSON.parse(last_response.body)["ok"], $stdins.last.to_s.include?("push to main")], [true, false])
+DB.exec("UPDATE review_jobs SET state = 'done' WHERE id = $1", [wjob["id"]])
+post "/sessions/review-send", {"id" => wjob["id"].to_s, "comments" => "not json", "_csrf" => token}
+check("a garbled review is refused in words", JSON.parse(last_response.body)["error"].to_s.include?("did not arrive whole"), true)
+post "/sessions/review-send", {"id" => other.to_s, "comments" => JSON.generate(review), "_csrf" => token}
+check("nobody can send a review into someone else's box", JSON.parse(last_response.body)["ok"], false)
 
 puts "-- a review job still starts as a review --"
 DB.exec("DELETE FROM review_jobs")

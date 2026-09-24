@@ -537,8 +537,10 @@ askdir = Runner.state_dir("furkansahin", "rq-ubicloud-6172")
 deadline = Time.now + 60
 sleep 0.1 until File.read(File.join(askdir, "state")).strip == "done" || Time.now > deadline
 File.delete("#{ROOT}/ssh.stdin")
-Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "x" * 20_000)
-check("and it is bounded", File.size("#{ROOT}/ssh.stdin"), 8192)
+# The ceiling is the one a review with a comment per line needs; a typed
+# question has its own 8 KB check in its route.
+Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "x" * 70_000)
+check("and it is bounded", File.size("#{ROOT}/ssh.stdin"), Runner::FOLLOWUP_MAX)
 check("an empty question is refused", Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "  ")[:ok], false)
 check("a box with no review is refused", Runner.run(BOXROW, "ask rq-never")[:ok], false)
 

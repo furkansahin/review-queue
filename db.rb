@@ -321,6 +321,11 @@ module DB
     -- stored rather than fetched over ssh on every page load.
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS summary text;
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS pr_url  text;
+    -- The branch's diff and each commit's patch, as JSON, recorded with the
+    -- summary when a run stops, so the changes page reads it from here rather
+    -- than asking the box on every load. Kept out of the list queries: it
+    -- runs to a megabyte on a big branch.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS diff    text;
     -- A second GitHub token, kept apart from github_token_enc on purpose. That
     -- one is written into the box, where claude runs unattended over issue text
     -- anyone can comment on. This one can push, so it never goes in: the

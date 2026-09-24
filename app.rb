@@ -12,6 +12,8 @@ REVIEWS_ENABLED = !ENV["DATABASE_URL"].to_s.empty?
 if REVIEWS_ENABLED
   require_relative "db"
   require_relative "queue_store"
+  require_relative "diff_view"
+  require_relative "review_note"
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
@@ -192,6 +194,34 @@ class ReviewQueue < Roda
     text = message.to_s.strip.gsub(/\s+/, " ")
     return session.delete(key) if text.empty?
     session[key] = text.length > FLASH_MAX ? "#{text[0, FLASH_MAX - 1]}…" : text
+  end
+
+  # Puts a finished job back to work on a follow-up: a question from the box
+  # under a card, or a review from the changes page. nil when it started,
+  # otherwise why not, in words for the page.
+  def start_followup(job, box, prompt)
+    return "that session is still working; wait for it to finish" unless %w[done failed].include?(job["state"])
+    # Reopen FIRST. reopen re-enters review_jobs_live_idx, so it can lose to
+    # another live job for the same pull request; firing the ask before knowing
+    # that left the box answering into a row that was never reopened, and
+    # raised a 500 on the way out.
+    reopened = begin
+      Jobs.reopen(job["id"], current_login)
+    rescue PG::UniqueViolation
+      nil
+    end
+    return "another session is already running for that pull request; wait for it to finish" if reopened.nil?
+    # The text goes over stdin, so it is never part of a command line.
+    res = Runner.run(box, "ask #{job["box_name"]}", stdin: prompt)
+    if res[:ok]
+      # Only now can the worker trust what it reads about this box.
+      Jobs.started(job["id"])
+      nil
+    else
+      detail = (res[:error] || res[:output]).to_s.strip
+      Jobs.finish(job["id"], "failed", error: "could not ask: #{detail[0, 400]}")
+      "could not ask: #{detail[0, 400]}"
+    end
   end
 
   # The label you watch. Kept against your login when there is a database, so
@@ -584,33 +614,92 @@ class ReviewQueue < Roda
           flash!("sessions_error", "no such review, or no baybox registered")
         elsif !%w[done failed].include?(job["state"])
           flash!("sessions_error", "wait for the review to finish first")
-        else
-          # Reopen FIRST. reopen re-enters review_jobs_live_idx, so it can lose
-          # to another live job for the same pull request; firing the ask before
-          # knowing that left the box answering into a row that was never
-          # reopened, and raised a 500 on the way out.
-          reopened = begin
-            Jobs.reopen(job["id"], current_login)
-          rescue PG::UniqueViolation
-            nil
-          end
-
-          if reopened.nil?
-            flash!("sessions_error",
-                   "another review is already running for that pull request; wait for it to finish")
-          else
-            # The question goes over stdin, so it is never part of a command line.
-            res = Runner.run(box, "ask #{job["box_name"]}", stdin: prompt)
-            # Only now can the worker trust what it reads about this box.
-            Jobs.started(job["id"]) if res[:ok]
-            unless res[:ok]
-              detail = (res[:error] || res[:output]).to_s.strip
-              Jobs.finish(job["id"], "failed", error: "could not ask: #{detail[0, 400]}")
-              flash!("sessions_error", "could not ask: #{detail[0, 400]}")
-            end
-          end
+        elsif (problem = start_followup(job, box, prompt))
+          flash!("sessions_error", problem)
         end
         r.redirect "/sessions"
+      end
+
+      # The changes page: what a work session built, as a diff to read and
+      # comment on, with its commits, its description and the button that
+      # opens the pull request. Work sessions only -- a review's diff is the
+      # pull request's, and GitHub already shows that.
+      r.get "changes" do
+        id = param_id(r.params["id"])
+        job = id && DB.row(<<~SQL, [current_login, id])
+          SELECT #{Jobs::LIST_COLUMNS} FROM review_jobs WHERE login = $1 AND id = $2 AND kind = 'work'
+        SQL
+        next r.redirect("/sessions") unless job
+        diff = Jobs.diff(current_login, job["id"])
+        # A session from before diffs were recorded: ask the box once, and keep
+        # the answer, so the next load does not.
+        if diff.nil? && job["state"] == "done" && job["torn_down_at"].nil? && (box = Jobs.baybox(job))
+          seen = Runner.run(box, "inspect #{job["box_name"]}")
+          if seen[:ok]
+            Jobs.set_summary(job["id"], seen[:output])
+            Jobs.set_diff(job["id"], seen[:diff])
+            diff = seen[:diff] && JSON.parse(JSON.generate(seen[:diff]), symbolize_names: true)
+            job["summary"] = seen[:output]
+          end
+        end
+        baybox = DB.row("SELECT * FROM bayboxes WHERE login = $1", [current_login])
+        view("changes", locals: {job: job, diff: diff, baybox: baybox, login: current_login,
+                                 error: session.delete("sessions_error"),
+                                 notice: session.delete("sessions_notice"),
+                                 csrf_publish: csrf_tag("/sessions/publish"),
+                                 csrf_refresh: csrf_tag("/sessions/changes/refresh"),
+                                 review_token: csrf_token("/sessions/review-send")},
+          layout: false)
+      end
+
+      # Reads the branch from the box again -- after work done in it by hand,
+      # say. Everything else records it when a run stops.
+      r.post "changes/refresh" do
+        check_csrf!
+        id = param_id(r.params["id"])
+        job = id && DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2 AND kind = 'work'",
+                           [current_login, id])
+        box = job && Jobs.baybox(job)
+        if job.nil? || box.nil?
+          flash!("sessions_error", "no such session, or no baybox registered")
+          next r.redirect "/sessions"
+        end
+        seen = Runner.run(box, "inspect #{job["box_name"]}")
+        if seen[:ok]
+          Jobs.set_summary(job["id"], seen[:output])
+          Jobs.set_diff(job["id"], seen[:diff])
+          flash!("sessions_notice", "read the branch again from the box")
+        else
+          flash!("sessions_error", "could not read the branch: #{(seen[:error] || seen[:output]).to_s.strip[0, 300]}")
+        end
+        r.redirect "/sessions/changes?id=#{job["id"]}"
+      end
+
+      # A review from the changes page, sent to the box as one follow-up. The
+      # page posts it with fetch and gets JSON back, so a refused send leaves
+      # the comments where they were instead of navigating away from them.
+      r.post "review-send" do
+        check_csrf!
+        response["Content-Type"] = "application/json"
+        id = param_id(r.params["id"])
+        job = id && DB.row("SELECT * FROM review_jobs WHERE login = $1 AND id = $2 AND kind = 'work'",
+                           [current_login, id])
+        box = job && Jobs.baybox(job)
+        next JSON.generate(ok: false, error: "no such session, or no baybox registered") if job.nil? || box.nil?
+        comments = begin
+          JSON.parse(r.params["comments"].to_s)
+        rescue JSON::ParserError
+          nil
+        end
+        # The commit the page showed, quoted to the box as what was reviewed --
+        # so a commit id, and nothing else.
+        head = r.params["head"].to_s[/\A\h{7,40}\z/].to_s
+        prompt = ReviewNote.compose(Jobs.diff(current_login, job["id"]), comments, r.params["overall"].to_s, head: head)
+        next JSON.generate(ok: false, error: prompt[:error]) if prompt[:error]
+        problem = start_followup(job, box, prompt[:text])
+        next JSON.generate(ok: false, error: problem) if problem
+        flash!("sessions_notice", "sent your review: #{prompt[:count]} comment#{prompt[:count] == 1 ? "" : "s"}")
+        JSON.generate(ok: true, to: "/sessions#job-#{job["id"]}")
       end
 
       # Deletes the record and its review text. Only offered once the box is

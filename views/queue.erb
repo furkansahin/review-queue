@@ -477,7 +477,7 @@
               <a class="mini" href="<%= job["pr_url"] %>" target="_blank" rel="noreferrer"
                  title="the draft pull request opened from your baybox" style="text-decoration: none; color: var(--quick-fg);">your PR ↗</a>
             <% elsif job && job["state"] == "done" %>
-              <a class="mini" href="/sessions" title="finished: look at what it did, then open a pull request"
+              <a class="mini" href="/sessions/changes?id=<%= job["id"] %>" title="finished: review what it did, then open a pull request"
                  style="text-decoration: none; color: var(--quick-fg);">ready to check</a>
             <% elsif has_baybox %>
               <form method="post" action="/work?tab=issues" style="margin: 0;">

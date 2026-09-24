@@ -286,6 +286,7 @@
               <span style="color: var(--muted);">not inspected yet</span>
             <% end %>
             <div style="flex: 1;"></div>
+            <a href="/sessions/changes?id=<%= j["id"] %>">review the changes →</a>
             <% if j["pr_url"] %>
               <a href="<%= j["pr_url"] %>" target="_blank" rel="noreferrer">the pull request ↗</a>
             <% end %>
