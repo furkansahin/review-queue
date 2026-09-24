@@ -121,6 +121,21 @@ check("a stamp in the issue cannot pass for a real one", text.include?("__RQ_EXI
 check("a pull request is refused as an issue",
       begin; Runner.fetch_issue("t", REPO, 6400); false; rescue Runner::Error => e; e.message.include?("pull request"); end, true)
 
+puts "-- the person's skills set the standard --"
+# A work run loaded jeremy-lens before touching a file, then followed this
+# prompt where the two disagreed: one commit where the skill wants the
+# migration first, no coverage run because this said "do not run the whole
+# suite", the repository's log for the commit voice. The prompt now yields.
+work = File.read(Runner::WORK_PROMPT)
+check("the work prompt says the skills win", work.include?("Where a skill and this prompt disagree, the skill wins"), true)
+check("including how commits are split and written", work.match?(/split into commits.*commit messages.*Co-Authored-By/m), true)
+check("and has the branch checked against them before finishing", work.include?("check the branch\n  against it"), true)
+check("it no longer forbids a run the skills ask for", work.include?("Do not run the whole suite:"), false)
+check("the finish says which skills were applied", work.include?("which skills you applied"), true)
+review = File.read(Runner::PROMPT)
+check("the review prompt reviews against the skills too", review.include?("review against it: a change that breaks"), true)
+check("while keeping its verified / read-only marks", review.include?("keep this prompt's\n`verified` / `read-only` marks"), true)
+
 puts "-- the branch is made on the machine, from origin/main --"
 first = Runner.prepare_branch(BOXROW, BRANCH)
 check("it succeeds", first[:ok], true)
