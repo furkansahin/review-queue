@@ -762,6 +762,20 @@ class ReviewQueue < Roda
         end
       end
 
+      # Whether a job is finished as far as this server's record goes. A live
+      # page asks after its stream ends: the stream follows the run's own
+      # state file, which says done a few seconds before the worker writes the
+      # finished review into the database, and the finished card can only be
+      # drawn from the database.
+      r.get "state" do
+        response["Content-Type"] = "application/json"
+        response["Cache-Control"] = "no-store"
+        id = param_id(r.params["id"])
+        job = id && DB.row("SELECT state FROM review_jobs WHERE login = $1 AND id = $2", [current_login, id])
+        next JSON.generate(found: false) unless job
+        JSON.generate(found: true, state: job["state"], done: !%w[queued running].include?(job["state"]))
+      end
+
       r.get "tail" do
         response["Content-Type"] = "application/json"
         response["Cache-Control"] = "no-store"

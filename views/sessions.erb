@@ -110,6 +110,10 @@
   # A torn-down box has no box left to act on, so its card leaves Previous. The
   # review it produced is still worth reading, so it moves rather than vanishes.
   past, gone = rest.partition { |j| j["torn_down_at"].nil? }
+  # Newest finished first. A run that ends while the page is open is moved to
+  # the top of this list in place (see finish() below), so a reload must put
+  # it in the same spot, not wherever its start date falls.
+  past = past.sort_by { |j| -(j["finished_at"] || j["created_at"]).to_f }
 
   # outputs holds only the reviews this page prints; see Jobs.inline_ids. Any
   # other panel is rendered closed with a link, and the script below swaps the
@@ -164,14 +168,15 @@
     </div>
   <% end %>
 
-  <h2>Active<%= live.empty? ? "" : " (#{live.size})" %></h2>
+  <h2 id="active-h">Active<%= live.empty? ? "" : " (#{live.size})" %></h2>
+  <div id="active-list">
   <% if live.empty? %>
     <div class="empty">Nothing running. Press <span class="mono">Review</span> on a pull request,
       or <span class="mono">Work on it</span> on an issue.</div>
   <% end %>
   <% live.each do |j| %>
     <% bg, fg = colours.fetch(j["state"], ["var(--chip-grey-bg)", "var(--chip-grey-fg)"]) %>
-    <div class="card">
+    <div class="card" id="job-<%= j["id"] %>">
       <div class="row1">
         <span class="pill <%= "live" if j["state"] == "running" %>" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
         <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
@@ -203,13 +208,16 @@
     </div>
   <% end %>
 
-  <h2>Previous<%= past.empty? ? "" : " (#{past.size})" %></h2>
+  </div>
+
+  <h2 id="previous-h">Previous<%= past.empty? ? "" : " (#{past.size})" %></h2>
+  <div id="previous-list">
   <% if past.empty? %>
     <div class="empty">Nothing has finished yet.</div>
   <% end %>
   <% past.each do |j| %>
     <% bg, fg = colours.fetch(j["state"], ["var(--chip-grey-bg)", "var(--chip-grey-fg)"]) %>
-    <div class="card">
+    <div class="card" id="job-<%= j["id"] %>">
       <div class="row1">
         <span class="pill" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
         <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
@@ -322,6 +330,7 @@
       </form>
     </div>
   <% end %>
+  </div>
 
   <% unless gone.empty? %>
     <details data-keep="gone-section">
@@ -394,99 +403,175 @@
 // Follows running reviews by asking for bytes after what we already have.
 // Short requests, so no Puma thread is held open for the length of a review.
 // Without scripting the <noscript> refresh above still updates the page.
-// Remember which panels are open, so a refresh does not force them all back
-// open. Keyed per job, so it survives the row moving between sections.
-(function () {
+// What a card needs wired up: for the cards on the page when it loads, and for
+// a finished card put in later without a reload (see finish() below).
+var RQ = (function () {
+  // Remember which panels are open, so a refresh does not force them all back
+  // open. Keyed per job, so it survives the row moving between sections.
   var KEY = "rq-panels";
   var saved;
   try { saved = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { saved = {}; }
 
-  document.querySelectorAll("details[data-keep]").forEach(function (d) {
-    var k = d.dataset.keep;
-    if (Object.prototype.hasOwnProperty.call(saved, k)) { d.open = !!saved[k]; }
-    d.addEventListener("toggle", function () {
-      saved[k] = d.open;
-      try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* full or blocked */ }
+  function keepPanels(root) {
+    root.querySelectorAll("details[data-keep]").forEach(function (d) {
+      var k = d.dataset.keep;
+      if (Object.prototype.hasOwnProperty.call(saved, k)) { d.open = !!saved[k]; }
+      d.addEventListener("toggle", function () {
+        saved[k] = d.open;
+        try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) { /* full or blocked */ }
+      });
     });
-  });
-})();
+  }
 
-// Enter sends a follow-up; Ctrl+Enter starts a new line. So does Shift+Enter,
-// the habit most chat boxes teach, so it never sends by surprise.
-(function () {
-  document.querySelectorAll("form.ask textarea").forEach(function (ta) {
-    ta.addEventListener("keydown", function (e) {
-      if (e.key !== "Enter") return;
-      // An Enter that confirms an input method's composition is not a send.
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.shiftKey) return;                 // the browser adds the line itself
-      e.preventDefault();
-      if (e.ctrlKey) {
-        // Ctrl+Enter adds nothing on its own in a textarea, so add the line
-        // here -- within maxlength, which setRangeText does not enforce.
-        var picked = ta.selectionEnd - ta.selectionStart;
-        if (ta.maxLength > 0 && ta.value.length - picked >= ta.maxLength) return;
-        ta.setRangeText("\n", ta.selectionStart, ta.selectionEnd, "end");
-        return;
+  // Enter sends a follow-up; Ctrl+Enter starts a new line. So does Shift+Enter,
+  // the habit most chat boxes teach, so it never sends by surprise.
+  function enterSends(root) {
+    root.querySelectorAll("form.ask textarea").forEach(function (ta) {
+      ta.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter") return;
+        // An Enter that confirms an input method's composition is not a send.
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.shiftKey) return;                 // the browser adds the line itself
+        e.preventDefault();
+        if (e.ctrlKey) {
+          // Ctrl+Enter adds nothing on its own in a textarea, so add the line
+          // here -- within maxlength, which setRangeText does not enforce.
+          var picked = ta.selectionEnd - ta.selectionStart;
+          if (ta.maxLength > 0 && ta.value.length - picked >= ta.maxLength) return;
+          ta.setRangeText("\n", ta.selectionStart, ta.selectionEnd, "end");
+          return;
+        }
+        var form = ta.form;
+        // Nothing to send is not a send, and a second Enter while the first is
+        // on its way would only earn "wait for the review to finish first".
+        if (!ta.value.trim() || form.dataset.sending) return;
+        form.dataset.sending = "1";
+        if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
+      });
+    });
+  }
+
+  // Older reviews are not printed with the page -- there can be fifty of them
+  // at 200 KB each. Each one keeps its size and a plain link, and the first
+  // time its panel is opened the text is fetched and swapped in. Without
+  // scripting the link is simply followed instead.
+  function lazyReviews(root) {
+    root.querySelectorAll("details[data-review]").forEach(function (d) {
+      var loaded = false;
+      d.addEventListener("toggle", function () {
+        if (!d.open || loaded) return;
+        loaded = true;
+        var pre = d.querySelector("pre");
+        var id = d.dataset.review;
+        pre.textContent = "loading…";
+        fetch("/sessions/review?format=json&id=" + encodeURIComponent(id),
+              { headers: { "Accept": "application/json" } })
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+          .then(function (data) {
+            if (!data.found) { throw "gone"; }
+            pre.textContent = data.review;
+          })
+          .catch(function () {
+            // Put the link back, so the panel is never a dead end.
+            loaded = false;
+            pre.innerHTML = "";
+            var a = document.createElement("a");
+            a.href = "/sessions/review?id=" + encodeURIComponent(id);
+            a.textContent = "could not load it here — open the review";
+            pre.appendChild(a);
+          });
+      });
+      // A panel restored open by keepPanels never fires toggle on its own.
+      if (d.open) { d.dispatchEvent(new Event("toggle")); }
+    });
+  }
+
+  // A log is read from its end: that is where a live run is, and a finished
+  // trace keeps its newest lines for the same reason. Every one starts there,
+  // and one opened later is taken there when it opens -- a closed panel has
+  // no height to scroll while it is shut.
+  function logsAtEnd(root) {
+    root.querySelectorAll("pre.tail").forEach(function (pre) {
+      pre.scrollTop = pre.scrollHeight;
+      var d = pre.closest("details");
+      if (d) {
+        d.addEventListener("toggle", function () { if (d.open) { pre.scrollTop = pre.scrollHeight; } });
       }
-      var form = ta.form;
-      // Nothing to send is not a send, and a second Enter while the first is
-      // on its way would only earn "wait for the review to finish first".
-      if (!ta.value.trim() || form.dataset.sending) return;
-      form.dataset.sending = "1";
-      if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
     });
-  });
+  }
+
+  function wire(root) { keepPanels(root); enterSends(root); lazyReviews(root); logsAtEnd(root); }
+  wire(document);
+  return { wire: wire };
 })();
 
-// Older reviews are not printed with the page -- there can be fifty of them at
-// 200 KB each. Each one keeps its size and a plain link, and the first time its
-// panel is opened the text is fetched and swapped in. Without scripting the
-// link is simply followed instead.
-(function () {
-  document.querySelectorAll("details[data-review]").forEach(function (d) {
-    var loaded = false;
-    d.addEventListener("toggle", function () {
-      if (!d.open || loaded) return;
-      loaded = true;
-      var pre = d.querySelector("pre");
-      var id = d.dataset.review;
-      pre.textContent = "loading…";
-      fetch("/sessions/review?format=json&id=" + encodeURIComponent(id),
-            { headers: { "Accept": "application/json" } })
-        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
-        .then(function (data) {
-          if (!data.found) { throw "gone"; }
-          pre.textContent = data.review;
-        })
-        .catch(function () {
-          // Put the link back, so the panel is never a dead end.
-          loaded = false;
-          pre.innerHTML = "";
-          var a = document.createElement("a");
-          a.href = "/sessions/review?id=" + encodeURIComponent(id);
-          a.textContent = "could not load it here — open the review";
-          pre.appendChild(a);
-        });
-    });
-    // A panel restored open by the block above never fires toggle on its own.
-    if (d.open) { d.dispatchEvent(new Event("toggle")); }
-  });
-})();
+// When a run ends, its card turns into the finished one -- the rendered answer,
+// its stages, the follow-up box -- where it is, without a reload. A reload
+// would throw away whatever is typed in another card's box, and where the page
+// was scrolled; this used to need one by hand.
+//
+// The stream ends on the run's own state file, a few seconds before the worker
+// writes the finished review into the database, and the finished card is drawn
+// from the database. So: wait for that, then fetch the page and take this one
+// card out of it. If anything goes wrong, the card says so and links to the
+// page, which is what reloading by hand gave before.
+function finish(id) {
+  var card = document.getElementById("job-" + id);
+  var status = document.getElementById("s-" + id);
+  if (!card) return;
+  if (status) { status.textContent = "finishing…"; }
+  var tries = 0;
+  function giveUp() {
+    if (!status) return;
+    status.textContent = "";
+    var a = document.createElement("a");
+    a.href = "/sessions";
+    a.textContent = "finished — show the result";
+    status.appendChild(a);
+  }
+  function wait() {
+    fetch("/sessions/state?id=" + encodeURIComponent(id), { headers: { "Accept": "application/json" }, cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (d) {
+        if (!d.found) { throw "gone"; }
+        if (!d.done) {
+          // The worker writes it within a tick; half a minute is well past that.
+          if (++tries < 30) { setTimeout(wait, 1000); return; }
+          throw "slow";
+        }
+        return fetch("/sessions", { headers: { "Accept": "text/html" }, cache: "no-store" })
+          .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+          .then(function (html) { swapIn(id, card, html); });
+      })
+      .catch(giveUp);
+  }
+  wait();
+}
 
-// A log is read from its end: that is where a live run is, and a finished
-// trace keeps its newest lines for the same reason. Every one starts there, and
-// one opened later is taken there when it opens -- a closed panel has no height
-// to scroll while it is shut.
-(function () {
-  document.querySelectorAll("pre.tail").forEach(function (pre) {
-    pre.scrollTop = pre.scrollHeight;
-    var d = pre.closest("details");
-    if (d) {
-      d.addEventListener("toggle", function () { if (d.open) { pre.scrollTop = pre.scrollHeight; } });
-    }
+function swapIn(id, card, html) {
+  var page = new DOMParser().parseFromString(html, "text/html");
+  var fresh = page.getElementById("job-" + id);
+  // Not among the finished ones -- torn down meanwhile, say: the link is the
+  // honest answer.
+  if (!fresh || !fresh.closest("#previous-list")) { throw "not finished on the page"; }
+  var node = document.importNode(fresh, true);
+  var previous = document.getElementById("previous-list");
+  var empty = previous.querySelector(":scope > .empty");
+  if (empty) { empty.remove(); }
+  card.remove();
+  // Newest finished first, which is how the page lists them too.
+  previous.insertBefore(node, previous.firstChild);
+  ["active-h", "previous-h"].forEach(function (h) {
+    var mine = document.getElementById(h), theirs = page.getElementById(h);
+    if (mine && theirs) { mine.textContent = theirs.textContent; }
   });
-})();
+  var active = document.getElementById("active-list");
+  if (!active.querySelector(".card") && !active.querySelector(".empty")) {
+    var none = page.querySelector("#active-list > .empty");
+    if (none) { active.appendChild(document.importNode(none, true)); }
+  }
+  RQ.wire(node);
+}
 
 (function () {
   var POLL = 2000;
@@ -533,6 +618,7 @@
         stopped = true;
         if (status) { status.textContent = d.state; }
         es.close();
+        finish(id);
       });
 
       // EventSource reconnects on its own when the server closes a stream at
@@ -562,10 +648,8 @@
             if (stick) { pre.scrollTop = pre.scrollHeight; }
           }
           if (status) { status.textContent = d.done ? d.state : (d.phase || "live"); }
-          // Do not reload: it throws away scroll position and which panels are
-          // open. The row is finished; the page can move it to Previous on the
-          // next visit.
-          if (d.done) { stopped = true; return; }
+          // Not a reload -- see finish().
+          if (d.done) { stopped = true; finish(id); return; }
           setTimeout(tick, POLL);
         })
         .catch(function () {

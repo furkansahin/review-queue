@@ -205,6 +205,26 @@ check("no forced reload on completion", last_response.body.include?("location.re
 DB.exec("UPDATE review_jobs SET state='running' WHERE id=$1", [job_id])
 get "/sessions"
 check("live panel is keyed", last_response.body.include?(%(data-keep="live-#{job_id}")), true)
+
+# When the run ends, the page swaps this card for the finished one in place
+# (checked in Chrome: the card moves, the follow-up box works, nothing typed
+# elsewhere is lost). What it relies on from the server:
+check("the live card is findable by its job", last_response.body.include?(%(id="job-#{job_id}")), true)
+check("in a list the finished one can leave", last_response.body.include?('<div id="active-list">'), true)
+check("for a list it can join", last_response.body.include?('<div id="previous-list">'), true)
+check("the page hands a finished stream over to the swap", last_response.body.include?("finish(id);"), true)
+get "/sessions/state?id=#{job_id}"
+check("the database's word on a running job", JSON.parse(last_response.body), {"found" => true, "state" => "running", "done" => false})
+DB.exec("UPDATE review_jobs SET state='done' WHERE id=$1", [job_id])
+get "/sessions/state?id=#{job_id}"
+check("and on a finished one", JSON.parse(last_response.body)["done"], true)
+someone_else = DB.row(<<~SQL, ["mohi-kalantari", "ubicloud/ubicloud", 999, "rq-z-999"])["id"]
+  INSERT INTO review_jobs (login, repo, pr_number, box_name, state) VALUES ($1,$2,$3,$4,'running') RETURNING id
+SQL
+get "/sessions/state?id=#{someone_else}"
+check("nothing about someone else's", JSON.parse(last_response.body), {"found" => false})
+DB.exec("DELETE FROM review_jobs WHERE id = $1", [someone_else])
+DB.exec("UPDATE review_jobs SET state='running' WHERE id=$1", [job_id])
 DB.exec("UPDATE review_jobs SET state='done' WHERE id=$1", [job_id])
 
 # --- follow-up ------------------------------------------------------------
