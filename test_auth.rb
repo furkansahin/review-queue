@@ -65,6 +65,9 @@ check(results, "GET /favicon.svg public", last_response.status == 200 &&
                                            last_response.headers["Content-Type"].to_s.start_with?("image/svg+xml"))
 check(results, "the empty drop, for both themes", last_response.body.include?(Logo::WATER) &&
                                                    last_response.body.include?("prefers-color-scheme:dark"))
+get "/logo.png"
+check(results, "and as a PNG, for places that take no SVG", last_response.status == 200 &&
+      last_response.headers["Content-Type"] == "image/png" && last_response.body.b.start_with?("\x89PNG".b))
 
 # 4. /auth/start sets state and redirects to GitHub with scope=
 get "/auth/start"

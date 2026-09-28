@@ -297,6 +297,12 @@ class ReviewQueue < Roda
       Logo::FAVICON
     end
 
+    r.get "logo.png" do
+      response["Content-Type"] = "image/png"
+      response["Cache-Control"] = "public, max-age=86400"
+      Logo::PNG
+    end
+
     r.on "auth" do
       # One-shot nonce tying the callback to the browser that started the flow.
       r.get "start" do

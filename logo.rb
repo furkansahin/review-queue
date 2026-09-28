@@ -19,6 +19,11 @@ module Logo
       %(<path d="#{OUTLINE}" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round"/></svg>)
   end
 
+  # The mark as a 512px PNG on the app's light background, for places that
+  # take no SVG -- a GitHub app's logo, for one. Rendered from the paths
+  # above; render it again if they change.
+  PNG = File.binread(File.expand_path("assets/logo.png", __dir__)).freeze
+
   # The tab icon cannot reach a page's colours, so it carries its own, for a
   # light tab strip and a dark one.
   FAVICON = <<~SVG.freeze
