@@ -96,7 +96,6 @@ check("both merged titles are on the page", ["Older", "Newer"].all? { |t| page.i
 check("the Merged pill is drawn", page.include?(">Merged<"), true)
 check("no Review button on finished work", page.include?("start an adversarial review"), false)
 check("no Snooze button either", page.include?("Hide until there is new activity"), false)
-check("no Next up hero", page.include?("Next up"), false)
 check("the badge shows a plain total", page.include?(">2</span>"), true)
 
 puts "-- the tab is registered --"

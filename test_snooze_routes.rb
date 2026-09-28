@@ -52,6 +52,7 @@ get "/auth/start"; st = last_response.location[/state=([^&]+)/, 1]
 get "/auth/callback?code=c&state=#{st}"
 get "/"
 check("both rows visible before snooze", rows_on_page(last_response.body).sort, ["o/r#1", "o/r#2"])
+check("no Next up card above them", last_response.body.include?("Next up"), false)
 check("All tab count is 2", last_response.body[/All<\/span>\s*<span class="badge">(\d+)\/(\d+)/m, 2], "2")
 # The activity columns, as drawn: who on one line, what and when on the next,
 # and nothing under "never".

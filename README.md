@@ -61,7 +61,7 @@ An approval older than the head commit does not count, because it reviewed code 
 since been replaced.
 
 Drafts are listed but are not work for today. They sort below the active rows and count in
-neither `to go` nor `done`, and one is never chosen as `Next up`.
+neither `to go` nor `done`.
 
 The bar and the `Waiting` column measure time since the last event that wasn't mine, so a
 re-push resets the clock: green below `RQ_WARN_DAYS`, amber at `RQ_WARN_DAYS`, orange at
@@ -83,10 +83,9 @@ for the fetch, so it waits for it.
 
 ## Getting through the queue
 
-The list is ordered reddest-first, so row one is always the next thing to review; it is
-also lifted into a **Next up** card above the table. A progress bar and the tab title
-(`(4) Review queue`) count what is still waiting, and clearing the list earns a proper
-empty state.
+The list is ordered reddest-first, so row one is always the next thing to review. A
+progress bar and the tab title (`(4) Review queue`) count what is still waiting, and
+clearing the list earns a proper empty state.
 
 The **Size** column estimates reading time from the diff churn at `RQ_LINES_PER_MIN`
 lines per minute. **Quick wins** filters to non-draft PRs of `RQ_QUICK_LINES` churn or
@@ -105,7 +104,7 @@ pages read did not reach back a full 7 days, so the number is a floor, not a tot
 
 ## Snooze
 
-`Snooze` on a row, or `Not now` on the Next up card, hides it for `RQ_SNOOZE_DAYS` days.
+`Snooze` on a row hides it for `RQ_SNOOZE_DAYS` days.
 Nothing lists what you hid: a snoozed row stays out of sight until it wakes.
 
 A snoozed row also comes back on its own when there is new activity on it. If a person pushes

@@ -112,7 +112,6 @@ check("and its state", body.include?("PR open"), true)
 check("offers to work on it", body.include?("Work on it"), true)
 check("posting to /work", body.include?('action="/work?tab=issues"'), true)
 check("the badge counts what is still to do", body[%r{My issues</span>\s*<span class="badge">([^<]+)}, 1], "1/2")
-check("no Next up hero here", body.include?("Next up"), false)
 check("no review button here", body.include?(">Review</button>"), false)
 
 ISSUES[:error] = "GitHub GraphQL: broke"
