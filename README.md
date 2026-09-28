@@ -207,6 +207,20 @@ dokku letsencrypt:enable review-queue
 Config lives in `dokku config`. `dokku config:set review-queue RQ_SCOPE=repo:owner/name`
 restarts the app with the new scope; no code change needed.
 
+### A new name
+
+To move the app to a new host name and keep the old one working: point DNS at the host, add
+the name with `dokku domains:add review-queue new.example.com`, and run
+`dokku letsencrypt:enable review-queue` again, which issues one certificate for every name the
+app has. Then change the OAuth App's callback URL to the new name and, straight after:
+
+```sh
+dokku config:set review-queue RQ_BASE_URL=https://new.example.com RQ_REDIRECT_HOSTS=review.example.com
+```
+
+An OAuth App has one callback URL, so signing in can happen on one name only. The old name
+forwards every request to the new one, path and query kept.
+
 ## Watch label
 
 The watched label is **per user**, not global. Set it in the box in the top bar. It shows every

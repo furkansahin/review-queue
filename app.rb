@@ -115,11 +115,22 @@ ALLOWED_LOGINS = env_required("RQ_ALLOWED_LOGINS")
   .split(",").map { |s| s.strip.downcase }.reject(&:empty?).freeze
 abort("RQ_ALLOWED_LOGINS is empty") if ALLOWED_LOGINS.empty?
 
+BASE_URL = env_required("RQ_BASE_URL").chomp("/")
+
 OAUTH = GitHubOAuth.new(
   client_id: env_required("RQ_GITHUB_CLIENT_ID"),
   client_secret: env_required("RQ_GITHUB_CLIENT_SECRET"),
-  redirect_uri: env_required("RQ_BASE_URL").chomp("/") + "/auth/callback"
+  redirect_uri: BASE_URL + "/auth/callback"
 )
+
+# Earlier names of this app, forwarded to RQ_BASE_URL so old links and
+# bookmarks keep working. Only a forward: a GitHub OAuth app has one callback
+# URL, so signing in can happen on one name alone. Named one by one, rather
+# than "any host but the main one", because the health check reaches the app
+# by the container's own address. The main name is never on the list, so a
+# slip in the config cannot loop.
+REDIRECT_HOSTS = (ENV.fetch("RQ_REDIRECT_HOSTS", "").split(",").map { |h| h.strip.downcase }.reject(&:empty?) -
+                  [URI(BASE_URL).host.to_s.downcase]).freeze
 
 class ReviewQueue < Roda
   plugin :render, engine: "erb", views: File.expand_path("views", __dir__), escape: true
@@ -267,6 +278,12 @@ class ReviewQueue < Roda
   def allowed?(login) = ALLOWED_LOGINS.include?(login.to_s.downcase)
 
   route do |r|
+    if REDIRECT_HOSTS.include?(r.host.to_s.downcase)
+      # 308 for anything but a read, so a browser does not turn a form's POST
+      # into a GET on the way.
+      next r.redirect(BASE_URL + r.fullpath, r.get? || r.head? ? 301 : 308)
+    end
+
     r.get "healthz" do
       response["Content-Type"] = "text/plain"
       "ok"

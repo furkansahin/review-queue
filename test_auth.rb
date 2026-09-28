@@ -7,6 +7,7 @@ ENV["RQ_GITHUB_CLIENT_SECRET"]= "csecret"
 ENV["RQ_BASE_URL"]            = "https://review.example.com"
 ENV["RQ_SESSION_SECRET"]      = "a" * 64
 ENV["RQ_INSECURE_COOKIES"]    = "1"   # test client is plain http
+ENV["RQ_REDIRECT_HOSTS"]      = "old.example.com, review.example.com"
 
 require "rack/test"
 require_relative "app"
@@ -34,6 +35,18 @@ end
 # 1. healthz stays public
 get "/healthz"
 check(results, "GET /healthz public", last_response.status == 200 && last_response.body == "ok")
+
+# 1b. an old name forwards to the main one, and nothing else does
+get "/sessions/changes?id=4", {}, "HTTP_HOST" => "old.example.com"
+check(results, "an old name forwards, path and query kept",
+      last_response.status == 301 && last_response.location == "https://review.example.com/sessions/changes?id=4",
+      last_response.location.to_s)
+post "/snooze", {"key" => "o/r#1"}, "HTTP_HOST" => "OLD.example.com:443"
+check(results, "a POST keeps its method on the way", last_response.status == 308, last_response.status.to_s)
+get "/healthz", {}, "HTTP_HOST" => "10.0.0.5:5000"
+check(results, "the health check is not forwarded", last_response.status == 200 && last_response.body == "ok")
+get "/login", {}, "HTTP_HOST" => "review.example.com"
+check(results, "nor is the main name, even when listed", last_response.status == 200)
 
 # 2. root redirects to login when signed out
 get "/"
