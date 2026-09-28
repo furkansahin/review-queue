@@ -277,6 +277,10 @@ class ReviewQueue < Roda
 
   def allowed?(login) = ALLOWED_LOGINS.include?(login.to_s.downcase)
 
+  # How full the drop in the logo is on pages other than the queue: what the
+  # queue last showed, in whole percent; nil, the mark as drawn, before it has.
+  def last_fill = (v = session["fill"]).is_a?(Integer) ? v.clamp(0, 100) : nil
+
   route do |r|
     if REDIRECT_HOSTS.include?(r.host.to_s.downcase)
       # 308 for anything but a read, so a browser does not turn a form's POST
@@ -290,11 +294,13 @@ class ReviewQueue < Roda
     end
 
     # Every page asks for it, the sign-in page too, so it is served before
-    # anything asks who you are.
+    # anything asks who you are. ?fill= is how full the drop is; the page
+    # names it, so the answer depends on the address alone and caches.
     r.get "favicon.svg" do
       response["Content-Type"] = "image/svg+xml"
       response["Cache-Control"] = "public, max-age=86400"
-      Logo::FAVICON
+      pct = Integer(r.params["fill"].to_s, 10, exception: false)
+      Logo.favicon(pct&.clamp(0, 100))
     end
 
     r.get "logo.png" do
@@ -1061,6 +1067,22 @@ class ReviewQueue < Roda
         rows = rows.reject { |row| row[:settled] } if hide
       end
 
+      # The drop in the logo holds what is still waiting on you: the progress
+      # bar's "to go" out of everything, drafts left out, snoozed rows too, over
+      # the whole queue whichever tab is open. Not while GitHub is failing: an
+      # empty list then is not a clear queue, so the last level stands.
+      waiting = awake.count { |row| !row[:settled] && !row[:draft] }
+      counted = waiting + awake.count { |row| row[:settled] }
+      before = last_fill
+      drop = if snap[:error]
+        {pct: before, from: nil, waiting: nil, total: nil}
+      else
+        # Anything waiting shows, however little.
+        pct = waiting.zero? ? 0 : (waiting * 100.0 / counted).round.clamp(1, 100)
+        session["fill"] = pct
+        {pct: pct, from: before, waiting: waiting, total: counted}
+      end
+
       # Counts come from the awake rows only, or the tab badges show work that
       # the user cannot see.
       counts = service.counts(awake)
@@ -1070,7 +1092,7 @@ class ReviewQueue < Roda
       counts[:issues] = {open: issues.count { |i| !i[:settled] }, total: issues.size}
       snap = snap.merge(counts: counts)
 
-      view("queue", locals: {snap: snap, rows: rows, tab: tab, hide: hide, service: service,
+      view("queue", locals: {snap: snap, rows: rows, tab: tab, hide: hide, service: service, drop: drop,
                              login: current_login, csrf: csrf_tag("/refresh"),
                              csrf_logout: csrf_tag("/logout"),
                              csrf_snooze: csrf_tag("/snooze"),

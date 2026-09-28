@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Review · Leeghwater</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="<%= Logo.favicon_href(last_fill) %>" type="image/svg+xml" />
 <style>
 <%= PALETTE %>
   body { margin: 0; background: var(--bg); color: var(--fg);
@@ -26,7 +26,7 @@
 <body>
 <div class="bar">
   <div style="display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">
-    <a href="/" title="Leeghwater: the queue" style="color: inherit;"><%== Logo.svg(20) %></a>Review
+    <a href="/" title="Leeghwater: the queue" style="color: inherit;"><%== Logo.svg(20, fill: last_fill) %></a>Review
   </div>
   <a class="mono" style="font-size: 12px;" href="/sessions">← back to sessions</a>
 </div>

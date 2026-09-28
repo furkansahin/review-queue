@@ -38,7 +38,7 @@
     finish, rather than three minutes on with a queue minutes old. %>
 <meta http-equiv="refresh" content="<%= service.refreshing? ? 10 : 180 %>" />
 <title><%= active.zero? ? "" : "(#{active}) " %>Leeghwater</title>
-<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="<%= Logo.favicon_href(drop && drop[:pct]) %>" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -269,8 +269,14 @@
     # fragment is still there on hover.
     scope_name = service.scope.sub(/\Arepo:/, "")
   %>
+  <%
+    drop_title = if drop.nil? || drop[:total].nil? then "Leeghwater"
+                 elsif drop[:waiting].zero? then "Nothing waiting on you: the drop is empty"
+                 else "#{drop[:waiting]} of #{drop[:total]} still waiting on you"
+                 end
+  %>
   <div style="min-width: 0; display: flex; align-items: center; gap: 9px;">
-    <%== Logo.svg(20) %>
+    <span title="<%= drop_title %>" style="display: flex;"><%== Logo.svg(20, fill: drop && drop[:pct], from: drop && drop[:from]) %></span>
     <div style="min-width: 0;">
       <span style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Leeghwater</span>
       <span class="mono" title="RQ_SCOPE: <%= service.scope %>"

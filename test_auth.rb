@@ -63,7 +63,7 @@ check(results, "with the tab icon", last_response.body.include?('<link rel="icon
 get "/favicon.svg"
 check(results, "GET /favicon.svg public", last_response.status == 200 &&
                                            last_response.headers["Content-Type"].to_s.start_with?("image/svg+xml"))
-check(results, "the empty drop, for both themes", last_response.body.include?(Logo::WATER) &&
+check(results, "the empty drop, for both themes", last_response.body.include?(Logo.water(nil)) &&
                                                    last_response.body.include?("prefers-color-scheme:dark"))
 get "/logo.png"
 check(results, "and as a PNG, for places that take no SVG", last_response.status == 200 &&

@@ -91,7 +91,7 @@ page = tpl.render(Object.new, {
   rows: snap[:merged], tab: :merged, hide: false, service: fresh, login: ME,
   csrf: "", csrf_logout: "", csrf_snooze: "", csrf_settings: "", suggested_label: "",
   reviews_enabled: true, review_error: nil, has_baybox: true, csrf_review: "",
-  jobs_by_key: {}
+  jobs_by_key: {}, drop: nil
 })
 check("both merged titles are on the page", ["Older", "Newer"].all? { |t| page.include?(t) }, true)
 check("the Merged pill is drawn", page.include?(">Merged<"), true)
