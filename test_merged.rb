@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 # Merged tab tests:  bundle exec ruby test_merged.rb
 require_relative "queue_service"
+require_relative "logo"
 
 ME = "furkansahin"
 $fail = 0

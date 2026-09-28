@@ -42,6 +42,16 @@ check(results, "GET / signed out -> /login", last_response.status == 302 && last
 # 3. login page renders
 get "/login"
 check(results, "GET /login renders", last_response.status == 200 && last_response.body.include?("Sign in with GitHub"))
+check(results, "under the app's name and mark", last_response.body.include?("<h1>Leeghwater</h1>") &&
+                                                  last_response.body.include?(Logo::OUTLINE))
+check(results, "with the tab icon", last_response.body.include?('<link rel="icon" href="/favicon.svg"'))
+
+# 3b. the tab icon is public: the sign-in page asks for it too
+get "/favicon.svg"
+check(results, "GET /favicon.svg public", last_response.status == 200 &&
+                                           last_response.headers["Content-Type"].to_s.start_with?("image/svg+xml"))
+check(results, "the empty drop, for both themes", last_response.body.include?(Logo::WATER) &&
+                                                   last_response.body.include?("prefers-color-scheme:dark"))
 
 # 4. /auth/start sets state and redirects to GitHub with scope=
 get "/auth/start"
@@ -64,7 +74,8 @@ state = last_response.location[/state=([^&]+)/, 1]
 get "/auth/callback?code=goodcode&state=#{state}"
 check(results, "valid callback signs in", last_response.status == 302 && last_response.location == "/")
 get "/"
-check(results, "GET / now renders queue", last_response.status == 200 && last_response.body.include?("Review queue"))
+check(results, "GET / now renders queue", last_response.status == 200 && last_response.body.include?(">Leeghwater</span>"))
+check(results, "with the mark in its header", last_response.body.include?(Logo::OUTLINE))
 
 # 8. allowlist denies a non-listed login
 STUB[:login] = "randomstranger"

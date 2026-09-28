@@ -1,6 +1,9 @@
 <img width="1494" height="829" alt="image" src="https://github.com/user-attachments/assets/44f2bc6c-f893-4859-b7fe-d57243aa3f52" />
 
-# pr-review-queue
+# Leeghwater
+
+Named after Jan Adriaanszoon Leeghwater, who drained the Beemster with windmills in 1612. The
+name means "empty water", which is what this does to a review queue.
 
 Dashboard for the pull requests that actually need you: review requests, mentions, your own PRs,
 and a watched label you choose yourself. Sign in with GitHub and the queue is fetched with your own account,
@@ -84,7 +87,7 @@ for the fetch, so it waits for it.
 ## Getting through the queue
 
 The list is ordered reddest-first, so row one is always the next thing to review. A
-progress bar and the tab title (`(4) Review queue`) count what is still waiting, and
+progress bar and the tab title (`(4) Leeghwater`) count what is still waiting, and
 clearing the list earns a proper empty state.
 
 The **Size** column estimates reading time from the diff churn at `RQ_LINES_PER_MIN`

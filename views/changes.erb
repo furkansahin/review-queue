@@ -31,7 +31,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Changes · #<%= job["pr_number"] %> · Review queue</title>
+<title>Changes · #<%= job["pr_number"] %> · Leeghwater</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -122,7 +123,9 @@
 </head>
 <body>
 <div class="bar">
-  <div style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">Changes</div>
+  <div style="display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">
+    <a href="/" title="Leeghwater: the queue" style="color: inherit;"><%== Logo.svg(20) %></a>Changes
+  </div>
   <a class="mono" style="font-size: 12px;" href="/sessions">← sessions</a>
   <a class="mono" style="font-size: 12px;" href="/?tab=issues">issues</a>
   <div style="flex: 1;"></div>

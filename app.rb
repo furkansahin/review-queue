@@ -4,6 +4,7 @@ require "securerandom"
 require_relative "queue_service"
 require_relative "auth"
 require_relative "snooze"
+require_relative "logo"
 
 # The review feature needs Postgres and a baybox. Without DATABASE_URL the
 # dashboard still runs and simply does not offer it, so this branch can deploy
@@ -269,6 +270,14 @@ class ReviewQueue < Roda
     r.get "healthz" do
       response["Content-Type"] = "text/plain"
       "ok"
+    end
+
+    # Every page asks for it, the sign-in page too, so it is served before
+    # anything asks who you are.
+    r.get "favicon.svg" do
+      response["Content-Type"] = "image/svg+xml"
+      response["Cache-Control"] = "public, max-age=86400"
+      Logo::FAVICON
     end
 
     r.on "auth" do
