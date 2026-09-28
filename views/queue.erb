@@ -15,15 +15,16 @@
   icols = "4px 110px minmax(0, 1.25fr) minmax(0, 1fr) 84px 128px"
   merged_tab = tab == :merged
   issues_tab = tab == :issues
+  # Drafts are listed, but they are not the queue: no progress, and no
+  # celebration when there are none.
+  drafts_tab = tab == :drafts
   pr_tone = {"open" => ["var(--state-them-bg)", "var(--state-them-fg)"],
              "draft" => ["var(--chip-grey-bg)", "var(--chip-grey-fg)"],
              "merged" => ["var(--state-merged-bg)", "var(--state-merged-fg)"],
              "closed" => ["var(--state-done-bg)", "var(--state-done-fg)"]}
 
-  # A draft is listed but is not work for today, so it counts in neither
-  # "to go" nor "done".
-  drafts = rows.count { |r| !r[:settled] && r[:draft] }
-  done = rows.count { |r| r[:settled] }
+  # The queue tabs hold no drafts; on Drafts, nothing is "to go".
+  done = rows.count { |r| r[:settled] && !r[:draft] }
   active = rows.count { |r| !r[:settled] && !r[:draft] }
   total = active + done
   pct = total.zero? ? 100 : (done * 100.0 / total).round
@@ -351,8 +352,8 @@
       bar. It rides in the space the tab row already had spare. The counts it
       dropped are on the bar itself, for when the number matters more than the
       shape. %>
-  <% unless merged_tab || issues_tab || (total.zero? && drafts.zero?) %>
-    <div class="progress" title="<%= active %> to go<%= done.positive? ? ", #{done} done" : "" %><%= drafts.positive? ? ", #{drafts} draft" : "" %>">
+  <% unless merged_tab || issues_tab || drafts_tab || total.zero? %>
+    <div class="progress" title="<%= active %> to go<%= done.positive? ? ", #{done} done" : "" %>">
       <span class="mono" style="font-size: 11px; color: var(--muted-2); white-space: nowrap;"><%= active %> to go</span>
       <div class="track"><div class="fill" style="width: <%= pct %>%;"></div></div>
       <span class="mono" style="font-size: 11px; color: var(--muted-2);"><%= pct %>%</span>
@@ -574,11 +575,17 @@
     </div>
   <% end %>
 
-  <% if active.zero? %>
+  <% if drafts_tab %>
+    <% if rows.empty? %>
+      <div style="padding: 72px 24px; text-align: center; color: var(--muted-2); font-size: 13px;">
+        No draft pull requests.
+      </div>
+    <% end %>
+  <% elsif active.zero? %>
     <div class="win">
       <div class="win-mark">🎉</div>
       <div class="win-head">
-        <%= total.zero? && drafts.zero? ? "Nothing in the queue." : "Queue clear — nothing waiting on you." %>
+        <%= total.zero? ? "Nothing in the queue." : "Queue clear — nothing waiting on you." %>
       </div>
       <div class="mono" style="margin-top: 8px; font-size: 12px; color: var(--muted-2);">
         <% if reviews_7d && reviews_7d[:count].positive? %>

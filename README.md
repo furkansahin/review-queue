@@ -63,8 +63,8 @@ reviewer leaves `requested_reviewers` when they submit, and returns when you re-
 An approval older than the head commit does not count, because it reviewed code that has
 since been replaced.
 
-Drafts are listed but are not work for today. They sort below the active rows and count in
-neither `to go` nor `done`.
+Drafts are not in the queue. They are listed under **Drafts** and in no other tab, and no count
+but that tab's own includes them: not the badges, not `to go`, not the tab title, not the logo.
 
 The bar and the `Waiting` column measure time since the last event that wasn't mine, so a
 re-push resets the clock: green below `RQ_WARN_DAYS`, amber at `RQ_WARN_DAYS`, orange at

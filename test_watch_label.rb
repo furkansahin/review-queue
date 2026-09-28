@@ -24,9 +24,9 @@ check("whitespace-only label is empty",
 
 # --- Review requested and Mentions me fill All, with no tab of their own ------
 tabs = ->(svc) { svc.tabs.map { |t| t[:key] } }
-check("the tabs", tabs.(QueueService.new(token: "t", scope: "s", label: "")), [:all, :mine, :quick, :merged, :issues])
+check("the tabs", tabs.(QueueService.new(token: "t", scope: "s", label: "")), [:all, :mine, :quick, :drafts, :merged, :issues])
 check("a watched label keeps its tab", tabs.(QueueService.new(token: "t", scope: "s", label: "clickhouse")),
-      [:all, :label, :mine, :quick, :merged, :issues])
+      [:all, :label, :mine, :quick, :drafts, :merged, :issues])
 
 # --- the label is interpolated into a quoted search term --------------------
 check("quotes and backslashes are removed",

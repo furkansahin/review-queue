@@ -1063,7 +1063,12 @@ class ReviewQueue < Roda
       elsif tab == :issues
         rows = hide ? issues.reject { |row| row[:settled] } : issues
       else
-        rows = awake.select { |row| tab == :all || row[:buckets].include?(tab) }
+        # Drafts are not the queue: listed under Drafts, and in no other tab.
+        rows = if tab == :drafts
+          awake.select { |row| row[:draft] }
+        else
+          awake.select { |row| !row[:draft] && (tab == :all || row[:buckets].include?(tab)) }
+        end
         rows = rows.reject { |row| row[:settled] } if hide
       end
 
@@ -1072,7 +1077,7 @@ class ReviewQueue < Roda
       # the whole queue whichever tab is open. Not while GitHub is failing: an
       # empty list then is not a clear queue, so the last level stands.
       waiting = awake.count { |row| !row[:settled] && !row[:draft] }
-      counted = waiting + awake.count { |row| row[:settled] }
+      counted = waiting + awake.count { |row| row[:settled] && !row[:draft] }
       before = last_fill
       drop = if snap[:error]
         {pct: before, from: nil, waiting: nil, total: nil}

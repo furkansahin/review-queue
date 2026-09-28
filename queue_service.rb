@@ -221,13 +221,15 @@ class QueueService
 
   # Review requested and Mentions me are still searched -- they are most of
   # All -- but have no tab of their own. Snoozed rows have none either: they
-  # stay out of sight until they wake.
+  # stay out of sight until they wake. Drafts are not the queue: they are
+  # listed under Drafts and nowhere else.
   NO_TAB = %i[review mention].freeze
 
   def tabs
     [{key: :all, label: "All"}] +
       buckets.reject { |b| NO_TAB.include?(b[:key]) }.map { |b| {key: b[:key], label: b[:label]} } +
-      [{key: :quick, label: "Quick wins"}, {key: :merged, label: "Merged"}, {key: :issues, label: "My issues"}]
+      [{key: :quick, label: "Quick wins"}, {key: :drafts, label: "Drafts"},
+       {key: :merged, label: "Merged"}, {key: :issues, label: "My issues"}]
   end
 
   # Open issues assigned to you. Like Merged, a list of its own rather than a
@@ -325,12 +327,15 @@ class QueueService
   # can say so and come back for the new one.
   def refreshing? = @state.synchronize { @refreshing }
 
+  # The badges. Every queue tab counts without drafts, which Drafts counts.
   def counts(rows)
-    out = {all: {open: rows.count { |r| !r[:settled] }, total: rows.size}}
+    drafts, queue = rows.partition { |r| r[:draft] }
+    out = {all: {open: queue.count { |r| !r[:settled] }, total: queue.size}}
     (buckets.map { |b| b[:key] } + [:quick]).each do |key|
-      in_b = rows.select { |r| r[:buckets].include?(key) }
+      in_b = queue.select { |r| r[:buckets].include?(key) }
       out[key] = {open: in_b.count { |r| !r[:settled] }, total: in_b.size}
     end
+    out[:drafts] = {open: drafts.count { |r| !r[:settled] }, total: drafts.size}
     out
   end
 
@@ -864,7 +869,7 @@ class QueueService
       # age_colors ramps red. Settled rows ("Reviewed" / "Waiting on them") are
       # grey regardless of age, so they sink below everything. A row with no
       # timeline events reads as fresh, so it sorts last within its group.
-      # 0 act on it, 1 draft (listed, but not today), 2 settled.
+      # 0 act on it, 1 draft (on the Drafts tab, not the queue), 2 settled.
       sort_key: [settled ? 2 : (pr[:draft] ? 1 : 0), wait_from ? wait_from.to_i : Float::INFINITY],
       draft: pr[:draft],
       url: pr[:url], title: pr[:title], ref: "#{pr[:repo]} ##{pr[:number]}", author: pr[:author],
