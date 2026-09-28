@@ -30,11 +30,6 @@ class Snooze
     self
   end
 
-  def remove(key)
-    @store.delete(key)
-    self
-  end
-
   # Removes entries that are no longer necessary. Call this one time for each
   # request, before you use hidden?. An entry goes away when:
   #   - the snooze time is complete, or

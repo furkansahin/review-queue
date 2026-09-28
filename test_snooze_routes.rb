@@ -84,29 +84,17 @@ check("snooze redirects", last_response.status, 302)
 get "/"
 check("snoozed row is hidden", rows_on_page(last_response.body), ["o/r#2"])
 check("All tab count drops to 1", last_response.body[/All<\/span>\s*<span class="badge">(\d+)\/(\d+)/m, 2], "1")
-check("Snoozed tab count is 1", last_response.body[/Snoozed<\/span>\s*<span class="badge">(\d+)\/(\d+)/m, 2], "1")
-
-# the snoozed tab shows it
+# Snoozed rows are not listed anywhere: they come back when they wake.
+check("there is no Snoozed tab", last_response.body.include?(">Snoozed<"), false)
 get "/?tab=snoozed"
-check("snoozed tab lists the row", rows_on_page(last_response.body), ["o/r#1"])
-check("snoozed tab offers Wake", last_response.body.include?(">Wake<"), true)
-check("no hero card on snoozed tab", last_response.body.include?("Next up"), false)
+check("an old link to it lands on All", last_response.body.match?(%r{class="tab on" href="/\?tab=all"}), true)
+check("where the snoozed row stays hidden", rows_on_page(last_response.body), ["o/r#2"])
 
 # new activity wakes it, with no user action
 LAST["o/r#1"] = Time.now + 1
 get "/"
 check("new activity wakes the row", rows_on_page(last_response.body).sort, ["o/r#1", "o/r#2"])
 LAST["o/r#1"] = NOW - 5 * 86_400
-
-# unsnooze by hand
-get "/"
-tok = csrf_for(last_response.body, "/snooze")
-post "/snooze", {"key" => "o/r#2", csrf_name(last_response.body) => tok}
-get "/?tab=snoozed"
-tok = csrf_for(last_response.body, "/unsnooze")
-post "/unsnooze", {"key" => "o/r#2", csrf_name(last_response.body) => tok}
-get "/"
-check("wake button restores the row", rows_on_page(last_response.body).include?("o/r#2"), true)
 
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")

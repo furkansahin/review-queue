@@ -980,13 +980,6 @@ class ReviewQueue < Roda
       r.redirect "/?#{r.query_string}"
     end
 
-    r.post "unsnooze" do
-      check_csrf!
-      key = r.params["key"].to_s
-      session["snoozed"] = Snooze.new(session["snoozed"]).remove(key).to_h unless key.empty?
-      r.redirect "/?#{r.query_string}"
-    end
-
     r.root do
       snap = service.snapshot
 
@@ -1017,7 +1010,6 @@ class ReviewQueue < Roda
       session["snoozed"] = snooze.to_h
 
       awake = snap[:rows].reject { |row| snooze.hidden?(row) }
-      asleep = snap[:rows].select { |row| snooze.hidden?(row) }
 
       # Merged rows are a separate list on the snapshot, not part of the queue,
       # so snoozing and Hide settled do not apply to them. They are all settled
@@ -1028,9 +1020,7 @@ class ReviewQueue < Roda
       # which the tab says, rather than claiming nothing is assigned to you.
       issues = snap[:issues] || []
 
-      if tab == :snoozed
-        rows = asleep
-      elsif tab == :merged
+      if tab == :merged
         rows = merged
       elsif tab == :issues
         rows = hide ? issues.reject { |row| row[:settled] } : issues
@@ -1042,7 +1032,6 @@ class ReviewQueue < Roda
       # Counts come from the awake rows only, or the tab badges show work that
       # the user cannot see.
       counts = service.counts(awake)
-      counts[:snoozed] = {open: asleep.count { |row| !row[:settled] }, total: asleep.size}
       # No open count: nothing merged is open, and "0/10" reads as a warning.
       counts[:merged] = {open: nil, total: merged.size}
       # "Open" is what is still yours to start: no pull request on it yet.
@@ -1062,9 +1051,7 @@ class ReviewQueue < Roda
                              csrf_review: csrf_tag("/review"),
                              jobs_by_key: (REVIEWS_ENABLED ? Jobs.by_key(current_login) : {}),
                              csrf_work: csrf_tag("/work"),
-                             work_by_key: (REVIEWS_ENABLED && tab == :issues ? Jobs.by_key(current_login, "work") : {}),
-                             csrf_unsnooze: csrf_tag("/unsnooze"),
-                             snooze: snooze},
+                             work_by_key: (REVIEWS_ENABLED && tab == :issues ? Jobs.by_key(current_login, "work") : {})},
         layout: false)
     end
   end

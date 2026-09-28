@@ -105,8 +105,8 @@ pages read did not reach back a full 7 days, so the number is a floor, not a tot
 
 ## Snooze
 
-`Snooze` on a row hides it for `RQ_SNOOZE_DAYS` days. The **Snoozed** tab shows what you hid,
-and `Wake` puts a row back immediately.
+`Snooze` on a row, or `Not now` on the Next up card, hides it for `RQ_SNOOZE_DAYS` days.
+Nothing lists what you hid: a snoozed row stays out of sight until it wakes.
 
 A snoozed row also comes back on its own when there is new activity on it. If a person pushes
 a commit or writes a comment after you snooze the pull request, the row returns to the queue

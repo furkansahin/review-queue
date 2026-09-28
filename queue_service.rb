@@ -219,11 +219,15 @@ class QueueService
     list
   end
 
+  # Review requested and Mentions me are still searched -- they are most of
+  # All -- but have no tab of their own. Snoozed rows have none either: they
+  # stay out of sight until they wake.
+  NO_TAB = %i[review mention].freeze
+
   def tabs
     [{key: :all, label: "All"}] +
-      buckets.map { |b| {key: b[:key], label: b[:label]} } +
-      [{key: :quick, label: "Quick wins"}, {key: :snoozed, label: "Snoozed"},
-       {key: :merged, label: "Merged"}, {key: :issues, label: "My issues"}]
+      buckets.reject { |b| NO_TAB.include?(b[:key]) }.map { |b| {key: b[:key], label: b[:label]} } +
+      [{key: :quick, label: "Quick wins"}, {key: :merged, label: "Merged"}, {key: :issues, label: "My issues"}]
   end
 
   # Open issues assigned to you. Like Merged, a list of its own rather than a

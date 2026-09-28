@@ -50,10 +50,6 @@ check("rows fetched after it drop it", s.count, 0)
 s = Snooze.new({}).add("o/r#1", 60, now: NOW - 3600).sweep([], now: NOW, fetched_at: NOW - 86_400)
 check("an expired one goes regardless", s.count, 0)
 
-# --- unsnooze ----------------------------------------------------------------
-s = Snooze.new({}).add("o/r#1", 7 * 86_400, now: NOW).remove("o/r#1")
-check("remove drops the entry", s.count, 0)
-
 # --- the cookie cannot grow without a limit ---------------------------------
 s = Snooze.new({})
 40.times { |i| s.add("o/r##{i}", (i + 1) * 86_400, now: NOW) }

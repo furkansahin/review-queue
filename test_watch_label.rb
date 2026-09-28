@@ -22,6 +22,12 @@ check("nil label behaves as empty", keys.(QueueService.new(token: "t", scope: "s
 check("whitespace-only label is empty",
       keys.(QueueService.new(token: "t", scope: "s", label: "   ")), [:review, :mention, :mine])
 
+# --- Review requested and Mentions me fill All, with no tab of their own ------
+tabs = ->(svc) { svc.tabs.map { |t| t[:key] } }
+check("the tabs", tabs.(QueueService.new(token: "t", scope: "s", label: "")), [:all, :mine, :quick, :merged, :issues])
+check("a watched label keeps its tab", tabs.(QueueService.new(token: "t", scope: "s", label: "clickhouse")),
+      [:all, :label, :mine, :quick, :merged, :issues])
+
 # --- the label is interpolated into a quoted search term --------------------
 check("quotes and backslashes are removed",
       QueueService.clean_label(%q{x" OR is:merged \\}), "x OR is:merged")

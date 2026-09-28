@@ -13,7 +13,6 @@
   # Issues: state, the issue, the pull requests on it, when it last moved, and
   # the one action.
   icols = "4px 110px minmax(0, 1.25fr) minmax(0, 1fr) 84px 128px"
-  snoozing = tab == :snoozed
   merged_tab = tab == :merged
   issues_tab = tab == :issues
   pr_tone = {"open" => ["var(--state-them-bg)", "var(--state-them-fg)"],
@@ -29,7 +28,7 @@
   total = active + done
   pct = total.zero? ? 100 : (done * 100.0 / total).round
   # Next up is the queue's question. Merged work has no next.
-  hero = (snoozing || merged_tab || issues_tab) ? nil : rows.find { |r| !r[:settled] && !r[:draft] }
+  hero = (merged_tab || issues_tab) ? nil : rows.find { |r| !r[:settled] && !r[:draft] }
   reviews_7d = snap[:reviews_7d]
 %>
 <!DOCTYPE html>
@@ -605,29 +604,16 @@
             <% end %>
           <% end %>
         <% end %>
-        <% if snoozing %>
-          <form method="post" action="/unsnooze?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
-            <%== csrf_unsnooze %>
-            <input type="hidden" name="key" value="<%= r[:key] %>" />
-            <button class="mini" type="submit" title="Put this back in the queue now">Wake</button>
-          </form>
-        <% else %>
-          <form method="post" action="/snooze?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
-            <%== csrf_snooze %>
-            <input type="hidden" name="key" value="<%= r[:key] %>" />
-            <button class="mini" type="submit" title="Hide until there is new activity">Snooze</button>
-          </form>
-        <% end %>
+        <form method="post" action="/snooze?tab=<%= tab %><%= hide ? "&hide=1" : "" %>" style="margin: 0;">
+          <%== csrf_snooze %>
+          <input type="hidden" name="key" value="<%= r[:key] %>" />
+          <button class="mini" type="submit" title="Hide until there is new activity">Snooze</button>
+        </form>
       </div>
     </div>
   <% end %>
 
-  <% if snoozing && rows.empty? %>
-    <div style="padding: 72px 24px; text-align: center; color: var(--muted-2); font-size: 13px;">
-      Nothing is snoozed. Use <span class="mono">Snooze</span> on a row to hide it until
-      there is new activity on it.
-    </div>
-  <% elsif active.zero? && !snoozing %>
+  <% if active.zero? %>
     <div class="win">
       <div class="win-mark">🎉</div>
       <div class="win-head">

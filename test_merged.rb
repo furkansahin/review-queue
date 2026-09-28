@@ -90,7 +90,7 @@ page = tpl.render(Object.new, {
   rows: snap[:merged], tab: :merged, hide: false, service: fresh, login: ME,
   csrf: "", csrf_logout: "", csrf_snooze: "", csrf_settings: "", suggested_label: "",
   reviews_enabled: true, review_error: nil, has_baybox: true, csrf_review: "",
-  jobs_by_key: {}, csrf_unsnooze: "", snooze: nil
+  jobs_by_key: {}
 })
 check("both merged titles are on the page", ["Older", "Newer"].all? { |t| page.include?(t) }, true)
 check("the Merged pill is drawn", page.include?(">Merged<"), true)
@@ -102,7 +102,7 @@ check("the badge shows a plain total", page.include?(">2</span>"), true)
 puts "-- the tab is registered --"
 keys = svc.tabs.map { |t| t[:key] }
 check("merged is a tab", keys.include?(:merged), true)
-check("it comes after the queue tabs", keys.index(:merged) > keys.index(:snoozed), true)
+check("it comes after the queue tabs", keys.index(:merged) > keys.index(:quick), true)
 check("the label reads Merged", svc.tabs.find { |t| t[:key] == :merged }[:label], "Merged")
 
 puts "-- a failed lookup degrades, it does not raise --"
