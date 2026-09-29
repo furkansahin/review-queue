@@ -143,7 +143,7 @@ check("but is not saved", QueueStore.for(ME).load(failing.send(:saved_key))[:err
 puts "-- the key carries the shape of a row --"
 # If this list changes, rows saved before the change would be restored with
 # fields missing or wrong. Bump QueueService::SAVED_FORMAT, then update it.
-ROW_FIELDS = %i[age age_color age_text_color author buckets changed chips churn ci ci_color draft key last_at
+ROW_FIELDS = %i[age age_color age_text_color author buckets changed chips churn ci ci_color draft fork key last_at
                 last_what last_who my_action my_action_kind number quick read_est ready ref repo repo_full row_bg
                 settled size_sub sort_key state state_bg state_color title url].freeze
 now = Time.now

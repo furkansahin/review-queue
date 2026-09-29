@@ -150,14 +150,16 @@
             %><% end %><%
           %><% end %>,
           with <span class="mono">Contents: Read and write</span> and
-          <span class="mono">Pull requests: Read and write</span>.
+          <span class="mono">Pull requests: Read and write</span>, and
+          <span class="mono">Actions: Read and write</span> to run E2E on a fork's pull request.
           <%# Workflows left off is a guard GitHub enforces for us: it refuses a
               push that changes .github/workflows without it. %>
           Leave <span class="mono">Workflows</span> off, and GitHub will refuse any push that changes CI.
           <br />
           It never goes into the box. Claude commits there with the read-only token above; this one is
           used from the dashboard, and only when you press <span class="mono">Open draft PR</span> after
-          reading what the branch holds.
+          reading what the branch holds, or <span class="mono">Push and run E2E</span> after reading a fork's
+          pull request.
         </div>
       </div>
 

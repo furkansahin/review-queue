@@ -538,9 +538,16 @@
           <div class="sub" title="<%= r[:my_action_kind] %>"><%= r[:my_action_kind] %></div>
         <% end %>
       </div>
-      <div class="cell" style="display: flex; align-items: center; gap: 6px;">
-        <span class="dot" style="background: <%= r[:ci_color] %>;"></span>
-        <span class="mono" style="font-size: 11px;"><%= r[:ci] %></span>
+      <div class="cell">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span class="dot" style="background: <%= r[:ci_color] %>;"></span>
+          <span class="mono" style="font-size: 11px;"><%= r[:ci] %></span>
+        </div>
+        <%# E2E cannot be dispatched on a fork's branch; this gives it one here first. %>
+        <% if reviews_enabled && r[:fork] %>
+          <div class="sub"><a href="<%= "/e2e?repo=#{r[:repo_full]}&pr=#{r[:number]}" %>"
+               title="from <%= r[:fork] %>: push it as a branch here and run E2E on it">run e2e</a></div>
+        <% end %>
       </div>
       <div class="mono" style="text-align: right; font-weight: 500; font-size: 13px; color: <%= r[:age_text_color] %>;"><%= r[:age] %></div>
       <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">

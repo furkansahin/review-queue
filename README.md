@@ -105,6 +105,19 @@ sufficient because `RQ_SCOPE` must be public repositories anyway — if you ever
 repository, this counter stops seeing those reviews. A `+` after the number (`18+`) means the
 pages read did not reach back a full 7 days, so the number is a floor, not a total.
 
+## E2E on a fork's pull request
+
+E2E CI is dispatched on a branch of the repository, and a fork's branch is not one, so
+`/run-e2e` cannot run it on a fork's pull request. Such a row has **run e2e** under its CI. It
+opens a page saying which commit becomes which branch: `<you>/<their login>-<their branch>`,
+where `<you>` is the first word of your GitHub name. Confirmed, it creates that branch at
+exactly their head commit and dispatches E2E CI on it. It is the same commit, not a copy, so a
+passing run counts for the pull request's Require E2E.
+
+Their code runs with the E2E secrets, so it pushes only the commit that page showed, and
+refuses if they have pushed since. It also refuses a pull request that changes `.github/`. It
+needs a write token with Contents and Actions: Read and write.
+
 ## Snooze
 
 `Snooze` on a row hides it for `RQ_SNOOZE_DAYS` days.

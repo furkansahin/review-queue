@@ -5,6 +5,7 @@ require_relative "queue_service"
 require_relative "auth"
 require_relative "snooze"
 require_relative "logo"
+require_relative "e2e"
 
 # The review feature needs Postgres and a baybox. Without DATABASE_URL the
 # dashboard still runs and simply does not offer it, so this branch can deploy
@@ -158,7 +159,7 @@ class ReviewQueue < Roda
     if defined?(Roda::RodaPlugins::Sessions::CookieTooLarge) &&
        e.is_a?(Roda::RodaPlugins::Sessions::CookieTooLarge)
       session.delete("snoozed")
-      %w[sessions_error sessions_notice baybox_error baybox_notice review_error]
+      %w[sessions_error sessions_notice baybox_error baybox_notice review_error e2e_notice e2e_error e2e_run]
         .each { |k| session.delete(k) }
       # The handler gets the exception, not the routing block's r.
       response.status = 302
@@ -1001,6 +1002,58 @@ class ReviewQueue < Roda
         end
       end
       r.redirect "/?#{r.query_string}"
+    end
+
+    # E2E on a pull request from a fork: a page saying which commit becomes
+    # which branch, then, confirmed, the push and the dispatch. Both read the
+    # pull request from GitHub afresh. The form carries only the commit the
+    # page showed, so a push to the fork in between is refused, not run.
+    r.is "e2e" do
+      next r.redirect "/" unless REVIEWS_ENABLED
+      repo = r.params["repo"].to_s.downcase
+      number = param_id(r.params["pr"])
+      next r.redirect "/" unless number && repo.match?(%r{\A[\w.-]+/[\w.-]+\z}) && service.names_repo?(repo)
+      box = DB.row("SELECT github_write_token_enc FROM bayboxes WHERE login = $1", [current_login])
+      write = box && !box["github_write_token_enc"].to_s.empty? ? box["github_write_token_enc"] : nil
+      here = "/e2e?repo=#{repo}&pr=#{number}"
+
+      r.get do
+        reader = GitHubClient.new(current_token)
+        plan = begin
+          E2E.plan(reader, repo, number, E2E.prefix(reader.get("/user")))
+        rescue StandardError => e
+          {error: "could not read ##{number} from GitHub: #{e.message[0, 200]}"}
+        end
+        view("e2e", locals: {plan: plan, repo: repo, number: number, can_write: !write.nil?,
+                             notice: session.delete("e2e_notice"), error: session.delete("e2e_error"),
+                             run_url: session.delete("e2e_run"), csrf: csrf_tag("/e2e")},
+          layout: false)
+      end
+
+      r.post do
+        check_csrf!
+        res = if write.nil?
+          {error: "add a write token on the Baybox page first"}
+        else
+          begin
+            # The branch is named for who is signed in; the push and the
+            # dispatch go with their write token, which this read-only
+            # session token cannot do.
+            gh = GitHubClient.new(Crypto.decrypt(write))
+            plan = E2E.plan(gh, repo, number, E2E.prefix(GitHubClient.new(current_token).get("/user")))
+            E2E.run(gh, plan, sha: r.params["sha"].to_s, providers: r.params["providers"])
+          rescue StandardError => e
+            {error: "could not reach GitHub: #{e.message[0, 200]}"}
+          end
+        end
+        if res[:ok]
+          flash!("e2e_notice", "pushed #{res[:branch]} and started E2E on it")
+          session["e2e_run"] = res[:run_url]
+        else
+          flash!("e2e_error", res[:error])
+        end
+        r.redirect here
+      end
     end
 
     r.post "settings" do

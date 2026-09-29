@@ -45,6 +45,10 @@ class GitHubClient
   # pull request is looked up by branch before one is created.
   def post(path, body) = call(:post, path, body)
 
+  # Moving a branch: the E2E mirror of a fork's pull request, when the fork
+  # has pushed since.
+  def patch(path, body) = call(:patch, path, body)
+
   # One round trip for what REST would need one call per issue for. Raises on
   # a GraphQL error as well as an HTTP one: GitHub answers a bad query with 200
   # and an errors array, which would otherwise read as "no results".
@@ -86,7 +90,8 @@ class GitHubClient
       raise Unauthorized, message if res.code == "401"
       raise message
     end
-    JSON.parse(res.body)
+    # Some writes answer 204 and nothing else.
+    res.body.to_s.strip.empty? ? {} : JSON.parse(res.body)
   end
 
   def request(uri, verb = :get, body = nil)
@@ -109,7 +114,7 @@ class GitHubClient
   end
 
   def build_request(uri, verb = :get, body = nil)
-    req = verb == :post ? Net::HTTP::Post.new(uri) : Net::HTTP::Get.new(uri)
+    req = {post: Net::HTTP::Post, patch: Net::HTTP::Patch}.fetch(verb, Net::HTTP::Get).new(uri)
     if body
       req["Content-Type"] = "application/json"
       req.body = JSON.generate(body)
@@ -169,7 +174,7 @@ class QueueService
   # of this file is not restored into a newer one. Bump it whenever a row
   # gains, loses or renames a field: an old row would draw blank cells, and
   # the snooze sweep reads rows by field.
-  SAVED_FORMAT = 1
+  SAVED_FORMAT = 2
 
   def initialize(token:, scope:, label:, warn_days: 2, hot_days: 4, stale_days: 7, ttl: 300, concurrency: 10, per_page: 50,
     quick_lines: 50, lines_per_min: 20, merged_limit: 10, saved: nil)
@@ -206,6 +211,14 @@ class QueueService
   end
 
   def watch_label? = !@label.empty?
+
+  # Whether RQ_SCOPE names a repository, itself or by its owner. Stricter than
+  # the reading check, where a scope naming nothing means everything: this is
+  # for the one place the app writes to a repository with someone's token.
+  def names_repo?(full_name)
+    name = full_name.to_s.downcase
+    scope_repos.include?(name) || scope_owners.include?(name.split("/").first)
+  end
 
   def buckets
     list = [
@@ -650,6 +663,10 @@ class QueueService
       node_id: item["node_id"], approved_at: approved_at,
       url: item["html_url"], title: item["title"], number: n, repo: repo, owner: owner,
       author: pull.dig("user", "login") || "?", draft: !!pull["draft"], ci: ci,
+      # "owner:branch" for a pull request from a fork, which E2E cannot be
+      # dispatched on until it has a branch here; nil for one from a branch
+      # of the repository itself.
+      fork: (pull.dig("head", "label") unless pull.dig("head", "repo", "full_name").to_s.casecmp?("#{owner}/#{repo}")),
       labels: (item["labels"] || []).map { |l| l["name"] },
       buckets: entry[:buckets],
       mine: pull.dig("user", "login") == login,
@@ -871,7 +888,7 @@ class QueueService
       # timeline events reads as fresh, so it sorts last within its group.
       # 0 act on it, 1 draft (on the Drafts tab, not the queue), 2 settled.
       sort_key: [settled ? 2 : (pr[:draft] ? 1 : 0), wait_from ? wait_from.to_i : Float::INFINITY],
-      draft: pr[:draft],
+      draft: pr[:draft], fork: pr[:fork],
       url: pr[:url], title: pr[:title], ref: "#{pr[:repo]} ##{pr[:number]}", author: pr[:author],
       state: state, state_bg: state_bg, state_color: state_color, chips: chips, ready: ready,
       row_bg: settled ? "var(--row-settled)" : "var(--row)",

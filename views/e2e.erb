@@ -1,0 +1,131 @@
+<%
+  ok = plan && !plan[:error]
+  here = "/e2e?repo=#{repo}&pr=#{number}"
+  held = !ok || plan[:touches_ci] || !can_write
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>E2E · #<%= number %> · Leeghwater</title>
+<link rel="icon" href="<%= Logo.favicon_href(last_fill) %>" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+<%= PALETTE %>
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
+         border-bottom: 1px solid var(--border); }
+  .wrap { max-width: 860px; padding: 22px 24px 80px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+  .facts { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 16px; margin: 16px 0 0; }
+  .facts dt { font: 500 11px 'IBM Plex Mono', monospace; color: var(--muted-2); padding-top: 2px; }
+  .facts dd { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+  .quiet { color: var(--muted); }
+  .caution { margin-top: 18px; padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5;
+             background: var(--chip-grey-bg); color: var(--fg); }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5;
+            font-family: 'IBM Plex Mono', monospace; }
+  .banner.err { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg); }
+  .banner.ok { background: var(--chip-blue-bg); border: 1px solid var(--chip-blue-br); color: var(--chip-blue-fg); }
+  .providers { display: flex; gap: 16px; }
+  .providers label { display: flex; align-items: center; gap: 6px; font: 13px 'IBM Plex Mono', monospace; }
+  .go { font: 600 13px 'IBM Plex Sans', sans-serif; padding: 9px 16px; border-radius: 7px; border: 0;
+        background: var(--accent); color: var(--surface); cursor: pointer; }
+  .go:hover { filter: brightness(1.08); }
+  .go:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+  .actions { display: flex; align-items: center; gap: 14px; margin-top: 18px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div style="display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">
+    <a href="/" title="Leeghwater: the queue" style="color: inherit;"><%== Logo.svg(20, fill: last_fill) %></a>E2E on a fork
+  </div>
+  <a class="mono" style="font-size: 12px;" href="/">← back to the queue</a>
+</div>
+
+<div class="wrap">
+  <% if notice %>
+    <div class="banner ok"><%= notice %><% if run_url %> · <a href="<%= run_url %>" target="_blank" rel="noreferrer">follow the run ↗</a><% end %></div>
+  <% end %>
+  <% if error %>
+    <div class="banner err"><%= error %></div>
+  <% end %>
+
+  <div class="card">
+    <% if !ok %>
+      <div class="banner err" style="margin: 0;"><%= plan ? plan[:error] : "nothing to show" %></div>
+    <% else %>
+      <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+        <span style="font-weight: 600; font-size: 15px;"><%= plan[:title] %></span>
+        <a class="mono" style="font-size: 12px;" href="<%= plan[:url] %>" target="_blank" rel="noreferrer"><%= repo %> #<%= number %> ↗</a>
+      </div>
+      <dl class="facts">
+        <dt>their commit</dt>
+        <dd>
+          <a class="mono" href="https://github.com/<%= repo %>/commit/<%= plan[:sha] %>" target="_blank" rel="noreferrer"><%= plan[:sha][0, 10] %></a>
+          <span class="quiet">on</span> <span class="mono"><%= plan[:owner] %>:<%= plan[:ref] %></span>
+          <span class="quiet">— the pull request's head as this page loaded</span>
+        </dd>
+        <dt>becomes</dt>
+        <dd>
+          <span class="mono"><%= plan[:branch] %></span> <span class="quiet">in</span> <span class="mono"><%= repo %></span>
+          <span class="quiet">—
+            <% if plan[:existing].nil? %>a new branch
+            <% elsif plan[:existing] == plan[:sha] %>there already, at this commit
+            <% else %>moves it from <span class="mono"><%= plan[:existing][0, 10] %></span>, where it is now
+            <% end %>
+          </span>
+        </dd>
+        <dt>files</dt>
+        <dd>
+          <% if plan[:files] %><%= plan[:files] %> changed<% else %>too many to list<% end %>
+          · <a href="<%= plan[:url] %>/files" target="_blank" rel="noreferrer">read them ↗</a>
+        </dd>
+        <dt>runs</dt>
+        <dd><span class="mono">E2E CI</span> <span class="quiet">(<%= E2E::WORKFLOW %>), every test case, on the providers ticked below</span></dd>
+      </dl>
+
+      <% if plan[:touches_ci] %>
+        <div class="banner err" style="margin: 16px 0 0;">
+          <% if plan[:files].nil? %>
+            Too many files to check that it leaves .github/ alone, so it is not pushed from here.
+          <% else %>
+            It changes .github/, which decides what E2E runs and with which secrets, so it is not pushed from here.
+          <% end %>
+        </div>
+      <% end %>
+
+      <div class="caution">
+        Their code runs with the E2E secrets. Read the pull request first: this pushes exactly the commit above,
+        and if they push again after this page loaded, it is refused rather than run.
+      </div>
+
+      <form method="post" action="<%= here %>" style="margin: 0;">
+        <%== csrf %>
+        <input type="hidden" name="sha" value="<%= plan[:sha] %>" />
+        <div class="actions">
+          <div class="providers" role="group" aria-label="providers">
+            <% E2E::PROVIDERS.each do |p| %>
+              <label><input type="checkbox" name="providers[]" value="<%= p %>" checked="checked" /><%= p %></label>
+            <% end %>
+          </div>
+          <div style="flex: 1;"></div>
+          <% unless can_write %>
+            <span class="mono" style="font-size: 11px; color: var(--err-fg);">needs a write token, on the <a href="/baybox">Baybox page</a></span>
+          <% end %>
+          <button class="go" type="submit" <%= "disabled" if held %>>Push and run E2E</button>
+        </div>
+      </form>
+    <% end %>
+  </div>
+</div>
+</body>
+</html>
