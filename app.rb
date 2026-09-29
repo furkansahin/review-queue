@@ -267,6 +267,15 @@ class ReviewQueue < Roda
     label
   end
 
+  # The first part of the branches made for you for E2E: yours if you set
+  # one, else the first word of your GitHub name -- asked of GitHub only then.
+  def branch_prefix
+    saved = DB.row("SELECT branch_prefix FROM user_settings WHERE login = $1", [current_login])
+    saved = saved && saved["branch_prefix"].to_s
+    return saved unless saved.nil? || saved.empty?
+    E2E.prefix(GitHubClient.new(current_token).get("/user"))
+  end
+
   # The part of a run's output that says what happened.
   def last_line(detail)
     detail.to_s.lines.map(&:strip).reject(&:empty?).last.to_s
@@ -1008,7 +1017,7 @@ class ReviewQueue < Roda
     # which branch, then, confirmed, the push and the dispatch. Both read the
     # pull request from GitHub afresh. The form carries only the commit the
     # page showed, so a push to the fork in between is refused, not run.
-    r.is "e2e" do
+    r.on "e2e" do
       next r.redirect "/" unless REVIEWS_ENABLED
       repo = r.params["repo"].to_s.downcase
       number = param_id(r.params["pr"])
@@ -1017,43 +1026,63 @@ class ReviewQueue < Roda
       write = box && !box["github_write_token_enc"].to_s.empty? ? box["github_write_token_enc"] : nil
       here = "/e2e?repo=#{repo}&pr=#{number}"
 
-      r.get do
-        reader = GitHubClient.new(current_token)
-        plan = begin
-          E2E.plan(reader, repo, number, E2E.prefix(reader.get("/user")))
-        rescue StandardError => e
-          {error: "could not read ##{number} from GitHub: #{e.message[0, 200]}"}
-        end
-        view("e2e", locals: {plan: plan, repo: repo, number: number, can_write: !write.nil?,
-                             notice: session.delete("e2e_notice"), error: session.delete("e2e_error"),
-                             run_url: session.delete("e2e_run"), csrf: csrf_tag("/e2e")},
-          layout: false)
-      end
-
-      r.post do
+      # Your own prefix, remembered: a first name is not always the one a
+      # person's branches carry. Empty goes back to it.
+      r.post "prefix" do
         check_csrf!
-        res = if write.nil?
-          {error: "add a write token on the Baybox page first"}
+        given = r.params["prefix"].to_s.strip
+        prefix = given.empty? ? "" : E2E.clean_prefix(given)
+        if prefix.nil?
+          flash!("e2e_error", "#{given[0, 40]} cannot start a branch name: use letters, digits and . _ -")
         else
-          begin
-            # The branch is named for who is signed in; the push and the
-            # dispatch go with their write token, which this read-only
-            # session token cannot do.
-            gh = GitHubClient.new(Crypto.decrypt(write))
-            plan = E2E.plan(gh, repo, number, E2E.prefix(GitHubClient.new(current_token).get("/user")))
-            E2E.run(gh, plan, sha: r.params["sha"].to_s, providers: r.params["providers"])
-          rescue StandardError => e
-            {error: "could not reach GitHub: #{e.message[0, 200]}"}
-          end
-        end
-        if res[:ok]
-          flash!("e2e_notice", "pushed #{res[:branch]} and started E2E on it")
-          session["e2e_run"] = res[:run_url]
-        else
-          flash!("e2e_error", res[:error])
+          DB.exec(<<~SQL, [current_login, prefix])
+            INSERT INTO user_settings (login, branch_prefix) VALUES ($1, $2)
+            ON CONFLICT (login) DO UPDATE SET branch_prefix = EXCLUDED.branch_prefix, updated_at = now()
+          SQL
         end
         r.redirect here
       end
+
+      r.is do
+        r.get do
+          reader = GitHubClient.new(current_token)
+          plan = begin
+            E2E.plan(reader, repo, number, branch_prefix)
+          rescue StandardError => e
+            {error: "could not read ##{number} from GitHub: #{e.message[0, 200]}"}
+          end
+          view("e2e", locals: {plan: plan, repo: repo, number: number, can_write: !write.nil?,
+                               notice: session.delete("e2e_notice"), error: session.delete("e2e_error"),
+                               run_url: session.delete("e2e_run"), csrf: csrf_tag("/e2e"),
+                               csrf_prefix: csrf_tag("/e2e/prefix")},
+            layout: false)
+        end
+  
+        r.post do
+          check_csrf!
+          res = if write.nil?
+            {error: "add a write token on the Baybox page first"}
+          else
+            begin
+              # The branch is named for who is signed in; the push and the
+              # dispatch go with their write token, which this read-only
+              # session token cannot do.
+              gh = GitHubClient.new(Crypto.decrypt(write))
+              plan = E2E.plan(gh, repo, number, branch_prefix)
+              E2E.run(gh, plan, sha: r.params["sha"].to_s, providers: r.params["providers"])
+            rescue StandardError => e
+              {error: "could not reach GitHub: #{e.message[0, 200]}"}
+            end
+          end
+          if res[:ok]
+            flash!("e2e_notice", "pushed #{res[:branch]} and started E2E on it")
+            session["e2e_run"] = res[:run_url]
+          else
+            flash!("e2e_error", res[:error])
+          end
+          r.redirect here
+        end
+        end
     end
 
     r.post "settings" do

@@ -64,8 +64,13 @@ def github(pull: pull(), files: [{"filename" => "prog/vm.rb"}], ref: nil)
   $routes[[:get, REF]] = {"object" => {"sha" => ref}} if ref
 end
 def writes = $calls.reject { |c| c[1] == :get }
+# The token of the form posting to path -- the page has two forms.
+def form_token(body, path) = body[%r{action="#{Regexp.escape(path)}[?"][^>]*>\s*<input type="hidden" name="_csrf" value="([^"]+)"}m, 1]
 
 puts "-- whose branch --"
+check("a prefix of your own, as a branch wants it", E2E.clean_prefix(" Ben "), "ben")
+check("not one git would refuse", [E2E.clean_prefix("-x"), E2E.clean_prefix("a..b"), E2E.clean_prefix("x.lock"),
+                                   E2E.clean_prefix("two words"), E2E.clean_prefix("a/b")], [nil] * 5)
 check("the first word of your name", E2E.prefix({"name" => "Furkan Sahin", "login" => "furkansahin"}), "furkan")
 check("in plain letters", E2E.prefix({"name" => "Şükrü Öz", "login" => "sukru"}), "sukru")
 check("or your login, with no name", E2E.prefix({"name" => nil, "login" => "Mohi-Kalantari"}), "mohi-kalantari")
@@ -156,6 +161,7 @@ QueueService.class_eval do
 end
 DB.setup!
 DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
+DB.exec("DELETE FROM user_settings")
 $routes = {}
 get "/auth/start"; st = last_response.location[/state=([^&]+)/, 1]
 get "/auth/callback?code=c&state=#{st}"
@@ -180,7 +186,7 @@ check("and wrote nothing", writes, [])
 get "/e2e?repo=someone/else&pr=6532"
 check("a repository outside the scope is not offered", last_response.status, 302)
 
-token = page[/name="_csrf" value="([^"]+)"/, 1]
+token = form_token(page, "/e2e")
 post "/e2e?repo=#{REPO}&pr=6532", {"sha" => SHA, "providers" => %w[metal aws gcp]}
 check("without its token it is refused", last_response.status, 403)
 check("before anything is written", writes, [])
@@ -197,6 +203,28 @@ post "/e2e?repo=#{REPO}&pr=6532", {"sha" => SHA, "providers" => %w[metal], "_csr
 check("pushed to since the page loaded: nothing written", writes, [])
 get "/e2e?repo=#{REPO}&pr=6532"
 check("and it says why", last_response.body.include?("has moved on since you looked"), true)
+
+puts "-- a prefix of your own --"
+github
+get "/e2e?repo=#{REPO}&pr=6532"
+ptok = form_token(last_response.body, "/e2e/prefix")
+post "/e2e/prefix?repo=#{REPO}&pr=6532", {"prefix" => "Ben", "_csrf" => ptok}
+get "/e2e?repo=#{REPO}&pr=6532"
+check("the page names the branch with it", last_response.body.include?("ben/enescakir-fix/dns"), true)
+token = form_token(last_response.body, "/e2e")
+$routes[[:post, "/repos/#{REPO}/git/refs"]] = {"ref" => "refs/heads/ben/enescakir-fix/dns"}
+$calls.clear
+post "/e2e?repo=#{REPO}&pr=6532", {"sha" => SHA, "providers" => %w[metal], "_csrf" => token}
+check("and the branch is made with it", writes.first[3], {ref: "refs/heads/ben/enescakir-fix/dns", sha: SHA})
+check("GitHub is not asked for a name it will not use", $calls.none? { |c| c[2] == "/user" }, true)
+post "/e2e/prefix?repo=#{REPO}&pr=6532", {"prefix" => "not a prefix", "_csrf" => ptok}
+get "/e2e?repo=#{REPO}&pr=6532"
+check("one that cannot start a branch is refused", last_response.body.include?("cannot start a branch name"), true)
+check("and the one before stands", last_response.body.include?("ben/enescakir-fix/dns"), true)
+post "/e2e/prefix?repo=#{REPO}&pr=6532", {"prefix" => "", "_csrf" => ptok}
+get "/e2e?repo=#{REPO}&pr=6532"
+check("empty goes back to your first name", last_response.body.include?(BRANCH), true)
+check("which is only yours", DB.row("SELECT count(*) AS n FROM user_settings WHERE branch_prefix <> ''")["n"].to_i, 0)
 
 DB.exec("UPDATE bayboxes SET github_write_token_enc = NULL")
 github

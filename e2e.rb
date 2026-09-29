@@ -28,6 +28,16 @@ module E2E
     first.empty? ? user["login"].to_s.downcase.gsub(/[^a-z0-9-]/, "") : first
   end
 
+  # A prefix someone sets for themselves, as one part of a branch name: lower
+  # case, letters, digits and . _ -, starting with a letter or digit, and
+  # nothing git refuses in a ref. nil when it is not one.
+  def clean_prefix(value)
+    v = value.to_s.strip.downcase
+    return nil unless v.match?(/\A[a-z0-9][a-z0-9._-]{0,38}\z/)
+    return nil if v.include?("..") || v.end_with?(".", ".lock")
+    v
+  end
+
   def branch_for(prefix, owner, ref) = "#{prefix}/#{owner.to_s.downcase}-#{ref}"
 
   # A branch in an API path: each part escaped, the slashes between kept.

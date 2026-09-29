@@ -342,6 +342,9 @@ module DB
     -- did nothing there, and the first request to read the label failed with
     -- "column watch_label does not exist".
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS watch_label text NOT NULL DEFAULT '';
+    -- The first part of the branches the app makes for you, for E2E on a
+    -- fork's pull request. Empty: the first word of your GitHub name.
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS branch_prefix text NOT NULL DEFAULT '';
 
     -- The last queue each person saw, so a restart shows it at once instead of
     -- making them wait out a rebuild. One row per person, replaced by every

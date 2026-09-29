@@ -110,7 +110,8 @@ pages read did not reach back a full 7 days, so the number is a floor, not a tot
 E2E CI is dispatched on a branch of the repository, and a fork's branch is not one, so
 `/run-e2e` cannot run it on a fork's pull request. Such a row has **run e2e** under its CI. It
 opens a page saying which commit becomes which branch: `<you>/<their login>-<their branch>`,
-where `<you>` is the first word of your GitHub name. Confirmed, it creates that branch at
+where `<you>` is the first word of your GitHub name, or a prefix you set on that page, kept
+for next time. Confirmed, it creates that branch at
 exactly their head commit and dispatches E2E CI on it. It is the same commit, not a copy, so a
 passing run counts for the pull request's Require E2E.
 

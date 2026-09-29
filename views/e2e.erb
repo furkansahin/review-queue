@@ -41,6 +41,13 @@
   .go:hover { filter: brightness(1.08); }
   .go:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
   .actions { display: flex; align-items: center; gap: 14px; margin-top: 18px; flex-wrap: wrap; }
+  details.prefix { margin-top: 4px; font-size: 12px; }
+  details.prefix summary { cursor: pointer; color: var(--link); font-family: 'IBM Plex Mono', monospace; width: fit-content; }
+  details.prefix form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  details.prefix input { font: 13px 'IBM Plex Mono', monospace; padding: 5px 8px; border-radius: 6px; width: 140px;
+                         border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); }
+  .mini { font: 500 12px 'IBM Plex Sans', sans-serif; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+          border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); }
 </style>
 </head>
 <body>
@@ -83,6 +90,16 @@
             <% else %>moves it from <span class="mono"><%= plan[:existing][0, 10] %></span>, where it is now
             <% end %>
           </span>
+          <details class="prefix">
+            <summary>change your prefix</summary>
+            <form method="post" action="<%= "/e2e/prefix?repo=#{repo}&pr=#{number}" %>">
+              <%== csrf_prefix %>
+              <input type="text" name="prefix" value="<%= plan[:branch].split("/").first %>" maxlength="39"
+                     aria-label="branch prefix" spellcheck="false" autocomplete="off" />
+              <button class="mini" type="submit">Save</button>
+              <span class="quiet">yours alone, kept for next time; empty is the first word of your GitHub name</span>
+            </form>
+          </details>
         </dd>
         <dt>files</dt>
         <dd>
