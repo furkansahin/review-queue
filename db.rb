@@ -321,6 +321,8 @@ module DB
     -- stored rather than fetched over ssh on every page load.
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS summary text;
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS pr_url  text;
+    -- The pending review drafted on GitHub from a review job, once there is one.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS draft_url text;
     -- The branch's diff and each commit's patch, as JSON, recorded with the
     -- summary when a run stops, so the changes page reads it from here rather
     -- than asking the box on every load. Kept out of the list queries: it

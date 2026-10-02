@@ -16,6 +16,7 @@ if REVIEWS_ENABLED
   require_relative "queue_store"
   require_relative "diff_view"
   require_relative "review_note"
+  require_relative "github_draft"
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
@@ -159,7 +160,8 @@ class ReviewQueue < Roda
     if defined?(Roda::RodaPlugins::Sessions::CookieTooLarge) &&
        e.is_a?(Roda::RodaPlugins::Sessions::CookieTooLarge)
       session.delete("snoozed")
-      %w[sessions_error sessions_notice baybox_error baybox_notice review_error e2e_notice e2e_error e2e_run]
+      %w[sessions_error sessions_notice baybox_error baybox_notice review_error e2e_notice e2e_error e2e_run
+         draft_notice draft_error]
         .each { |k| session.delete(k) }
       # The handler gets the exception, not the routing block's r.
       response.status = 302
@@ -672,6 +674,89 @@ class ReviewQueue < Roda
       # comment on, with its commits, its description and the button that
       # opens the pull request. Work sessions only -- a review's diff is the
       # pull request's, and GitHub already shows that.
+      # A review as a pending review on GitHub: a page showing what would be
+      # drafted, read from the box's .rq/review.json, then -- confirmed -- the
+      # draft, made with the write token. Pending: only you see it, until you
+      # submit it on GitHub.
+      r.on "draft" do
+        id = param_id(r.params["id"])
+        job = id && DB.row(<<~SQL, [current_login, id])
+          SELECT #{Jobs::LIST_COLUMNS} FROM review_jobs WHERE login = $1 AND id = $2 AND kind = 'review'
+        SQL
+        next r.redirect("/sessions") unless job
+        box = Jobs.baybox(job)
+        here = "/sessions/draft?id=#{job["id"]}"
+        write = box && !box["github_write_token_enc"].to_s.empty? ? box["github_write_token_enc"] : nil
+        # Fresh each time: a follow-up may have rewritten the file.
+        read_plan = lambda do |gh|
+          next {error: "this review's box has been torn down, and its findings with it"} if job["torn_down_at"]
+          next {error: "no baybox registered"} unless box
+          seen = Runner.run(box, "findings #{job["box_name"]}")
+          next {error: "could not read the box: #{(seen[:error] || seen[:output]).to_s.strip[0, 200]}"} unless seen[:ok]
+          next {missing: true} if seen[:json].nil?
+          GitHubDraft.plan(gh, job["repo"], job["pr_number"].to_i, commit: seen[:head],
+                           findings: GitHubDraft.parse(seen[:json]), login: current_login)
+        rescue StandardError => e
+          {error: "could not read ##{job["pr_number"]} from GitHub: #{e.message[0, 200]}"}
+        end
+
+        # A review from before the box wrote its findings down: ask it to.
+        r.post "ask" do
+          check_csrf!
+          prompt = "Write your findings from this review to .rq/review.json, as section 6 of your " \
+                   "instructions in .rq/review-prompt.md describes. Read that section first. Reply with " \
+                   "how many comments you wrote."
+          problem = box ? start_followup(job, box, prompt) : "no baybox registered"
+          flash!(problem ? "draft_error" : "draft_notice",
+                 problem || "asked the box to write its findings down; this page is ready when it has answered")
+          r.redirect here
+        end
+
+        r.is do
+          r.get do
+            plan = %w[done failed].include?(job["state"]) ? read_plan.call(GitHubClient.new(current_token)) : {running: true}
+            view("draft", locals: {job: job, plan: plan, can_write: !write.nil?,
+                                   notice: session.delete("draft_notice"), error: session.delete("draft_error"),
+                                   csrf: csrf_tag("/sessions/draft"), csrf_ask: csrf_tag("/sessions/draft/ask"),
+                                   login: current_login},
+              layout: false)
+          end
+
+          r.post do
+            check_csrf!
+            res = if write.nil?
+              {error: "add a write token on the Baybox page first"}
+            elsif !%w[done failed].include?(job["state"])
+              {error: "the box is still working on this review; wait for it to finish"}
+            else
+              begin
+                gh = GitHubClient.new(Crypto.decrypt(write))
+                plan = read_plan.call(gh)
+                if plan[:missing]
+                  {error: "the box has not written its findings down yet"}
+                elsif plan[:commit] && plan[:commit] != r.params["commit"].to_s
+                  {error: "the box's findings changed since this page loaded; look again first"}
+                elsif (plan[:placed] || []).size + (plan[:loose] || []).size != r.params["count"].to_i
+                  {error: "the box's findings changed since this page loaded; look again first"}
+                else
+                  GitHubDraft.create(gh, plan)
+                end
+              rescue StandardError => e
+                {error: "could not reach GitHub: #{e.message[0, 200]}"}
+              end
+            end
+            if res[:ok]
+              DB.exec("UPDATE review_jobs SET draft_url = $1 WHERE id = $2 AND login = $3", [res[:url], job["id"], current_login])
+              flash!("draft_notice", "drafted a pending review with #{res[:comments]} comment#{res[:comments] == 1 ? "" : "s"}: " \
+                                     "read it on GitHub, then submit it there")
+            else
+              flash!("draft_error", res[:error])
+            end
+            r.redirect here
+          end
+        end
+      end
+
       r.get "changes" do
         id = param_id(r.params["id"])
         job = id && DB.row(<<~SQL, [current_login, id])

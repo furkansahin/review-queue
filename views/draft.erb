@@ -1,0 +1,139 @@
+<%
+  ready = plan[:placed] && !plan[:error]
+  total = ready ? plan[:placed].size + plan[:loose].size : 0
+%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Draft · #<%= job["pr_number"] %> · Leeghwater</title>
+<link rel="icon" href="<%= Logo.favicon_href(last_fill) %>" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+<%= PALETTE %>
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: 'IBM Plex Sans', Helvetica, sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-hover); text-decoration: underline; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .bar { display: flex; align-items: center; gap: 16px; padding: 14px 24px; background: var(--surface);
+         border-bottom: 1px solid var(--border); }
+  .wrap { max-width: 900px; padding: 22px 24px 80px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 14px; }
+  .quiet { color: var(--muted); }
+  h2 { font: 600 12px 'IBM Plex Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase;
+       color: var(--muted-2); margin: 22px 0 10px; }
+  .summary { white-space: pre-wrap; line-height: 1.55; }
+  .comment { border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+  .where { font: 12px 'IBM Plex Mono', monospace; color: var(--muted); margin-bottom: 6px; overflow-wrap: anywhere; }
+  .body { white-space: pre-wrap; line-height: 1.5; font-size: 13px; overflow-wrap: anywhere; }
+  .banner { padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5;
+            font-family: 'IBM Plex Mono', monospace; }
+  .banner.err { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg); }
+  .banner.ok { background: var(--chip-blue-bg); border: 1px solid var(--chip-blue-br); color: var(--chip-blue-fg); }
+  .caution { padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.5;
+             background: var(--chip-grey-bg); color: var(--fg); }
+  .go { font: 600 13px 'IBM Plex Sans', sans-serif; padding: 9px 16px; border-radius: 7px; border: 0;
+        background: var(--accent); color: var(--surface); cursor: pointer; }
+  .go:hover { filter: brightness(1.08); }
+  .go:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+  .actions { display: flex; align-items: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div style="display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">
+    <a href="/" title="Leeghwater: the queue" style="color: inherit;"><%== Logo.svg(20, fill: last_fill) %></a>Draft on GitHub
+  </div>
+  <a class="mono" style="font-size: 12px;" href="/sessions#job-<%= job["id"] %>">← back to the review</a>
+</div>
+
+<div class="wrap">
+  <% if notice %>
+    <div class="banner ok"><%= notice %><% if job["draft_url"] %> · <a href="<%= job["draft_url"] %>" target="_blank" rel="noreferrer">open it ↗</a><% end %></div>
+  <% end %>
+  <% if error %><div class="banner err"><%= error %></div><% end %>
+
+  <div class="card">
+    <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+      <span style="font-weight: 600; font-size: 15px;"><%= ready ? plan[:title] : "#{job["repo"]} ##{job["pr_number"]}" %></span>
+      <a class="mono" style="font-size: 12px;" href="https://github.com/<%= job["repo"] %>/pull/<%= job["pr_number"] %>" target="_blank" rel="noreferrer"><%= job["repo"] %> #<%= job["pr_number"] %> ↗</a>
+      <% if job["draft_url"] && !notice %>
+        <a class="mono" style="font-size: 12px;" href="<%= job["draft_url"] %>" target="_blank" rel="noreferrer">drafted before ↗</a>
+      <% end %>
+    </div>
+
+    <% if plan[:running] %>
+      <p class="quiet">The box is still working on this review. Come back when it has finished.</p>
+    <% elsif plan[:missing] %>
+      <p>This review was written before the box wrote its findings down for GitHub.</p>
+      <form method="post" action="/sessions/draft/ask?id=<%= job["id"] %>" style="margin: 0;">
+        <%== csrf_ask %>
+        <div class="actions" style="margin-top: 4px;">
+          <button class="go" type="submit">Ask the box to write them</button>
+          <span class="quiet" style="font-size: 12px;">a follow-up in the same conversation; it takes a minute or two</span>
+        </div>
+      </form>
+    <% elsif plan[:error] %>
+      <div class="banner err" style="margin: 14px 0 0;"><%= plan[:error] %></div>
+    <% else %>
+      <p class="quiet" style="margin: 10px 0 0;">
+        Against <a class="mono" href="https://github.com/<%= job["repo"] %>/commit/<%= plan[:commit] %>" target="_blank" rel="noreferrer"><%= plan[:commit][0, 10] %></a>,
+        the commit the box reviewed<% if plan[:moved] %>; the pull request has moved on since, so GitHub shows these against that older commit<% end %>.
+      </p>
+
+      <h2>Summary</h2>
+      <div class="summary"><%= plan[:summary].to_s.empty? ? "(none)" : plan[:summary] %></div>
+
+      <h2><%= plan[:placed].size %> on the lines</h2>
+      <% if plan[:placed].empty? %><p class="quiet">None.</p><% end %>
+      <% plan[:placed].each do |c| %>
+        <div class="comment">
+          <div class="where"><%= c[:path] %> · <%= c[:side] == "LEFT" ? "removed line" : "line" %> <%= c[:line] %></div>
+          <div class="body"><%= c[:body] %></div>
+        </div>
+      <% end %>
+
+      <% unless plan[:loose].empty? %>
+        <h2><%= plan[:loose].size %> in the summary</h2>
+        <p class="quiet" style="margin-top: 0;">On lines the pull request does not change, so GitHub cannot take them as line comments.</p>
+        <% plan[:loose].each do |c| %>
+          <div class="comment">
+            <div class="where"><%= c[:path] %> · line <%= c[:line] %></div>
+            <div class="body"><%= c[:body] %></div>
+          </div>
+        <% end %>
+      <% end %>
+
+      <% if plan[:pending] %>
+        <div class="banner err" style="margin: 16px 0 0;">
+          You already have a pending review on this pull request. GitHub allows one:
+          <a href="<%= plan[:pending] %>" target="_blank" rel="noreferrer">submit or discard it</a>, then come back.
+        </div>
+      <% end %>
+
+      <div class="caution" style="margin-top: 16px;">
+        This makes a <strong>pending</strong> review: nobody sees it but you until you submit it on GitHub.
+        Read every comment there, delete what you disagree with, and submit it as yours.
+      </div>
+
+      <form method="post" action="/sessions/draft?id=<%= job["id"] %>" style="margin: 0;">
+        <%== csrf %>
+        <input type="hidden" name="commit" value="<%= plan[:commit] %>" />
+        <input type="hidden" name="count" value="<%= total %>" />
+        <div class="actions">
+          <div style="flex: 1;"></div>
+          <% unless can_write %>
+            <span class="mono" style="font-size: 11px; color: var(--err-fg);">needs a write token, on the <a href="/baybox">Baybox page</a></span>
+          <% end %>
+          <button class="go" type="submit" <%= "disabled" if !can_write || plan[:pending] || total.zero? && plan[:summary].to_s.empty? %>>Create pending review</button>
+        </div>
+      </form>
+    <% end %>
+  </div>
+</div>
+</body>
+</html>

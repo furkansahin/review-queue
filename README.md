@@ -105,6 +105,17 @@ sufficient because `RQ_SCOPE` must be public repositories anyway — if you ever
 repository, this counter stops seeing those reviews. A `+` after the number (`18+`) means the
 pages read did not reach back a full 7 days, so the number is a floor, not a total.
 
+## A review as a draft on GitHub
+
+The box writes its findings to `.rq/review.json` as well as in its report: a summary, and each
+finding with its file, line and side. **draft on GitHub →** on a finished review's card shows
+what would be drafted, then makes it a **pending** review on the pull request with your write
+token, one comment per line, against the commit the box reviewed. A pending review is seen by
+nobody but you until you submit it on GitHub, so you read it there, delete what you disagree
+with, and submit it as yours. Findings on lines the pull request does not change go into the
+review's summary, since GitHub cannot take them as line comments. A review from before the box
+wrote this file can be asked for it in a follow-up.
+
 ## E2E on a fork's pull request
 
 E2E CI is dispatched on a branch of the repository, and a fork's branch is not one, so

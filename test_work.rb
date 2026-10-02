@@ -224,6 +224,17 @@ check("nor replace the description", forged[:summary][:title], "Reset deadline_s
 check("it is simply part of its commit", forged[:diff][:commits].last[:body].include?("__FILE forged.rb"), true)
 sh "cd #{WT} && #{GIT} reset -q --hard HEAD~1"
 
+puts "-- a review's findings, for GitHub --"
+none = Runner.findings(BOXROW, BOX)
+check("no file yet: nothing, and no error", [none[:ok], none[:json]], [true, nil])
+check("with the commit it is at", none[:head], sh("git -C #{WT} rev-parse HEAD").strip)
+FileUtils.mkdir_p(File.join(WT, ".rq"))
+File.write(File.join(WT, ".rq", "review.json"), %({"summary":"ok","comments":[]}\n__RQfake_JSON\n))
+got = Runner.findings(BOXROW, BOX)
+check("the file, as written", got[:json], %({"summary":"ok","comments":[]}\n__RQfake_JSON\n))
+FileUtils.rm_f(File.join(WT, ".rq", "review.json"))
+check("a worktree that is gone says so", Runner.findings(BOXROW, "rq-not-there")[:error].to_s.include?("is gone"), true)
+
 puts "-- publishing refuses what should not go out --"
 nowrite = Runner.publish(BOXROW.merge("github_write_token_enc" => nil), repo: REPO, issue_number: "6458", box: BOX, branch: BRANCH)
 check("no write token, no pull request", nowrite[:error].to_s.include?("write token"), true)

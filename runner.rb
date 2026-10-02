@@ -408,6 +408,7 @@ module Runner
     when "review"   then review(box_row, repo: rest[0], pr_number: rest[1], box: rest[2])
     when "work"     then work(box_row, repo: rest[0], issue_number: rest[1], box: rest[2])
     when "inspect"  then inspect_branch(box_row, rest[0])
+    when "findings" then findings(box_row, rest[0])
     when "publish"  then publish(box_row, repo: rest[0], issue_number: rest[1], box: rest[2], branch: rest[3])
     when "ask"      then ask(box_row, rest[0], stdin)
     when "skills"   then skills(box_row, rest[0])
@@ -754,6 +755,31 @@ module Runner
     return {ok: false, output: "", exit_code: nil, error: "the worktree for #{box} is gone"} if summary[:missing]
     diff = marker.empty? ? nil : parse_diff_block(tag, diff_part)
     {ok: true, output: JSON.generate(summary), exit_code: 0, summary: summary, diff: diff}
+  rescue Error, Crypto::Error => e
+    {ok: false, output: "", exit_code: nil, error: e.message}
+  end
+
+  FINDINGS_MAX = 300_000
+
+  # What a review box wrote to .rq/review.json, with the commit it reviewed --
+  # for drafting the review on GitHub. Read from the machine, so a stopped box
+  # still answers. {ok:, head:, json:} -- json nil when there is no file.
+  def findings(box_row, box)
+    return bad_box unless box.to_s.match?(BOX_RE)
+    tag = "__RQ#{SecureRandom.hex(6)}"
+    script = <<~SH
+      cd #{BayBox.sh_quote(worktree(box_row, box))} 2>/dev/null || { echo "#{tag}_MISSING"; exit 0; }
+      echo "#{tag}_HEAD $(git rev-parse HEAD)"
+      if [ -f .rq/review.json ]; then echo "#{tag}_JSON"; head -c #{FINDINGS_MAX} .rq/review.json; fi
+    SH
+    res = capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), script],
+                  env_for(box_row), timeout: 60)
+    return res unless res[:ok]
+    text = res[:output].to_s.dup.force_encoding(Encoding::UTF_8).scrub("\uFFFD")
+    return {ok: false, output: "", exit_code: nil, error: "the worktree for #{box} is gone"} if text.include?("#{tag}_MISSING")
+    head = text[/^#{tag}_HEAD (\h{40})$/, 1]
+    _, marker, json = text.partition("#{tag}_JSON\n")
+    {ok: true, output: "", exit_code: 0, head: head, json: marker.empty? ? nil : json}
   rescue Error, Crypto::Error => e
     {ok: false, output: "", exit_code: nil, error: e.message}
   end

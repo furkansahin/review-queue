@@ -230,6 +230,14 @@
            style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
         <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
         <div style="flex: 1;"></div>
+        <% if j["kind"] != "work" && j["state"] == "done" && j["torn_down_at"].nil? %>
+          <% if j["draft_url"] %>
+            <a class="mono" style="font-size: 12px;" href="<%= j["draft_url"] %>" target="_blank" rel="noreferrer"
+               title="the pending review drafted from this one">drafted on GitHub ↗</a>
+          <% end %>
+          <a class="mono" style="font-size: 12px;" href="/sessions/draft?id=<%= j["id"] %>"
+             title="put these findings on the pull request as a pending review, for you to check and submit">draft on GitHub →</a>
+        <% end %>
         <form method="post" action="/sessions/teardown" style="margin: 0;">
           <%== csrf_teardown %>
           <input type="hidden" name="id" value="<%= j["id"] %>" />

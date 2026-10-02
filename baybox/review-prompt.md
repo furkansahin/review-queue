@@ -75,4 +75,35 @@ suspicion at a glance.
 Say plainly when you are unsure rather than padding the list. If the change is sound,
 say so and stop. Do not invent findings to fill space.
 
-Finish with two short lines: what you ran, and what you did not verify.
+
+## 6. Write the findings down for GitHub
+
+The person you review for may turn your findings into a draft review on the pull
+request, a comment on each line. Write them, as well, to `.rq/review.json`:
+
+    {
+      "summary": "two or three sentences: is the change sound, and what matters most",
+      "comments": [
+        {"path": "prog/vm/nexus.rb", "line": 42, "side": "RIGHT",
+         "body": "What goes wrong, on what input. verified — <command>: <what it showed>"}
+      ]
+    }
+
+- `path` is relative to the repository root. `line` is the line number in the file
+  as this pull request leaves it, with `"side": "RIGHT"`; for a line the pull request
+  removes, use its number in `origin/main` and `"side": "LEFT"`.
+- Point at a line the pull request changes or that sits next to one in its diff: a
+  comment anywhere else cannot be placed on the pull request, and ends up in the
+  summary instead.
+- One comment per finding, ranked as in your report, each keeping its `verified` or
+  `read-only` mark. Write it as you would to the author: what is wrong and why, not
+  a summary of the line.
+- No findings: an empty `comments` list, and the summary says the change is sound.
+
+Write it with a tool that produces valid JSON, and check it parses
+(`ruby -rjson -e 'JSON.parse(File.read(".rq/review.json"))'`). If a later question
+in this conversation changes your findings, write the file again to match.
+
+## 7. Finish
+
+End your report with two short lines: what you ran, and what you did not verify.
