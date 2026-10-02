@@ -1,6 +1,7 @@
-# A per-browser snooze list. It is kept in the encrypted session cookie, so the
-# app still needs no database. A cookie holds about 4 KB, so the list is small
-# and it drops the oldest entries when it is full.
+# A snooze list. With a database it is kept against the login (SnoozeStore);
+# without one, in the encrypted session cookie, so the app still runs with no
+# database. A cookie holds about 4 KB, so the list is small and it drops the
+# oldest entries when it is full.
 #
 # One rule makes this a queue and not a to-do list: new activity wakes a row.
 # If a person pushes or writes a comment after you snooze a pull request, the

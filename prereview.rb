@@ -2,6 +2,7 @@ require_relative "db"
 require_relative "jobs"
 require_relative "crypto"
 require_relative "queue_service"
+require_relative "snooze_store"
 
 # Reviews made ready before the day starts. On weekday mornings, at the hour
 # each person chose in their own time zone, the worker reads their queue and
@@ -72,8 +73,16 @@ module Prereview
       return "not prepared: the read token on the Baybox page belongs to #{snap[:login]}, not #{login}"
     end
 
-    picked = pick(snap[:rows], Jobs.by_key(login), count)
-    return "nothing to prepare: no pull request was waiting on your review" if picked.empty?
+    # What you snoozed stays out, by the page's own rule: until it wakes, on
+    # its time or on new activity. Read only; the page keeps the list.
+    snooze = Snooze.new(SnoozeStore.load(login) || {}).sweep(snap[:rows], fetched_at: snap[:fetched_at])
+    asleep, awake = snap[:rows].partition { |r| snooze.hidden?(r) }
+    skipped = pick(asleep, {}, asleep.size).size
+    picked = pick(awake, Jobs.by_key(login), count)
+    if picked.empty?
+      return "nothing to prepare: no pull request was waiting on your review" +
+             (skipped.positive? ? " that you had not snoozed" : "")
+    end
     started, refused = [], []
     picked.each do |r|
       res = Jobs.enqueue(login: login, repo: r[:repo_full], pr_number: r[:number], prepared: true)
@@ -81,6 +90,7 @@ module Prereview
     end
     note = started.empty? ? "prepared nothing" : "prepared #{started.join(", ")}"
     note += "; could not start #{refused.join(", ")}" unless refused.empty?
+    note += "; left out #{skipped} snoozed" if skipped.positive?
     note
   rescue StandardError => e
     "not prepared: #{e.class}: #{e.message[0, 200]}"

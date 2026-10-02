@@ -22,8 +22,8 @@ def check(name, got, want)
 end
 
 REPO = "ubicloud/ubicloud"
-def row(n, state: "To review", draft: false)
-  {key: "#{REPO}##{n}", repo_full: REPO, number: n, state: state, draft: draft}
+def row(n, state: "To review", draft: false, last_at: Time.now - 86_400)
+  {key: "#{REPO}##{n}", repo_full: REPO, number: n, state: state, draft: draft, last_at: last_at}
 end
 
 # The queue as GitHub would give it, and which token asked for it.
@@ -94,6 +94,24 @@ DB.exec("UPDATE bayboxes SET github_token_enc = NULL")
 check("no read token: says where to add one", Prereview.run_for("furkansahin", 3), "not prepared: add a GitHub read token on the Baybox page")
 check("someone no longer allowed is not prepared for", Prereview.run_for("stranger", 3).include?("no longer allowed"), true)
 check("no baybox: says so", Prereview.run_for("mohi-kalantari", 3), "not prepared: no baybox registered")
+
+puts "-- what you snoozed stays out --"
+DB.exec("UPDATE bayboxes SET github_token_enc = $1", [Crypto.encrypt("github_pat_READ")])
+DB.exec("DELETE FROM review_jobs")
+SnoozeStore.save("furkansahin", Snooze.new({}).add("#{REPO}#30", 7 * 86_400, now: Time.now - 3600).to_h)
+$queue[:rows] = [row(30), row(31)]
+check("a snoozed pull request is left out, and the note says so", Prereview.run_for("furkansahin", 3), "prepared #31; left out 1 snoozed")
+DB.exec("DELETE FROM review_jobs")
+$queue[:rows] = [row(30, last_at: Time.now)]
+check("unless it has moved since, which wakes it", Prereview.run_for("furkansahin", 3), "prepared #30")
+check("the morning does not change the list itself", SnoozeStore.load("furkansahin").keys, ["#{REPO}#30"])
+DB.exec("DELETE FROM review_jobs")
+$queue[:rows] = [row(30)]
+check("only snoozed ones waiting: says that", Prereview.run_for("furkansahin", 3),
+      "nothing to prepare: no pull request was waiting on your review that you had not snoozed")
+SnoozeStore.save("furkansahin", {"#{REPO}#30" => "garbage", "x" => [1]})
+check("a list that is not one is read as empty", SnoozeStore.load("furkansahin"), {})
+SnoozeStore.save("furkansahin", {})
 
 puts "-- a tick writes down what happened --"
 DB.exec("UPDATE bayboxes SET github_token_enc = $1", [Crypto.encrypt("github_pat_READ")])

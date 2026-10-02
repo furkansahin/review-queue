@@ -64,6 +64,7 @@ def settle(limit = 3.0)
 end
 # Each run starts with nothing saved, whatever the last one left.
 DB.exec("DELETE FROM saved_queues") if REVIEWS_ENABLED
+DB.exec("DELETE FROM user_settings") if REVIEWS_ENABLED
 
 def sign_in
   get "/auth/start"
@@ -135,13 +136,14 @@ get "/"
 check("the label is set", last_response.body.include?('value="clickhouse"'), true)
 post "/snooze", {"key" => "ubicloud/ubicloud#1", "_csrf" => csrf("/snooze")}
 get "/"
-snoozed_before = last_request.session["snoozed"]
+snoozed_before = SnoozeStore.load("furkansahin")
 check("something is snoozed", snoozed_before.to_h.size, 1)
+check("kept against the login, not in the cookie", last_request.session["snoozed"], nil)
 
 sign_in   # the same person, a new token
 get "/"
 check("the watch label survived", last_response.body.include?('value="clickhouse"'), true)
-check("and so did the snooze list", last_request.session["snoozed"], snoozed_before)
+check("and so did the snooze list", SnoozeStore.load("furkansahin"), snoozed_before)
 check("on a genuinely new token", last_request.session["token"], "gho_#{WORLD[:exchanges]}")
 
 puts "-- but a different person inherits nothing --"
@@ -149,7 +151,7 @@ WORLD[:login] = "mohi-kalantari"
 sign_in
 get "/"
 check("not the previous user's label", last_response.body.include?('value="clickhouse"'), false)
-check("nor their snooze list", last_request.session["snoozed"].to_h.size, 0)
+check("nor their snooze list", SnoozeStore.load("mohi-kalantari").to_h.size, 0)
 
 puts
 puts($fail.zero? ? "ALL PASS" : "#{$fail} FAILURE(S)")

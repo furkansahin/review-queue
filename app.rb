@@ -18,6 +18,7 @@ if REVIEWS_ENABLED
   require_relative "review_note"
   require_relative "github_draft"
   require_relative "prereview"
+  require_relative "snooze_store"
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
@@ -254,6 +255,26 @@ class ReviewQueue < Roda
     legacy = QueueService.clean_label(session.delete("label"))
     save_watch_label(legacy) unless legacy.empty?
     legacy
+  end
+
+  # The snooze list: against the login when there is a database, so the
+  # morning preparation can leave snoozed pull requests out and the list
+  # follows you between browsers; in the cookie when there is not. A list
+  # made before this is still in the cookie, and is adopted once.
+  def snooze_list
+    return session["snoozed"].to_h unless REVIEWS_ENABLED
+    saved = SnoozeStore.load(current_login)
+    return saved if saved
+    legacy = session.delete("snoozed").to_h
+    SnoozeStore.save(current_login, legacy)
+    legacy
+  end
+
+  # Writes the list back, and only when it changed: the queue sweeps it on
+  # every load, and most loads change nothing.
+  def save_snooze_list(list, before = nil)
+    return session["snoozed"] = list unless REVIEWS_ENABLED
+    SnoozeStore.save(current_login, list) unless list == before
   end
 
   def save_watch_label(value)
@@ -1191,7 +1212,7 @@ class ReviewQueue < Roda
       check_csrf!
       key = r.params["key"].to_s
       unless key.empty?
-        session["snoozed"] = Snooze.new(session["snoozed"]).add(key, SNOOZE_SECONDS).to_h
+        save_snooze_list(Snooze.new(snooze_list).add(key, SNOOZE_SECONDS).to_h)
       end
       r.redirect "/?#{r.query_string}"
     end
@@ -1222,8 +1243,9 @@ class ReviewQueue < Roda
       hide = r.params["hide"] == "1"
 
       # sweep first: it wakes every row that expired or that has new activity.
-      snooze = Snooze.new(session["snoozed"]).sweep(snap[:rows], fetched_at: snap[:fetched_at])
-      session["snoozed"] = snooze.to_h
+      kept = snooze_list
+      snooze = Snooze.new(kept).sweep(snap[:rows], fetched_at: snap[:fetched_at])
+      save_snooze_list(snooze.to_h, kept)
 
       awake = snap[:rows].reject { |row| snooze.hidden?(row) }
 

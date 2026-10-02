@@ -261,8 +261,8 @@
       <div class="note" style="margin-bottom: 12px;">
         On weekday mornings, start reviews of the first pull requests waiting on your review, so they are ready
         when you sit down: <span class="mono">review ✓</span> on their rows, findings ready to draft on GitHub.
-        It reads your queue with the read token above, and skips drafts, your own pull requests and any that
-        already have a review in Sessions. Each review runs on this machine and uses your Claude plan.
+        It reads your queue with the read token above, and skips drafts, your own pull requests, what you
+        snoozed and any that already have a review in Sessions. Each review runs on this machine and uses your Claude plan.
       </div>
       <form method="post" action="/baybox/prereview" style="margin: 0;">
         <%== csrf_prereview %>

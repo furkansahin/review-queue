@@ -358,6 +358,9 @@ module DB
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_tz    text     NOT NULL DEFAULT 'Europe/Amsterdam';
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_last_on date;
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_note  text;
+    -- The snooze list, as JSON: { "owner/repo#n": [wake_at, snoozed_at] }.
+    -- NULL until it moves here from the cookie, the first time the queue loads.
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS snoozed text;
 
     -- The last queue each person saw, so a restart shows it at once instead of
     -- making them wait out a rebuild. One row per person, replaced by every

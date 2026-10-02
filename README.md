@@ -110,7 +110,7 @@ pages read did not reach back a full 7 days, so the number is a floor, not a tot
 Under **Mornings** on the Baybox page, each person can have reviews started before they sit down:
 on weekdays, at the hour they pick in their own time zone, the worker reads their queue and starts
 reviews of the first few **To review** rows (one to five, three by default). It skips drafts, their
-own pull requests and anything that already has a review in Sessions. Those reviews show
+own pull requests, what they snoozed and anything that already has a review in Sessions. Those reviews show
 **prepared** in Sessions and **review ✓** on their rows as they finish.
 
 Nobody is signed in at seven, so the queue is read with the read-only token on the Baybox page,
@@ -153,11 +153,12 @@ a commit or writes a comment after you snooze the pull request, the row returns 
 at the next rebuild. You do not hide the pull request. You say "nothing for me until this
 changes".
 
-The list is per browser. It lives in the session cookie, so there is no database. A cookie
-holds about 4 KB, so the list keeps at most 25 entries and drops the oldest snoozes first.
-Entries also go away when the snooze time is complete or when the pull request leaves the
-queue. Clearing your cookies clears the list, and the list does not follow you to another
-browser.
+The list is kept against your login in the database, so it follows you to another browser,
+survives clearing cookies, and is what the morning preparation reads to leave snoozed pull
+requests out. A list from before that is taken over from the cookie the first time the queue
+loads. Without a database it lives in the session cookie, per browser; a cookie holds about
+4 KB, so the list keeps at most 25 entries and drops the oldest snoozes first. Entries also go
+away when the snooze time is complete or when the pull request leaves the queue.
 
 ## Sessions page
 

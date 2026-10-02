@@ -47,6 +47,8 @@ def csrf_for(body, path) = body[/action="#{Regexp.escape(path)}[^"]*"[^>]*>\s*<i
 def csrf_name(body) = body[/name="(_csrf)"/, 1] || "_csrf"
 def rows_on_page(body) = body.scan(/name="key" value="([^"]+)"/).flatten.uniq
 
+DB.exec("DELETE FROM user_settings") if REVIEWS_ENABLED
+
 # sign in
 get "/auth/start"; st = last_response.location[/state=([^&]+)/, 1]
 get "/auth/callback?code=c&state=#{st}"
@@ -90,6 +92,17 @@ check("there is no Snoozed tab", last_response.body.include?(">Snoozed<"), false
 get "/?tab=snoozed"
 check("an old link to it lands on All", last_response.body.match?(%r{class="tab on" href="/\?tab=all"}), true)
 check("where the snoozed row stays hidden", rows_on_page(last_response.body), ["o/r#2"])
+
+if REVIEWS_ENABLED
+  # Kept against the login: another browser, signed in as the same person,
+  # has the same list -- which is also what lets the morning preparation see it.
+  other = Rack::Test::Session.new(Rack::MockSession.new(app))
+  other.get "/auth/start"; st2 = other.last_response.location[/state=([^&]+)/, 1]
+  other.get "/auth/callback?code=c&state=#{st2}"
+  other.get "/"
+  check("another browser has the same snooze list", rows_on_page(other.last_response.body), ["o/r#2"])
+  check("kept in the database, not the cookie", SnoozeStore.load("furkansahin").keys, ["o/r#1"])
+end
 
 # new activity wakes it, with no user action
 LAST["o/r#1"] = Time.now + 1

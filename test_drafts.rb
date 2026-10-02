@@ -41,6 +41,7 @@ include Rack::Test::Methods
 def app = ReviewQueue.app
 def listed(body = last_response.body) = body.scan(/name="key" value="o\/r#(\d+)"/).flatten.map(&:to_i).uniq.sort
 def badge(label, body = last_response.body) = body[%r{<span>#{label}</span>\s*<span class="badge">([^<]+)</span>}, 1]
+DB.exec("DELETE FROM user_settings") if REVIEWS_ENABLED   # a snooze from the last run is saved
 get "/auth/start"; st = last_response.location[/state=([^&]+)/, 1]
 get "/auth/callback?code=c&state=#{st}"
 
