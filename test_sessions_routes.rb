@@ -275,6 +275,9 @@ check("ask without CSRF is blocked", last_response.status, 403)
 DB.exec("UPDATE review_jobs SET state='done', box_name='rq-ubicloud-6172' WHERE id=$1", [job_id])
 get "/"
 check("row claims reviewed before teardown", last_response.body.include?("review ✓"), true)
+check("and links to that review's own card", last_response.body.include?(%(href="/sessions#job-#{job_id}")), true)
+get "/sessions"
+check("which the sessions page has", last_response.body.include?(%(id="job-#{job_id}")), true)
 get "/sessions"
 post "/sessions/teardown", {"box" => "rq-ubicloud-6172", "_csrf" => csrf_for(last_response.body, "/sessions/teardown")}
 get "/sessions"

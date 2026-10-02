@@ -27,6 +27,8 @@
   .wrap { padding: 20px 24px 80px; }
   h2 { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-2);
        font-family: 'IBM Plex Mono', monospace; font-weight: 600; margin: 26px 0 10px; }
+  /* The card a link from the queue points at. */
+  .card:target { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
           padding: 14px 16px; margin-bottom: 10px; }
   .pill { font: 500 11px 'IBM Plex Mono', monospace; padding: 3px 7px; border-radius: 4px; white-space: nowrap; }
@@ -506,6 +508,18 @@ var RQ = (function () {
 
   function wire(root) { keepPanels(root); enterSends(root); lazyReviews(root); logsAtEnd(root); }
   wire(document);
+
+  // Arriving from a row's "review ✓": the browser jumps to the card before
+  // the panels are restored and the fonts are in, and then the page grows
+  // above it. Go to it again once everything has settled, with its answer
+  // open.
+  var target = /^#job-\d+$/.test(location.hash) && document.getElementById(location.hash.slice(1));
+  if (target) {
+    var answer = target.querySelector("details[data-keep]:last-of-type");
+    if (answer && !target.querySelector("details[open]")) { answer.open = true; }
+    var settle = function () { target.scrollIntoView({ block: "start" }); };
+    (document.fonts ? document.fonts.ready : Promise.resolve()).then(function () { requestAnimationFrame(settle); });
+  }
   return { wire: wire };
 })();
 
