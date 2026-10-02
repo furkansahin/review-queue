@@ -105,6 +105,19 @@ sufficient because `RQ_SCOPE` must be public repositories anyway — if you ever
 repository, this counter stops seeing those reviews. A `+` after the number (`18+`) means the
 pages read did not reach back a full 7 days, so the number is a floor, not a total.
 
+## Reviews ready in the morning
+
+Under **Mornings** on the Baybox page, each person can have reviews started before they sit down:
+on weekdays, at the hour they pick in their own time zone, the worker reads their queue and starts
+reviews of the first few **To review** rows (one to five, three by default). It skips drafts, their
+own pull requests and anything that already has a review in Sessions. Those reviews show
+**prepared** in Sessions and **review ✓** on their rows as they finish.
+
+Nobody is signed in at seven, so the queue is read with the read-only token on the Baybox page,
+the one that already goes into the box. The morning is marked done in the same statement that
+finds it due, so a restart never prepares one twice; a worker down at seven still prepares until
+three hours past it. The page shows what the last morning did. It is off unless turned on.
+
 ## A review as a draft on GitHub
 
 The box writes its findings to `.rq/review.json` as well as in its report: a summary, and each

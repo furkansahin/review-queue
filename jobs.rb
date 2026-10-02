@@ -19,7 +19,7 @@ module Jobs
 
   # kind "work" is an issue being worked on, and pr_number is then the issue's
   # number. See the schema for why they share a table.
-  def enqueue(login:, repo:, pr_number:, kind: "review")
+  def enqueue(login:, repo:, pr_number:, kind: "review", prepared: false)
     return {ok: false, error: "unknown job kind #{kind.inspect}"} unless KINDS.include?(kind)
     box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [login])
     return {ok: false, error: "no baybox registered"} unless box
@@ -27,9 +27,9 @@ module Jobs
     name = kind == "work" ? BayBox.issue_box_name(repo, pr_number) : BayBox.box_name(repo, pr_number)
     BayBox.validate!(repo: repo, pr_number: pr_number, box: name)
 
-    row = DB.row(<<~SQL, [login, box["id"], repo, pr_number, name, kind])
-      INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, kind)
-      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *
+    row = DB.row(<<~SQL, [login, box["id"], repo, pr_number, name, kind, prepared])
+      INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, kind, prepared)
+      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
     SQL
     {ok: true, job: row}
   rescue PG::UniqueViolation
@@ -50,7 +50,7 @@ module Jobs
   # no bandwidth.
   LIST_COLUMNS = "id, login, baybox_id, repo, pr_number, box_name, state, phase, " \
                  "torn_down_at, error, created_at, started_at, finished_at, " \
-                 "kind, branch, summary, pr_url, draft_url, " \
+                 "kind, branch, summary, pr_url, draft_url, prepared, " \
                  "octet_length(output) AS output_bytes"
 
   def for_user(login) = DB.rows(<<~SQL, [login])

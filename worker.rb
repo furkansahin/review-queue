@@ -13,6 +13,7 @@ require_relative "db"
 require_relative "jobs"
 require_relative "baybox"
 require_relative "runner"
+require_relative "prereview"
 
 TICK = Integer(ENV.fetch("RQ_WORKER_TICK", "10"))
 
@@ -147,6 +148,16 @@ if $PROGRAM_NAME == __FILE__
   DB.setup!
   loop do
     begin
+      # Mornings first, so what they queue starts on this same tick. Once a
+      # minute is plenty: a morning is an hour wide.
+      if $prereview_at.nil? || Time.now - $prereview_at >= 60
+        $prereview_at = Time.now
+        begin
+          Prereview.tick(log: method(:log))
+        rescue StandardError => e
+          log("prereview failed: #{e.class}: #{e.message}")
+        end
+      end
       start_queued
       poll_running
     rescue StandardError => e

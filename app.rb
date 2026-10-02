@@ -17,6 +17,7 @@ if REVIEWS_ENABLED
   require_relative "diff_view"
   require_relative "review_note"
   require_relative "github_draft"
+  require_relative "prereview"
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
@@ -594,6 +595,14 @@ class ReviewQueue < Roda
         r.redirect "/baybox"
       end
 
+      r.post "prereview" do
+        check_csrf!
+        problem = Prereview.save(current_login, on: r.params["on"] == "1", hour: r.params["hour"],
+                                 count: r.params["count"], tz: r.params["tz"])
+        flash!(problem ? "baybox_error" : "baybox_notice", problem || "saved your mornings")
+        r.redirect "/baybox"
+      end
+
       r.get true do
         box = current.call
         view("baybox", locals: {box: box, login: current_login, scope_repos: SCOPE_REPOS,
@@ -604,7 +613,9 @@ class ReviewQueue < Roda
                                 csrf_test: csrf_tag("/baybox/test"),
                                 csrf_prepare: csrf_tag("/baybox/prepare"),
                                 csrf_rotate: csrf_tag("/baybox/rotate"),
-                                csrf_delete: csrf_tag("/baybox/delete")},
+                                csrf_delete: csrf_tag("/baybox/delete"),
+                                csrf_prereview: csrf_tag("/baybox/prereview"),
+                                prereview: Prereview.settings(current_login)},
           layout: false)
       end
     end

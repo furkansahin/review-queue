@@ -323,6 +323,8 @@ module DB
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS pr_url  text;
     -- The pending review drafted on GitHub from a review job, once there is one.
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS draft_url text;
+    -- Started by the morning preparation rather than by a click.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS prepared boolean NOT NULL DEFAULT false;
     -- The branch's diff and each commit's patch, as JSON, recorded with the
     -- summary when a run stops, so the changes page reads it from here rather
     -- than asking the box on every load. Kept out of the list queries: it
@@ -347,6 +349,15 @@ module DB
     -- The first part of the branches the app makes for you, for E2E on a
     -- fork's pull request. Empty: the first word of your GitHub name.
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS branch_prefix text NOT NULL DEFAULT '';
+    -- Reviews prepared on weekday mornings: whether, at what hour of the
+    -- person's own time zone, how many, which morning was last done, and
+    -- what happened then.
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_on    boolean  NOT NULL DEFAULT false;
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_hour  smallint NOT NULL DEFAULT 7;
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_count smallint NOT NULL DEFAULT 3;
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_tz    text     NOT NULL DEFAULT 'Europe/Amsterdam';
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_last_on date;
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS prereview_note  text;
 
     -- The last queue each person saw, so a restart shows it at once instead of
     -- making them wait out a rebuild. One row per person, replaced by every

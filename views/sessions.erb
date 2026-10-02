@@ -185,6 +185,7 @@
       <div class="row1">
         <span class="pill <%= "live" if j["state"] == "running" %>" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
         <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
+        <% if j["prepared"] %><span class="kind" title="started by your morning preparation, not a click">prepared</span><% end %>
         <a href="<%= gh_link.call(j) %>" target="_blank" rel="noreferrer"
            style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
         <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
@@ -226,6 +227,7 @@
       <div class="row1">
         <span class="pill" style="background: <%= bg %>; color: <%= fg %>;"><%= j["state"] %></span>
         <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
+        <% if j["prepared"] %><span class="kind" title="started by your morning preparation, not a click">prepared</span><% end %>
         <a href="<%= gh_link.call(j) %>" target="_blank" rel="noreferrer"
            style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
         <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>
@@ -358,6 +360,7 @@
           <div class="row1">
             <span class="pill" style="background: var(--chip-grey-bg); color: var(--chip-grey-fg);">torn down</span>
             <% if j["kind"] == "work" %><span class="kind" title="claude working on an issue">issue</span><% end %>
+            <% if j["prepared"] %><span class="kind" title="started by your morning preparation, not a click">prepared</span><% end %>
         <a href="<%= gh_link.call(j) %>" target="_blank" rel="noreferrer"
                style="font-weight: 500;"><%= j["repo"] %> #<%= j["pr_number"] %></a>
             <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= j["box_name"] %></span>

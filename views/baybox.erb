@@ -34,6 +34,8 @@
   input[type=text], input[type=number] {
     font-family: 'IBM Plex Mono', monospace; font-size: 13px; padding: 7px 10px; border-radius: 6px;
     border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); width: 100%; }
+  select { font-family: 'IBM Plex Mono', monospace; font-size: 13px; padding: 7px 10px; border-radius: 6px;
+           border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); width: 100%; }
   .fields { display: flex; gap: 12px; flex-wrap: wrap; }
   .f-host { flex: 3 1 260px; } .f-user { flex: 1 1 120px; } .f-port { flex: 0 1 90px; }
   pre { background: var(--bg); border: 1px solid var(--border-soft); border-radius: 8px;
@@ -250,6 +252,47 @@
       </div>
       <% if box["last_error"] && !box["last_error"].to_s.empty? %>
         <pre style="margin-top: 12px;"><%= box["last_error"] %></pre>
+      <% end %>
+    </div>
+
+    <h2>Mornings</h2>
+    <div class="card">
+      <% pr_on = prereview["prereview_on"] == true %>
+      <div class="note" style="margin-bottom: 12px;">
+        On weekday mornings, start reviews of the first pull requests waiting on your review, so they are ready
+        when you sit down: <span class="mono">review ✓</span> on their rows, findings ready to draft on GitHub.
+        It reads your queue with the read token above, and skips drafts, your own pull requests and any that
+        already have a review in Sessions. Each review runs on this machine and uses your Claude plan.
+      </div>
+      <form method="post" action="/baybox/prereview" style="margin: 0;">
+        <%== csrf_prereview %>
+        <div class="fields" style="align-items: flex-end;">
+          <div style="flex: 0 0 auto; padding-bottom: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg); margin: 0;">
+              <input type="checkbox" name="on" value="1" <%= "checked" if pr_on %> /> Prepare reviews
+            </label>
+          </div>
+          <div style="flex: 0 0 110px;">
+            <label for="pr-count">how many</label>
+            <select id="pr-count" name="count" class="mono">
+              <% Prereview::COUNTS.each do |n| %><option value="<%= n %>" <%= "selected" if prereview["prereview_count"].to_i == n %>><%= n %></option><% end %>
+            </select>
+          </div>
+          <div style="flex: 0 0 110px;">
+            <label for="pr-hour">at</label>
+            <select id="pr-hour" name="hour" class="mono">
+              <% Prereview::HOURS.each do |h| %><option value="<%= h %>" <%= "selected" if prereview["prereview_hour"].to_i == h %>><%= format("%02d:00", h) %></option><% end %>
+            </select>
+          </div>
+          <div style="flex: 1 1 200px;">
+            <label for="pr-tz">time zone</label>
+            <input id="pr-tz" type="text" name="tz" value="<%= prereview["prereview_tz"] %>" spellcheck="false" autocomplete="off" />
+          </div>
+          <div style="flex: 0 0 auto;"><button class="btn" type="submit">Save</button></div>
+        </div>
+      </form>
+      <% if prereview["prereview_note"] %>
+        <div class="mono" style="font-size: 12px; color: var(--muted); margin-top: 12px;">last morning: <%= prereview["prereview_note"] %></div>
       <% end %>
     </div>
 
