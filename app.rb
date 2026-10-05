@@ -229,6 +229,15 @@ class ReviewQueue < Roda
       nil
     end
     return "another session is already running for that pull request; wait for it to finish" if reopened.nil?
+    # A review answers in the person's voice as it is now, not as it was when
+    # the review began. Best effort: a follow-up is never held up by it.
+    if job["kind"] != "work"
+      begin
+        Runner.run(box, "voice #{job["box_name"]}", stdin: Voice.compose(job["login"]).to_s)
+      rescue StandardError => e
+        warn "[review-queue] could not refresh the voice in #{job["box_name"]}: #{e.class}: #{e.message}"
+      end
+    end
     # The text goes over stdin, so it is never part of a command line.
     res = Runner.run(box, "ask #{job["box_name"]}", stdin: prompt)
     if res[:ok]

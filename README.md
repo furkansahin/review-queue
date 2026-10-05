@@ -114,7 +114,9 @@ or added by them, and what became of the summary. If the draft was thrown away f
 their own, that review is used. Once a day it also reads their recent review comments in the
 watched repositories. Only their own words are kept.
 
-Every review gets these as `.rq/voice.md`: their own notes from the Baybox page first, a few
+Every review gets these as `.rq/voice.md`, and gets it again, as it is then, before each
+follow-up, so what was learned while a review box was open reaches its next answer: their own
+notes from the Baybox page first, a few
 counts -- how much of a draft they post, how long their comments run against the drafts' -- then
 the examples. The review prompt tells the box to write `review.json` in that voice and to post
 only what they would; the evidence stays in its report on the Sessions page. The Baybox page

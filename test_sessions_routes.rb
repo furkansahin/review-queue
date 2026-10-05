@@ -44,7 +44,12 @@ box_stub = Module.new do
     case command
     when "list" then {ok: true, output: "rq-ubicloud-6172\tdeepak/x\tUp 2 minutes\n"}
     when /\Ateardown / then STUB[:teardown]
+    when /\Avoice /
+      (STUB[:order] ||= []) << :voice
+      STUB[:voice] = stdin
+      {ok: true, output: ""}
     when /\Aask /
+      (STUB[:order] ||= []) << :ask
       STUB[:asked] = stdin
       # What the worker would poll if its tick landed now, while the question
       # is still being copied to the box. See the follow-up checks below.
@@ -237,8 +242,15 @@ check("the box says how to send", last_response.body.include?("Enter sends, Ctrl
 check("and the page handles Enter in it",
       last_response.body.include?('querySelectorAll("form.ask textarea")') && last_response.body.include?("requestSubmit"), true)
 atok = csrf_for(last_response.body, "/sessions/ask")
+Voice.save_notes("furkansahin", "One sentence, as a question.") if defined?(Voice)
+STUB[:order] = []
 post "/sessions/ask", {"id" => job_id, "prompt" => "why is finding 1 exploitable?", "_csrf" => atok}
 check("the question goes over stdin, not the command line", STUB[:asked], "why is finding 1 exploitable?")
+if defined?(Voice)
+  check("the box gets the voice as it is now, before the question", STUB[:order], [:voice, :ask])
+  check("with what was learned since", STUB[:voice].to_s.include?("One sentence, as a question."), true)
+  Voice.save_notes("furkansahin", "")
+end
 check("the job goes back to running", DB.row("SELECT state FROM review_jobs WHERE id=$1", [job_id])["state"], "running")
 check("and back to the reviewing phase", DB.row("SELECT phase FROM review_jobs WHERE id=$1", [job_id])["phase"], "reviewing")
 # The race that lost follow-ups: the row was running before the run was, and

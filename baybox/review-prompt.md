@@ -103,8 +103,9 @@ request, a comment on each line. Write them, as well, to `.rq/review.json`:
 
 ### Their voice
 
-If `.rq/voice.md` has anything in it, read it before you write this file. It is how
-the person you review for writes review comments, learned from what they actually
+If `.rq/voice.md` has anything in it, read it before you write this file, and again
+each time you write it: it is brought up to date before every later question. It is
+how the person you review for writes review comments, learned from what they actually
 posted after earlier drafts: what they rewrote and how, what they dropped, what they
 added, and anything they said about it themselves. They post these comments as their
 own, so write the `summary` and every `body` the way they would -- their length,

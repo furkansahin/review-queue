@@ -552,6 +552,13 @@ File.delete("#{ROOT}/ssh.stdin")
 Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "x" * 70_000)
 check("and it is bounded", File.size("#{ROOT}/ssh.stdin"), Runner::FOLLOWUP_MAX)
 check("an empty question is refused", Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "  ")[:ok], false)
+File.delete("#{ROOT}/ssh.stdin") if File.exist?("#{ROOT}/ssh.stdin")
+File.delete("#{ROOT}/ssh.cmds") if File.exist?("#{ROOT}/ssh.cmds")
+check("the voice can be brought up to date in a box",
+      Runner.run(BOXROW, "voice rq-ubicloud-6172", stdin: "Ask, do not assert.\n")[:ok], true)
+check("into its worktree", File.read("#{ROOT}/ssh.cmds").include?("ubicloud/.worktrees/rq-ubicloud-6172/.rq/voice.md"), true)
+check("with what it is now", File.read("#{ROOT}/ssh.stdin"), "Ask, do not assert.\n")
+check("but not into a box with a bad name", Runner.run(BOXROW, "voice ../x", stdin: "x")[:ok], false)
 check("a box with no review is refused", Runner.run(BOXROW, "ask rq-never")[:ok], false)
 
 puts "-- without bay, it says so instead of failing oddly --"

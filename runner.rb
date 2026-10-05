@@ -411,6 +411,7 @@ module Runner
     when "findings" then findings(box_row, rest[0])
     when "publish"  then publish(box_row, repo: rest[0], issue_number: rest[1], box: rest[2], branch: rest[3])
     when "ask"      then ask(box_row, rest[0], stdin)
+    when "voice"    then place_voice(box_row, rest[0], stdin)
     when "skills"   then skills(box_row, rest[0])
     else {ok: false, output: "", exit_code: nil, error: "unknown command #{verb.inspect}"}
     end
@@ -987,6 +988,17 @@ module Runner
   # A typed question is capped at 8 KB by its route; a review from the changes
   # page, with a comment per line, is longer. This is the ceiling for both.
   FOLLOWUP_MAX = 65_536
+
+  # The person's review voice as it is now, into a review's worktree before a
+  # follow-up: what was learned since the review began reaches its next
+  # answer. Empty clears it. The worker places it at the start of a review.
+  VOICE_MAX = 32_000
+
+  def place_voice(box_row, box, text)
+    return bad_box unless box.to_s.match?(BOX_RE)
+    prepare!(box_row)
+    put_file(box_row, "#{worktree(box_row, box)}/.rq/voice.md", text.to_s.byteslice(0, VOICE_MAX))
+  end
 
   def ask(box_row, box, prompt)
     return bad_box unless box.to_s.match?(BOX_RE)
