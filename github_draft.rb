@@ -99,13 +99,45 @@ module GitHubDraft
 
   # Only the comments the person kept. indices number them as the page lists
   # them: the ones on lines first, then the ones for the summary.
-  def keep(plan, indices)
+  #
+  # bodies are the person's own wording, by the same numbers, for the
+  # comments they changed on the page; summary likewise. An edited comment
+  # carries what the box wrote as :original, for the review voice. One
+  # emptied is left out, as if unticked.
+  def keep(plan, indices, bodies: {}, summary: nil)
     wanted = Array(indices).filter_map { |i| Integer(i.to_s, 10, exception: false) }.to_set
-    placed = plan[:placed].each_with_index.select { |_, i| wanted.include?(i) }.map(&:first)
-    loose = plan[:loose].each_with_index.select { |_, i| wanted.include?(plan[:placed].size + i) }.map(&:first)
+    bodies = (bodies.is_a?(Hash) ? bodies : {}).transform_keys(&:to_s)
     all = plan[:placed] + plan[:loose]
-    unticked = all.each_with_index.reject { |_, i| wanted.include?(i) }.map(&:first)
-    plan.merge(placed: placed, loose: loose, unticked: unticked, dropped: unticked.size)
+    edited = all.each_with_index.map do |c, i|
+      text = bodies[i.to_s]
+      next c if text.nil? || same?(text, c[:body])
+      text = text.to_s.strip
+      return plan.merge(error: "comment #{i + 1} is over #{MAX_BODY} characters") if text.length > MAX_BODY
+      c.merge(body: text, original: c[:body])
+    end
+    keep_at = ->(i) { wanted.include?(i) && !edited[i][:body].to_s.empty? }
+    n = plan[:placed].size
+    placed = (0...n).select(&keep_at).map { |i| edited[i] }
+    loose = (n...all.size).select(&keep_at).map { |i| edited[i] }
+    unticked = (0...all.size).reject(&keep_at).map { |i| all[i] }
+    out = plan.merge(placed: placed, loose: loose, unticked: unticked, dropped: unticked.size)
+    unless summary.nil? || same?(summary, plan[:summary])
+      summary = summary.to_s.strip
+      return plan.merge(error: "the summary is over #{MAX_SUMMARY} characters") if summary.length > MAX_SUMMARY
+      out = out.merge(summary: summary, original_summary: plan[:summary])
+    end
+    out
+  end
+
+  # The same words, whatever the line breaks and spacing.
+  def same?(a, b) = a.to_s.split.join(" ") == b.to_s.split.join(" ")
+
+  # The review as the box wrote it, for what was kept: the review voice
+  # learns from what the box wrote, not from the person's own first edit.
+  def original(kept)
+    back = ->(c) { c[:original] ? c.merge(body: c[:original]).except(:original) : c }
+    kept.merge(summary: kept[:original_summary] || kept[:summary],
+               placed: kept[:placed].map(&back), loose: kept[:loose].map(&back))
   end
 
   def body(plan)

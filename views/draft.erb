@@ -36,7 +36,15 @@
   .comment:has(input:not(:checked)) .where::after { content: " · left out"; color: var(--err-fg); }
   .kept { font: 12px 'IBM Plex Mono', monospace; color: var(--muted); }
   .where { font: 12px 'IBM Plex Mono', monospace; color: var(--muted); margin-bottom: 6px; overflow-wrap: anywhere; }
-  .body { white-space: pre-wrap; line-height: 1.5; font-size: 13px; overflow-wrap: anywhere; }
+  /* The comment as it will be sent, editable where it stands: text until you
+     point at it, a field when you click. */
+  textarea.body { display: block; width: 100%; box-sizing: border-box; margin: 0; padding: 4px 6px; resize: none;
+                  overflow: hidden; font: 13px/1.5 'IBM Plex Sans', Helvetica, sans-serif; color: var(--fg);
+                  background: transparent; border: 1px solid transparent; border-radius: 6px; }
+  textarea.body:hover { border-color: var(--border); }
+  textarea.body:focus { outline: none; border-color: var(--accent); background: var(--bg); }
+  .edited { color: var(--accent); }
+  .revert { font: inherit; color: var(--link); background: none; border: 0; padding: 0; cursor: pointer; }
   .banner { padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5;
             font-family: 'IBM Plex Mono', monospace; }
   .banner.err { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg); }
@@ -98,35 +106,43 @@
       </p>
 
       <h2>Summary</h2>
-      <div class="summary"><%= plan[:summary].to_s.empty? ? "(none)" : plan[:summary] %></div>
+      <div class="comment" style="border-style: dashed;">
+        <div>
+          <div class="where">the review's body<span class="edited" hidden> · edited · <button type="button" class="revert">revert</button></span></div>
+          <textarea class="body" form="draft-form" name="summary" rows="1" spellcheck="true" placeholder="(none)"
+                    aria-label="the review's summary, as it will be sent" data-original="<%= plan[:summary] %>"><%= plan[:summary] %></textarea>
+        </div>
+      </div>
 
       <h2><%= plan[:placed].size %> on the lines</h2>
       <% if plan[:placed].empty? %><p class="quiet">None.</p><% end %>
       <%# Numbered as GitHubDraft.keep counts them: these first, then the ones
           for the summary. The boxes belong to the form at the bottom. %>
       <% plan[:placed].each_with_index do |c, i| %>
-        <label class="comment">
+        <div class="comment">
           <input type="checkbox" form="draft-form" name="keep[]" value="<%= i %>" checked="checked"
                  aria-label="keep this comment" />
           <div>
-            <div class="where"><%= c[:path] %> · <%= c[:side] == "LEFT" ? "removed line" : "line" %> <%= c[:line] %></div>
-            <div class="body"><%= c[:body] %></div>
+            <div class="where"><%= c[:path] %> · <%= c[:side] == "LEFT" ? "removed line" : "line" %> <%= c[:line] %><span class="edited" hidden> · edited · <button type="button" class="revert">revert</button></span></div>
+            <textarea class="body" form="draft-form" name="body[<%= i %>]" rows="1" spellcheck="true"
+                      aria-label="the comment, as it will be sent" data-original="<%= c[:body] %>"><%= c[:body] %></textarea>
           </div>
-        </label>
+        </div>
       <% end %>
 
       <% unless plan[:loose].empty? %>
         <h2><%= plan[:loose].size %> in the summary</h2>
         <p class="quiet" style="margin-top: 0;">On lines the pull request does not change, so GitHub cannot take them as line comments.</p>
         <% plan[:loose].each_with_index do |c, i| %>
-          <label class="comment">
-            <input type="checkbox" form="draft-form" name="keep[]" value="<%= plan[:placed].size + i %>" checked="checked"
-                   aria-label="keep this comment" />
-            <div>
-              <div class="where"><%= c[:path] %> · line <%= c[:line] %></div>
-              <div class="body"><%= c[:body] %></div>
-            </div>
-          </label>
+          <div class="comment">
+          <input type="checkbox" form="draft-form" name="keep[]" value="<%= plan[:placed].size + i %>" checked="checked"
+                 aria-label="keep this comment" />
+          <div>
+            <div class="where"><%= c[:path] %> · line <%= c[:line] %><span class="edited" hidden> · edited · <button type="button" class="revert">revert</button></span></div>
+            <textarea class="body" form="draft-form" name="body[<%= plan[:placed].size + i %>]" rows="1" spellcheck="true"
+                      aria-label="the comment, as it will be sent" data-original="<%= c[:body] %>"><%= c[:body] %></textarea>
+          </div>
+        </div>
         <% end %>
       <% end %>
 
@@ -139,7 +155,8 @@
 
       <div class="caution" style="margin-top: 16px;">
         This makes a <strong>pending</strong> review: nobody sees it but you until you submit it on GitHub.
-        Untick what you do not want sent; read the rest there, and submit it as yours.
+        Untick what you do not want sent, and click into any comment to say it your way; what you change
+        here is learned from too. Then read it there, and submit it as yours.
       </div>
 
       <form id="draft-form" method="post" action="/sessions/draft?id=<%= job["id"] %>" style="margin: 0;">
@@ -158,6 +175,17 @@
   </div>
 </div>
 <script>
+// Each comment grows to its text, and says when it no longer reads as the box
+// wrote it, with a way back.
+document.querySelectorAll("textarea.body").forEach(function (ta) {
+  var mark = ta.parentNode.querySelector(".edited");
+  function fit() { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; }
+  function edited() { mark.hidden = ta.value.trim().split(/\s+/).join(" ") === ta.dataset.original.trim().split(/\s+/).join(" "); }
+  ta.addEventListener("input", function () { fit(); edited(); });
+  mark.querySelector(".revert").addEventListener("click", function () { ta.value = ta.dataset.original; fit(); edited(); });
+  fit();
+});
+
 // The count by the button. Without it the page still works: it only counts.
 (function () {
   var out = document.getElementById("kept");

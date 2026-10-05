@@ -797,14 +797,18 @@ class ReviewQueue < Roda
                 elsif plan[:digest] && plan[:digest] != r.params["digest"].to_s
                   {error: "the box's findings changed since this page loaded; look again first"}
                 else
-                  # The page's ticks: what is not ticked is not sent.
-                  kept = GitHubDraft.keep(plan, r.params["keep"])
-                  made = GitHubDraft.create(gh, kept).merge(dropped: kept[:dropped])
+                  # The page's ticks and the page's words: what is not ticked
+                  # is not sent, and what was edited is sent as edited.
+                  kept = GitHubDraft.keep(plan, r.params["keep"], bodies: r.params["body"],
+                                          summary: r.params["summary"])
+                  made = GitHubDraft.create(gh, kept).merge(dropped: kept[:dropped].to_i)
                   # Kept, so what you submit can be set against it and learned
-                  # from: the summary as sent, the line comments, the unticked.
+                  # from: what the box wrote -- the summary, each line comment,
+                  # the unticked -- with your edits on the page as the first
+                  # rewrite of it.
                   if made[:ok] && made[:id]
                     Voice.record_draft(job["id"], review_id: made[:id], at: Time.now,
-                                       summary: GitHubDraft.body(kept).delete_suffix(GitHubDraft::FOOTER).strip,
+                                       summary: GitHubDraft.body(GitHubDraft.original(kept)).delete_suffix(GitHubDraft::FOOTER).strip,
                                        sent: kept[:placed], unticked: kept[:unticked])
                   end
                   made

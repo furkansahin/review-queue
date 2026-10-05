@@ -201,6 +201,32 @@ check("what was sent is kept, to learn from what you submit",
 check("the summary as sent, without the footer", kept[:summary], "One real problem.")
 check("the page says it will learn from it", last_response.body.include?("what you changed is learned from"), true)
 
+puts "-- edited on the page --"
+check("each comment is a field holding its text", page.include?(%(name="body[0]")) && page.include?(">new_call can raise. verified"), true)
+check("and so is the summary", page.include?(%(name="summary")), true)
+$calls.clear
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0 1], "_csrf" => token,
+                                          "body" => {"0" => "Can `new_call` raise here?", "1" => "This loop never ends."},
+                                          "summary" => "Two things."}
+sent = writes.last[3]
+check("the edited comment is sent as edited", sent[:comments], [C_ADD.merge(body: "Can `new_call` raise here?")])
+check("so is one for the summary", sent[:body].include?("line 300: This loop never ends.") && !sent[:body].include?("Second line"), true)
+check("and the summary", sent[:body].start_with?("Two things."), true)
+rec = JSON.parse(DB.row("SELECT draft_json FROM review_jobs WHERE id = $1", [job["id"]])["draft_json"], symbolize_names: true)
+check("the box's words are kept beside yours, to learn from", rec[:sent].first.values_at(:body, :original),
+      ["Can `new_call` raise here?", C_ADD[:body]])
+check("and the summary as the box wrote it", rec[:summary].start_with?("One real problem."), true)
+$calls.clear
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0 1], "_csrf" => token, "body" => {"0" => "  "}}
+check("a comment emptied is left out, as if unticked", writes.last[3][:comments], [])
+$calls.clear
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0 1], "_csrf" => token, "body" => {"0" => "x" * 20_001}}
+check("one too long is refused, nothing sent", writes, [])
+get "/sessions/draft?id=#{job["id"]}"
+check("and it says which", last_response.body.include?("comment 1 is over 20000 characters"), true)
+unchanged = GitHubDraft.keep(plan, %w[0], bodies: {"0" => C_ADD[:body].gsub(" ", "\n")})
+check("spacing alone is not an edit", unchanged[:placed].first.key?(:original), false)
+
 $calls.clear
 post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[1], "_csrf" => token}
 check("unticked, a line comment is not sent", writes.last[3][:comments], [])

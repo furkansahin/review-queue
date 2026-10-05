@@ -110,7 +110,8 @@ module Voice
     posted = comments.map do |c|
       {path: c["path"].to_s, line: (c["original_line"] || c["line"]).to_i, side: c["side"] || "RIGHT", body: c["body"].to_s}
     end
-    drafted = Array(d[:sent]).map { |c| c.slice(:path, :line, :side, :body) }
+    # What the box wrote; an edit on the draft page is already the person's.
+    drafted = Array(d[:sent]).map { |c| c.slice(:path, :line, :side).merge(body: c[:original] || c[:body]) }
     pairs, dropped, added = pair(drafted, posted)
     dropped += Array(d[:unticked]).map { |c| c.slice(:path, :line, :side, :body) }
 

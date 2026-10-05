@@ -99,6 +99,21 @@ check("each comment in its place", kinds.map { |k| k["kind"] }, %w[rewritten rew
 check("with their own words", kinds.first["posted"], P_PG)
 check("and nobody else's", kinds.any? { |k| k["posted"].to_s.include?("someone else") }, false)
 
+# Edited on the draft page, then posted as edited: still the box's words
+# against theirs.
+job3 = DB.row(<<~SQL, [box["id"], REPO])
+  INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, kind, finished_at)
+  VALUES ('furkansahin', $1, $2, 6590, 'rq-ubicloud-ubicloud-6590', 'done', 'review', now()) RETURNING *
+SQL
+Voice.record_draft(job3["id"], review_id: 444, at: Time.now - 600, summary: "",
+                   sent: [D_SPEC.merge(path: "e.rb", body: "Pin the cutoff?", original: D_SPEC[:body])], unticked: [])
+$routes = {[:get, "/repos/#{REPO}/pulls/6590/reviews/444"] => {"id" => 444, "state" => "COMMENTED", "body" => ""},
+           [:get, "/repos/#{REPO}/pulls/6590/comments?per_page=100&page=1"] => [posted(444, "e.rb", 57, "Pin the cutoff?")]}
+Voice.tick
+ex = DB.row("SELECT kind, drafted, posted FROM voice_examples WHERE job_id = $1", [job3["id"]])
+check("an edit on the page is learned as a rewrite of the box's words", ex.values_at("kind", "drafted", "posted"),
+      ["rewritten", D_SPEC[:body], "Pin the cutoff?"])
+
 puts "-- a draft thrown away for a review of their own --"
 job2 = DB.row(<<~SQL, [box["id"], REPO])
   INSERT INTO review_jobs (login, baybox_id, repo, pr_number, box_name, state, kind, finished_at)
@@ -133,7 +148,7 @@ check("their notes come first", Voice.save_notes("furkansahin", "One or two sent
 text = Voice.compose("furkansahin")
 check("the notes", text.include?("## In their own words\n\nOne or two sentences. Ask, do not assert."), true)
 check("ahead of the examples", text.index("In their own words") < text.index("## Rewritten"), true)
-check("the numbers: how much they post", text.include?("Of 6 comments drafted for them, they posted 2"), true)
+check("the numbers: how much they post", text.include?("Of 7 comments drafted for them, they posted 3"), true)
 check("and how long", text.match?(/Their comments run about \d+ words; the drafts ran about \d+/), true)
 check("and the summaries", text.include?("1 of 1 drafted summaries were deleted"), true)
 check("each rewrite, drafted then theirs", text.include?("They wrote:\n> #{P_PG}"), true)
