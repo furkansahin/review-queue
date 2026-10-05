@@ -19,6 +19,7 @@ if REVIEWS_ENABLED
   require_relative "github_draft"
   require_relative "prereview"
   require_relative "snooze_store"
+  require_relative "voice"
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
@@ -616,6 +617,29 @@ class ReviewQueue < Roda
         r.redirect "/baybox"
       end
 
+      # How you write review comments, as the review boxes are given it.
+      r.post "voice" do
+        check_csrf!
+        problem = Voice.save_notes(current_login, r.params["notes"])
+        flash!(problem ? "baybox_error" : "baybox_notice", problem || "saved your notes on how you write reviews")
+        r.redirect "/baybox#voice"
+      end
+
+      r.post "voice/forget" do
+        check_csrf!
+        Voice.forget(current_login)
+        flash!("baybox_notice", "forgot what was learned from your reviews; your own notes are kept")
+        r.redirect "/baybox#voice"
+      end
+
+      # The worker reads your recent comments once a day; this asks for it now.
+      r.post "voice/read" do
+        check_csrf!
+        DB.exec("UPDATE user_settings SET voice_own_at = NULL WHERE login = $1", [current_login])
+        flash!("baybox_notice", "reading your recent review comments; give it a minute")
+        r.redirect "/baybox#voice"
+      end
+
       r.post "prereview" do
         check_csrf!
         problem = Prereview.save(current_login, on: r.params["on"] == "1", hour: r.params["hour"],
@@ -636,7 +660,11 @@ class ReviewQueue < Roda
                                 csrf_rotate: csrf_tag("/baybox/rotate"),
                                 csrf_delete: csrf_tag("/baybox/delete"),
                                 csrf_prereview: csrf_tag("/baybox/prereview"),
-                                prereview: Prereview.settings(current_login)},
+                                prereview: Prereview.settings(current_login),
+                                voice: Voice.compose(current_login), voice_notes: Voice.notes(current_login),
+                                voice_counts: Voice.counts(current_login),
+                                csrf_voice: csrf_tag("/baybox/voice"), csrf_voice_forget: csrf_tag("/baybox/voice/forget"),
+                                csrf_voice_read: csrf_tag("/baybox/voice/read")},
           layout: false)
       end
     end
@@ -771,7 +799,15 @@ class ReviewQueue < Roda
                 else
                   # The page's ticks: what is not ticked is not sent.
                   kept = GitHubDraft.keep(plan, r.params["keep"])
-                  GitHubDraft.create(gh, kept).merge(dropped: kept[:dropped])
+                  made = GitHubDraft.create(gh, kept).merge(dropped: kept[:dropped])
+                  # Kept, so what you submit can be set against it and learned
+                  # from: the summary as sent, the line comments, the unticked.
+                  if made[:ok] && made[:id]
+                    Voice.record_draft(job["id"], review_id: made[:id], at: Time.now,
+                                       summary: GitHubDraft.body(kept).delete_suffix(GitHubDraft::FOOTER).strip,
+                                       sent: kept[:placed], unticked: kept[:unticked])
+                  end
+                  made
                 end
               rescue StandardError => e
                 {error: "could not reach GitHub: #{e.message[0, 200]}"}

@@ -63,6 +63,11 @@
     <div class="banner ok"><%= notice %><% if job["draft_url"] %> · <a href="<%= job["draft_url"] %>" target="_blank" rel="noreferrer">open it ↗</a><% end %></div>
   <% end %>
   <% if error %><div class="banner err"><%= error %></div><% end %>
+  <% if job["learn_note"] %>
+    <div class="banner ok"><%= job["learn_note"] %> · <a href="/baybox#voice">your review voice</a></div>
+  <% elsif job["draft_url"] %>
+    <div class="banner ok">Once you submit the drafted review on GitHub, what you changed is learned from, for the next reviews.</div>
+  <% end %>
 
   <div class="card">
     <div style="display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">

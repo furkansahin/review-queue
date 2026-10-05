@@ -325,6 +325,31 @@ module DB
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS draft_url text;
     -- Started by the morning preparation rather than by a click.
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS prepared boolean NOT NULL DEFAULT false;
+    -- What was sent to GitHub as a pending review, as JSON, so what the person
+    -- submitted can be set against it; and when that was learned from.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS draft_json       text;
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS learned_at       timestamptz;
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS learn_checked_at timestamptz;
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS learn_note       text;
+
+    -- How each person writes review comments, from what they post: a drafted
+    -- comment and what they posted instead (rewritten), unchanged (kept), not
+    -- posted (dropped), theirs alone (added), the summary, and their recent
+    -- comments (own). Only their own words.
+    CREATE TABLE IF NOT EXISTS voice_examples (
+      id         bigserial PRIMARY KEY,
+      login      text        NOT NULL,
+      job_id     bigint      REFERENCES review_jobs(id) ON DELETE CASCADE,
+      repo       text        NOT NULL,
+      pr_number  integer     NOT NULL,
+      path       text        NOT NULL DEFAULT '',
+      line       integer     NOT NULL DEFAULT 0,
+      kind       text        NOT NULL,
+      drafted    text,
+      posted     text,
+      at         timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS voice_examples_login_idx ON voice_examples (login, at DESC);
     -- The branch's diff and each commit's patch, as JSON, recorded with the
     -- summary when a run stops, so the changes page reads it from here rather
     -- than asking the box on every load. Kept out of the list queries: it
@@ -361,6 +386,10 @@ module DB
     -- The snooze list, as JSON: { "owner/repo#n": [wake_at, snoozed_at] }.
     -- NULL until it moves here from the cookie, the first time the queue loads.
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS snoozed text;
+    -- What the person says about how they write reviews, and when their
+    -- recent comments were last read.
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS voice_notes  text NOT NULL DEFAULT '';
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS voice_own_at timestamptz;
 
     -- The last queue each person saw, so a restart shows it at once instead of
     -- making them wait out a rebuild. One row per person, replaced by every

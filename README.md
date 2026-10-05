@@ -105,6 +105,21 @@ sufficient because `RQ_SCOPE` must be public repositories anyway — if you ever
 repository, this counter stops seeing those reviews. A `+` after the number (`18+`) means the
 pages read did not reach back a full 7 days, so the number is a floor, not a total.
 
+## Review voice
+
+The comments a box drafts for GitHub are written in the voice of the person they are for. Once a
+drafted review is submitted on GitHub, the worker reads it back with the read token on the Baybox
+page and sets it against what was drafted: each comment rewritten, posted as it was, dropped,
+or added by them, and what became of the summary. If the draft was thrown away for a review of
+their own, that review is used. Once a day it also reads their recent review comments in the
+watched repositories. Only their own words are kept.
+
+Every review gets these as `.rq/voice.md`: their own notes from the Baybox page first, a few
+counts -- how much of a draft they post, how long their comments run against the drafts' -- then
+the examples. The review prompt tells the box to write `review.json` in that voice and to post
+only what they would; the evidence stays in its report on the Sessions page. The Baybox page
+shows the file as a review gets it, and can forget what was learned.
+
 ## Reviews ready in the morning
 
 Under **Mornings** on the Baybox page, each person can have reviews started before they sit down:

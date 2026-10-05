@@ -14,6 +14,7 @@ require_relative "jobs"
 require_relative "baybox"
 require_relative "runner"
 require_relative "prereview"
+require_relative "voice"
 
 TICK = Integer(ENV.fetch("RQ_WORKER_TICK", "10"))
 
@@ -40,6 +41,7 @@ def start_one(job)
   # Runner validates each field before it reaches a command line, and answers
   # with the reason if one is wrong.
   verb = job["kind"] == "work" ? "work" : "review"
+  write_voice(job) if verb == "review"
   res = Runner.run(box, "#{verb} #{job["repo"]} #{job["pr_number"]} #{job["box_name"]}")
   if res[:ok]
     Jobs.set_branch(job["id"], res[:branch]) if res[:branch]
@@ -49,6 +51,22 @@ def start_one(job)
     Jobs.finish(job["id"], "failed", output: res[:output], error: res[:error] || "could not start #{what}")
     log("could not start #{job["box_name"]}: #{res[:error] || res[:output].to_s[0, 200]}")
   end
+end
+
+# How this person writes review comments, where Runner.review picks it up and
+# puts it in the box. Removed when there is nothing to say, so an old one is
+# not used. Never stops a review: without it the box writes as it would have.
+def write_voice(job)
+  path = File.join(Runner.state_dir(job["login"], job["box_name"]), "voice.md")
+  text = Voice.compose(job["login"])
+  if text
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, text)
+  else
+    FileUtils.rm_f(path)
+  end
+rescue StandardError => e
+  log("could not write the review voice for #{job["login"]}: #{e.class}: #{e.message}")
 end
 
 # After work on an issue stops -- finished, failed, or a follow-up answered --
@@ -156,6 +174,11 @@ if $PROGRAM_NAME == __FILE__
           Prereview.tick(log: method(:log))
         rescue StandardError => e
           log("prereview failed: #{e.class}: #{e.message}")
+        end
+        begin
+          Voice.tick(log: method(:log))
+        rescue StandardError => e
+          log("voice failed: #{e.class}: #{e.message}")
         end
       end
       start_queued

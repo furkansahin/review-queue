@@ -312,6 +312,8 @@ check("the prompt was placed on the machine",
       cmds.include?("ubicloud/.worktrees/rq-ubicloud-6172/.rq/review-prompt.md"), true)
 check("with the prompt's own text",
       File.read("#{ROOT}/ssh.stdin").include?("run the specs"), true)
+check("and a voice file beside it, empty when nothing is known about the person",
+      cmds.include?("ubicloud/.worktrees/rq-ubicloud-6172/.rq/voice.md"), true)
 
 # And when it cannot be placed, the review must fail rather than run blind.
 # Only the placement fails: taking ssh away entirely now stops the review one
@@ -336,6 +338,14 @@ check("without ever running the review",
       calls.include?("run rq-ubicloud-6173 review"), false)
 File.delete(File.join(ROOT, "bin", "ssh"))
 File.rename(File.join(ROOT, "bin", "ssh.off"), File.join(ROOT, "bin", "ssh"))
+# The worker puts the person's voice in the run's directory before it starts.
+d6175 = Runner.state_dir("furkansahin", "rq-ubicloud-6175")
+FileUtils.mkdir_p(d6175)
+File.write(File.join(d6175, "voice.md"), "# How furkansahin writes\nOne sentence. Ask.\n")
+Runner.run(BOXROW, "review ubicloud/ubicloud 6175 rq-ubicloud-6175")
+deadline = Time.now + 60
+sleep 0.1 until File.read(File.join(d6175, "state")).strip == "done" || Time.now > deadline
+check("a known voice reaches the box", File.read("#{ROOT}/ssh.stdin").include?("One sentence. Ask."), true)
 check("a bad repo never reaches bay",
       Runner.run(BOXROW, "review notarepo 1 rq-x-1")[:ok], false)
 

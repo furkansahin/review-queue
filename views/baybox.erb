@@ -296,6 +296,46 @@
       <% end %>
     </div>
 
+    <h2 id="voice">Review voice</h2>
+    <div class="card">
+      <div class="note" style="margin-bottom: 12px;">
+        How you write review comments, given to every review so the comments it drafts for GitHub read like
+        yours. Learned from what you submit after a draft -- what you rewrote, dropped and added -- and from your
+        recent review comments. What you write here comes first and wins.
+      </div>
+      <form method="post" action="/baybox/voice" style="margin: 0;">
+        <%== csrf_voice %>
+        <label for="voice-notes">in your own words</label>
+        <textarea id="voice-notes" name="notes" rows="4" maxlength="<%= Voice::MAX_NOTES %>"
+                  placeholder="e.g. One or two sentences. Ask rather than assert. No evidence in the comment, no summary. Only things worth a reply."
+                  style="width: 100%; box-sizing: border-box; font: 13px 'IBM Plex Mono', monospace; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--fg); resize: vertical;"><%= voice_notes %></textarea>
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap;">
+          <button class="btn" type="submit">Save</button>
+          <span class="mono" style="font-size: 12px; color: var(--muted);">
+            <% c = voice_counts %>
+            learned: <%= c.fetch("rewritten", 0) %> rewritten · <%= c.fetch("dropped", 0) %> dropped · <%= c.fetch("added", 0) %> added ·
+            <%= c.fetch("own", 0) %> of your recent comments
+          </span>
+        </div>
+      </form>
+      <div style="display: flex; gap: 8px; margin-top: 10px;">
+        <form method="post" action="/baybox/voice/read" style="margin: 0;">
+          <%== csrf_voice_read %>
+          <button class="btn" type="submit">Read my recent comments now</button>
+        </form>
+        <form method="post" action="/baybox/voice/forget" style="margin: 0;">
+          <%== csrf_voice_forget %>
+          <button class="btn danger" type="submit">Forget what it learned</button>
+        </form>
+      </div>
+      <% if voice %>
+        <details style="margin-top: 12px;">
+          <summary class="mono" style="font-size: 12px; cursor: pointer; color: var(--link);">what a review is given</summary>
+          <pre style="user-select: text; max-height: 420px; overflow-y: auto;"><%= voice %></pre>
+        </details>
+      <% end %>
+    </div>
+
     <h2>Key</h2>
     <div class="card">
       <div class="note" style="margin-bottom: 10px;">

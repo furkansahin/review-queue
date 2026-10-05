@@ -85,7 +85,7 @@ request, a comment on each line. Write them, as well, to `.rq/review.json`:
       "summary": "two or three sentences: is the change sound, and what matters most",
       "comments": [
         {"path": "prog/vm/nexus.rb", "line": 42, "side": "RIGHT",
-         "body": "What goes wrong, on what input. verified — <command>: <what it showed>"}
+         "body": "What goes wrong, on what input, and what to do about it."}
       ]
     }
 
@@ -95,10 +95,25 @@ request, a comment on each line. Write them, as well, to `.rq/review.json`:
 - Point at a line the pull request changes or that sits next to one in its diff: a
   comment anywhere else cannot be placed on the pull request, and ends up in the
   summary instead.
-- One comment per finding, ranked as in your report, each keeping its `verified` or
-  `read-only` mark. Write it as you would to the author: what is wrong and why, not
-  a summary of the line.
+- One comment per finding, ranked as in your report. Write it as you would to the
+  author: what is wrong and why, not a summary of the line. The `verified` /
+  `read-only` marks and the evidence behind them stay in your report above; they go
+  in a comment only if the person's voice (below) carries such things.
 - No findings: an empty `comments` list, and the summary says the change is sound.
+
+### Their voice
+
+If `.rq/voice.md` has anything in it, read it before you write this file. It is how
+the person you review for writes review comments, learned from what they actually
+posted after earlier drafts: what they rewrote and how, what they dropped, what they
+added, and anything they said about it themselves. They post these comments as their
+own, so write the `summary` and every `body` the way they would -- their length,
+their tone, how they ask and how they suggest -- and leave out the kinds of finding
+they do not post. Where their notes and their examples disagree, their notes win.
+
+It changes how findings are written and which go in this file, never what is true:
+do not soften a finding into something it is not, and keep every finding in your
+report whether or not it goes here.
 
 Write it with a tool that produces valid JSON, and check it parses
 (`ruby -rjson -e 'JSON.parse(File.read(".rq/review.json"))'`). If a later question

@@ -103,8 +103,9 @@ module GitHubDraft
     wanted = Array(indices).filter_map { |i| Integer(i.to_s, 10, exception: false) }.to_set
     placed = plan[:placed].each_with_index.select { |_, i| wanted.include?(i) }.map(&:first)
     loose = plan[:loose].each_with_index.select { |_, i| wanted.include?(plan[:placed].size + i) }.map(&:first)
-    plan.merge(placed: placed, loose: loose,
-               dropped: plan[:placed].size + plan[:loose].size - placed.size - loose.size)
+    all = plan[:placed] + plan[:loose]
+    unticked = all.each_with_index.reject { |_, i| wanted.include?(i) }.map(&:first)
+    plan.merge(placed: placed, loose: loose, unticked: unticked, dropped: unticked.size)
   end
 
   def body(plan)
@@ -131,7 +132,7 @@ module GitHubDraft
                   {commit_id: plan[:commit], body: body(plan),
                    comments: plan[:placed].map { |c| c.slice(:path, :line, :side, :body) }})
     url = res["html_url"].to_s
-    {ok: true, url: url.start_with?("https://github.com/") ? url : plan[:url], comments: plan[:placed].size}
+    {ok: true, id: res["id"], url: url.start_with?("https://github.com/") ? url : plan[:url], comments: plan[:placed].size}
   rescue StandardError => e
     said = e.message[/"message"\s*:\s*"([^"]+)"/, 1] || e.message[0, 200]
     hint = e.message.match?(/\AGitHub (403|404)\b/) ? " (the write token needs Pull requests: Read and write)" : ""

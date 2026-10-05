@@ -50,7 +50,7 @@ module Jobs
   # no bandwidth.
   LIST_COLUMNS = "id, login, baybox_id, repo, pr_number, box_name, state, phase, " \
                  "torn_down_at, error, created_at, started_at, finished_at, " \
-                 "kind, branch, summary, pr_url, draft_url, prepared, " \
+                 "kind, branch, summary, pr_url, draft_url, prepared, learned_at, learn_note, " \
                  "octet_length(output) AS output_bytes"
 
   def for_user(login) = DB.rows(<<~SQL, [login])

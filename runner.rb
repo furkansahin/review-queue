@@ -547,10 +547,15 @@ module Runner
       return {ok: false, output: prep[:output].to_s, exit_code: nil,
               error: "could not check out the pull request: #{detail}"}
     end
-    detach(box_row, dir, <<~SH)
+    # How the person writes review comments, if anything is known: put there
+    # by the worker before it starts the run. Placed empty otherwise, so a
+    # voice from an earlier run in this worktree does not linger.
+    voice = File.join(dir, "voice.md")
+    detach(box_row, dir, <<~SH, "VOICE_FILE" => File.size?(voice) ? voice : "/dev/null")
       set -o pipefail
       "$BAY" up #{box} --branch #{BayBox.sh_quote(branch)} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
       #{place_prompt(box_row, box)}
+      #{place_file(box_row, box, "VOICE_FILE", "voice.md", "the review voice")}
       echo reviewing > "$DIR/state"
       if "$BAY" run #{box} review >> "$DIR/log" 2>&1; then
         echo done > "$DIR/state"

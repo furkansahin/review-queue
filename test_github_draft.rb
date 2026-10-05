@@ -195,6 +195,11 @@ check("unticked, one for the summary is not in it", writes.last[3][:body].includ
 check("and the ticked one still goes", writes.last[3][:comments], [C_ADD])
 get "/sessions/draft?id=#{job["id"]}"
 check("the page says what was left out", last_response.body.include?("leaving out the 1 you unticked"), true)
+kept = JSON.parse(DB.row("SELECT draft_json FROM review_jobs WHERE id = $1", [job["id"]])["draft_json"], symbolize_names: true)
+check("what was sent is kept, to learn from what you submit",
+      [kept[:review_id], kept[:sent], kept[:unticked]], [77, [C_ADD], [C_FAR]])
+check("the summary as sent, without the footer", kept[:summary], "One real problem.")
+check("the page says it will learn from it", last_response.body.include?("what you changed is learned from"), true)
 
 $calls.clear
 post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[1], "_csrf" => token}
