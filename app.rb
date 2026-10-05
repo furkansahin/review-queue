@@ -766,12 +766,12 @@ class ReviewQueue < Roda
                 plan = read_plan.call(gh)
                 if plan[:missing]
                   {error: "the box has not written its findings down yet"}
-                elsif plan[:commit] && plan[:commit] != r.params["commit"].to_s
-                  {error: "the box's findings changed since this page loaded; look again first"}
-                elsif (plan[:placed] || []).size + (plan[:loose] || []).size != r.params["count"].to_i
+                elsif plan[:digest] && plan[:digest] != r.params["digest"].to_s
                   {error: "the box's findings changed since this page loaded; look again first"}
                 else
-                  GitHubDraft.create(gh, plan)
+                  # The page's ticks: what is not ticked is not sent.
+                  kept = GitHubDraft.keep(plan, r.params["keep"])
+                  GitHubDraft.create(gh, kept).merge(dropped: kept[:dropped])
                 end
               rescue StandardError => e
                 {error: "could not reach GitHub: #{e.message[0, 200]}"}
@@ -779,7 +779,8 @@ class ReviewQueue < Roda
             end
             if res[:ok]
               DB.exec("UPDATE review_jobs SET draft_url = $1 WHERE id = $2 AND login = $3", [res[:url], job["id"], current_login])
-              flash!("draft_notice", "drafted a pending review with #{res[:comments]} comment#{res[:comments] == 1 ? "" : "s"}: " \
+              left = res[:dropped].to_i.positive? ? ", leaving out the #{res[:dropped]} you unticked" : ""
+              flash!("draft_notice", "drafted a pending review with #{res[:comments]} line comment#{res[:comments] == 1 ? "" : "s"}#{left}: " \
                                      "read it on GitHub, then submit it there")
             else
               flash!("draft_error", res[:error])

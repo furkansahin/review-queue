@@ -1,4 +1,6 @@
 require "json"
+require "digest"
+require "set"
 require_relative "diff_view"
 
 # A box's review as a pending review on the pull request: one comment on each
@@ -89,7 +91,20 @@ module GitHubDraft
     {repo: repo, number: number, url: pull["html_url"].to_s, title: pull["title"].to_s,
      commit: commit, moved: pull.dig("head", "sha") != commit,
      summary: findings[:summary], placed: placed, loose: loose,
+     # What the page showed, so a box that rewrote its findings after the page
+     # loaded cannot have its new ones drafted under the old ones' ticks.
+     digest: Digest::SHA256.hexdigest(JSON.generate([commit, findings[:summary], placed, loose])),
      pending: pending && (pending["html_url"] || "#{pull["html_url"]}#pullrequestreview-#{pending["id"]}")}
+  end
+
+  # Only the comments the person kept. indices number them as the page lists
+  # them: the ones on lines first, then the ones for the summary.
+  def keep(plan, indices)
+    wanted = Array(indices).filter_map { |i| Integer(i.to_s, 10, exception: false) }.to_set
+    placed = plan[:placed].each_with_index.select { |_, i| wanted.include?(i) }.map(&:first)
+    loose = plan[:loose].each_with_index.select { |_, i| wanted.include?(plan[:placed].size + i) }.map(&:first)
+    plan.merge(placed: placed, loose: loose,
+               dropped: plan[:placed].size + plan[:loose].size - placed.size - loose.size)
   end
 
   def body(plan)
@@ -108,6 +123,9 @@ module GitHubDraft
     return {error: plan[:error]} if plan[:error]
     if plan[:pending]
       return {error: "you already have a pending review on ##{plan[:number]}: submit or discard it on GitHub first"}
+    end
+    if plan[:placed].empty? && plan[:loose].empty? && plan[:summary].to_s.empty?
+      return {error: "every comment is unticked and there is no summary: nothing to draft"}
     end
     res = gh.post("/repos/#{plan[:repo]}/pulls/#{plan[:number]}/reviews",
                   {commit_id: plan[:commit], body: body(plan),

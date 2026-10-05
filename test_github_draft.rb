@@ -102,6 +102,10 @@ check("the summary first", sent[:body].start_with?("One real problem."), true)
 check("the rest after it, by file and line", sent[:body].include?("- `prog/nexus.rb` line 300: Unrelated: this loop never ends. Second line."), true)
 check("and where it came from", sent[:body].end_with?(GitHubDraft::FOOTER), true)
 check("answering with the review", [res[:ok], res[:url], res[:comments]], [true, "https://github.com/#{REPO}/pull/6503#pullrequestreview-77", 2])
+kept = GitHubDraft.keep(plan, ["1", "2", "nonsense", "99"])
+check("keep counts lines first, then the summary's", [kept[:placed], kept[:loose], kept[:dropped]], [[C_DEL], [C_FAR], 1])
+check("nothing kept and no summary: nothing drafted",
+      GitHubDraft.create(FakeGH.new, GitHubDraft.keep(plan.merge(summary: ""), []))[:error].to_s.include?("nothing to draft"), true)
 github(reviews: [{"id" => 9, "state" => "PENDING", "user" => {"login" => "FurkanSahin"}, "html_url" => "https://github.com/x#r9"}])
 pend = GitHubDraft.plan(FakeGH.new, REPO, 6503, commit: HEAD, findings: GitHubDraft.parse(json([C_ADD])), login: "furkansahin")
 check("a pending review of yours is found", pend[:pending], "https://github.com/x#r9")
@@ -166,16 +170,38 @@ get "/sessions/draft?id=#{other}"
 check("someone else's review is not shown", last_response.status, 302)
 
 token = form.(page, "/sessions/draft")
-post "/sessions/draft?id=#{job["id"]}", {"commit" => HEAD, "count" => "2"}
+digest = page[/name="digest" value="(\h{64})"/, 1]
+check("every comment has a box, ticked", page.scan(/name="keep\[\]" value="(\d+)" checked="checked"/).flatten, %w[0 1])
+check("counted by the button", page.include?("2 of 2 kept"), true)
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0 1]}
 check("without its token it is refused", last_response.status, 403)
-$box = {ok: true, head: HEAD, json: json([C_ADD, C_FAR, C_DEL])}
-post "/sessions/draft?id=#{job["id"]}", {"commit" => HEAD, "count" => "2", "_csrf" => token}
-check("findings changed since the page: nothing drafted", writes, [])
+
+# Same number of findings, one reworded: the ticks would land on other words.
+$box = {ok: true, head: HEAD, json: json([C_ADD, C_FAR.merge(body: "Something else entirely.")])}
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0 1], "_csrf" => token}
+check("findings reworded since the page: nothing drafted", writes, [])
 get "/sessions/draft?id=#{job["id"]}"
 check("and it says so", last_response.body.include?("changed since this page loaded"), true)
 $box = {ok: true, head: HEAD, json: json([C_ADD, C_FAR])}
-post "/sessions/draft?id=#{job["id"]}", {"commit" => HEAD, "count" => "2", "_csrf" => token}
-check("confirmed, the review is drafted", writes.map { |c| [c[0], c[2]] }, [["github_pat_WRITE", "/repos/#{REPO}/pulls/6503/reviews"]])
+
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0 1], "_csrf" => token}
+check("all ticked, the review is drafted", writes.map { |c| [c[0], c[2]] }, [["github_pat_WRITE", "/repos/#{REPO}/pulls/6503/reviews"]])
+check("with the line comment", writes.last[3][:comments], [C_ADD])
+check("and the other in the summary", writes.last[3][:body].include?("this loop never ends"), true)
+
+$calls.clear
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0], "_csrf" => token}
+check("unticked, one for the summary is not in it", writes.last[3][:body].include?("this loop never ends"), false)
+check("and the ticked one still goes", writes.last[3][:comments], [C_ADD])
+get "/sessions/draft?id=#{job["id"]}"
+check("the page says what was left out", last_response.body.include?("leaving out the 1 you unticked"), true)
+
+$calls.clear
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[1], "_csrf" => token}
+check("unticked, a line comment is not sent", writes.last[3][:comments], [])
+$calls.clear
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "_csrf" => token}
+check("none ticked: the summary alone", [writes.last[3][:comments], writes.last[3][:body].start_with?("One real problem.")], [[], true])
 get "/sessions/draft?id=#{job["id"]}"
 check("the page links to it", last_response.body.include?("pullrequestreview-77"), true)
 get "/sessions"

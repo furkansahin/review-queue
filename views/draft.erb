@@ -27,7 +27,14 @@
   h2 { font: 600 12px 'IBM Plex Mono', monospace; letter-spacing: 0.08em; text-transform: uppercase;
        color: var(--muted-2); margin: 22px 0 10px; }
   .summary { white-space: pre-wrap; line-height: 1.55; }
-  .comment { border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px; }
+  .comment { border: 1px solid var(--border-soft); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px;
+             display: flex; gap: 12px; align-items: flex-start; }
+  .comment > div { min-width: 0; flex: 1; }
+  .comment input[type=checkbox] { margin: 3px 0 0; width: 16px; height: 16px; flex: none; cursor: pointer; accent-color: var(--accent); }
+  /* An unticked comment stays readable, but plainly out. */
+  .comment:has(input:not(:checked)) > div { opacity: 0.4; }
+  .comment:has(input:not(:checked)) .where::after { content: " · left out"; color: var(--err-fg); }
+  .kept { font: 12px 'IBM Plex Mono', monospace; color: var(--muted); }
   .where { font: 12px 'IBM Plex Mono', monospace; color: var(--muted); margin-bottom: 6px; overflow-wrap: anywhere; }
   .body { white-space: pre-wrap; line-height: 1.5; font-size: 13px; overflow-wrap: anywhere; }
   .banner { padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5;
@@ -90,21 +97,31 @@
 
       <h2><%= plan[:placed].size %> on the lines</h2>
       <% if plan[:placed].empty? %><p class="quiet">None.</p><% end %>
-      <% plan[:placed].each do |c| %>
-        <div class="comment">
-          <div class="where"><%= c[:path] %> · <%= c[:side] == "LEFT" ? "removed line" : "line" %> <%= c[:line] %></div>
-          <div class="body"><%= c[:body] %></div>
-        </div>
+      <%# Numbered as GitHubDraft.keep counts them: these first, then the ones
+          for the summary. The boxes belong to the form at the bottom. %>
+      <% plan[:placed].each_with_index do |c, i| %>
+        <label class="comment">
+          <input type="checkbox" form="draft-form" name="keep[]" value="<%= i %>" checked="checked"
+                 aria-label="keep this comment" />
+          <div>
+            <div class="where"><%= c[:path] %> · <%= c[:side] == "LEFT" ? "removed line" : "line" %> <%= c[:line] %></div>
+            <div class="body"><%= c[:body] %></div>
+          </div>
+        </label>
       <% end %>
 
       <% unless plan[:loose].empty? %>
         <h2><%= plan[:loose].size %> in the summary</h2>
         <p class="quiet" style="margin-top: 0;">On lines the pull request does not change, so GitHub cannot take them as line comments.</p>
-        <% plan[:loose].each do |c| %>
-          <div class="comment">
-            <div class="where"><%= c[:path] %> · line <%= c[:line] %></div>
-            <div class="body"><%= c[:body] %></div>
-          </div>
+        <% plan[:loose].each_with_index do |c, i| %>
+          <label class="comment">
+            <input type="checkbox" form="draft-form" name="keep[]" value="<%= plan[:placed].size + i %>" checked="checked"
+                   aria-label="keep this comment" />
+            <div>
+              <div class="where"><%= c[:path] %> · line <%= c[:line] %></div>
+              <div class="body"><%= c[:body] %></div>
+            </div>
+          </label>
         <% end %>
       <% end %>
 
@@ -117,14 +134,14 @@
 
       <div class="caution" style="margin-top: 16px;">
         This makes a <strong>pending</strong> review: nobody sees it but you until you submit it on GitHub.
-        Read every comment there, delete what you disagree with, and submit it as yours.
+        Untick what you do not want sent; read the rest there, and submit it as yours.
       </div>
 
-      <form method="post" action="/sessions/draft?id=<%= job["id"] %>" style="margin: 0;">
+      <form id="draft-form" method="post" action="/sessions/draft?id=<%= job["id"] %>" style="margin: 0;">
         <%== csrf %>
-        <input type="hidden" name="commit" value="<%= plan[:commit] %>" />
-        <input type="hidden" name="count" value="<%= total %>" />
+        <input type="hidden" name="digest" value="<%= plan[:digest] %>" />
         <div class="actions">
+          <% if total.positive? %><span class="kept" id="kept"><%= total %> of <%= total %> kept</span><% end %>
           <div style="flex: 1;"></div>
           <% unless can_write %>
             <span class="mono" style="font-size: 11px; color: var(--err-fg);">needs a write token, on the <a href="/baybox">Baybox page</a></span>
@@ -135,5 +152,18 @@
     <% end %>
   </div>
 </div>
+<script>
+// The count by the button. Without it the page still works: it only counts.
+(function () {
+  var out = document.getElementById("kept");
+  if (!out) return;
+  var boxes = document.querySelectorAll('input[name="keep[]"]');
+  function count() {
+    var n = Array.prototype.filter.call(boxes, function (b) { return b.checked; }).length;
+    out.textContent = n + " of " + boxes.length + " kept";
+  }
+  boxes.forEach(function (b) { b.addEventListener("change", count); });
+})();
+</script>
 </body>
 </html>
