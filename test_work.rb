@@ -42,6 +42,9 @@ ENV["RQ_SSH_HOME"] = File.join(ROOT, "fakehome")
 FileUtils.mkdir_p(ENV["RQ_SSH_HOME"])
 
 require_relative "runner"
+
+# The always-on skills come from GitHub; here they come from this file.
+AlwaysSkills.singleton_class.prepend(Module.new { def fetch(name) = "# #{name}\nA rule from #{name}.\n" })
 require_relative "crypto"
 require_relative "diff_view"
 
@@ -167,6 +170,8 @@ check("and runs the work command", calls.include?("run #{BOX} work"), true)
 check("the issue went over stdin", ssh_stdin.include?("It carries over."), true)
 check("so did the work prompt", ssh_stdin.include?("# Work on an issue"), true)
 check("and landed in the worktree's .rq/", ssh_cmds.include?(".worktrees/#{BOX}/.rq/issue.md"), true)
+check("the work applies the always-on skills too", ssh_cmds.include?(".worktrees/#{BOX}/.rq/skills/jeremy-lens/SKILL.md") &&
+      ssh_stdin.include?("A rule from jeremy-lens."), true)
 check("no command line carried the issue text", ssh_cmds.include?("It carries over."), false)
 env_file = File.read(File.join(Runner.bay_home("furkansahin"), "env"))
 check("the box gets the read token", env_file.include?("github_pat_READONLY"), true)

@@ -52,6 +52,9 @@ FileUtils.mkdir_p(FAKE_HOME)
 ENV["RQ_SSH_HOME"] = FAKE_HOME
 
 require_relative "runner"
+
+# The always-on skills come from GitHub; here they come from this file.
+AlwaysSkills.singleton_class.prepend(Module.new { def fetch(name) = "# #{name}\nA rule from #{name}.\n" })
 require_relative "crypto"
 
 $fail = 0
@@ -346,6 +349,11 @@ Runner.run(BOXROW, "review ubicloud/ubicloud 6175 rq-ubicloud-6175")
 deadline = Time.now + 60
 sleep 0.1 until File.read(File.join(d6175, "state")).strip == "done" || Time.now > deadline
 check("a known voice reaches the box", File.read("#{ROOT}/ssh.stdin").include?("One sentence. Ask."), true)
+check("so does every always-on skill, into .rq/skills", File.read("#{ROOT}/ssh.cmds").include?(
+      "ubicloud/.worktrees/rq-ubicloud-6175/.rq/skills/jeremy-lens/SKILL.md"), true)
+check("with its text", File.read("#{ROOT}/ssh.stdin").include?("A rule from jeremy-lens."), true)
+check("after emptying the folder, so a skill taken off the list goes",
+      File.read("#{ROOT}/ssh.cmds").include?("rm -rf 'ubicloud/.worktrees/rq-ubicloud-6175/.rq/skills'"), true)
 check("a bad repo never reaches bay",
       Runner.run(BOXROW, "review notarepo 1 rq-x-1")[:ok], false)
 

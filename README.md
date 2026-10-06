@@ -105,6 +105,16 @@ sufficient because `RQ_SCOPE` must be public repositories anyway — if you ever
 repository, this counter stops seeing those reviews. A `+` after the number (`18+`) means the
 pages read did not reach back a full 7 days, so the number is a floor, not a total.
 
+## Skills every run applies
+
+A person's skills repository is installed in their boxes by bay, but whether a skill there is
+used is the model's judgment: it loads one when it decides the description fits. Some are not
+left to that. `RQ_ALWAYS_SKILLS` (default `jeremy-lens`) names skills every review and every
+piece of work applies, from `RQ_ALWAYS_SKILLS_REPO` (default `furkansahin/skills`). Each run
+gets a fresh copy in `.rq/skills/<name>/SKILL.md`, fetched at most every 15 minutes, the last
+good copy when GitHub cannot be reached, and its prompt says to read and apply each one before
+anything else. A person whose own repository lacks them gets them all the same.
+
 ## Review voice
 
 The comments a box drafts for GitHub are written in the voice of the person they are for. Once a

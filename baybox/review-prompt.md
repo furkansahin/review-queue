@@ -18,6 +18,12 @@ prompt disagree on what to check or run, the skill wins; keep this prompt's
 `verified` / `read-only` marks either way, because that is how the reader tells a fact
 from a suspicion.
 
+Some are not left to that judgment. `.rq/skills/` holds the skills every review here
+applies, whatever their descriptions say. Before you read the change, read each
+`SKILL.md` under `.rq/skills/` in full, and review against it exactly as if you had
+loaded that skill: every rule in it is part of the standard. If a skill of the same
+name is installed as well, it is the same skill; apply it once.
+
 ## 1. Read the change
 
     git diff --stat origin/main

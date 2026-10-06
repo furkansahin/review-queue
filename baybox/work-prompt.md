@@ -12,8 +12,11 @@ The skills available to you were put in this box by the person you are working f
 They are how code in this repository is written here -- a code-quality standard, a
 commit voice, whatever they chose -- and they are not optional reading.
 
-- Before writing anything, load every skill whose description fits this repository or
-  this task.
+- Before writing anything, read each `SKILL.md` under `.rq/skills/` in full. Those are
+  the skills every task here applies, whatever their descriptions say: hold the work
+  to them exactly as if you had loaded them. If a skill of the same name is installed
+  as well, it is the same skill.
+- Then load every other skill whose description fits this repository or this task.
 - Where a skill and this prompt disagree, the skill wins. That covers how the work is
   split into commits, what must pass before each commit, how commit messages and the
   pull request description are written, and whether commits carry a `Co-Authored-By`

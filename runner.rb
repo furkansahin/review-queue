@@ -5,6 +5,7 @@ require "securerandom"
 require_relative "crypto"
 require_relative "baybox"
 require_relative "queue_service"
+require_relative "always_skills"
 require_relative "stream_render"
 
 # Drives bay from this host instead of from the user's box.
@@ -552,11 +553,13 @@ module Runner
     # by the worker before it starts the run. Placed empty otherwise, so a
     # voice from an earlier run in this worktree does not linger.
     voice = File.join(dir, "voice.md")
-    detach(box_row, dir, <<~SH, "VOICE_FILE" => File.size?(voice) ? voice : "/dev/null")
+    skills_env, skills_sh = always_skills(box_row, box, dir)
+    detach(box_row, dir, <<~SH, {"VOICE_FILE" => File.size?(voice) ? voice : "/dev/null"}.merge(skills_env))
       set -o pipefail
       "$BAY" up #{box} --branch #{BayBox.sh_quote(branch)} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
       #{place_prompt(box_row, box)}
       #{place_file(box_row, box, "VOICE_FILE", "voice.md", "the review voice")}
+      #{skills_sh}
       echo reviewing > "$DIR/state"
       if "$BAY" run #{box} review >> "$DIR/log" 2>&1; then
         echo done > "$DIR/state"
@@ -603,11 +606,13 @@ module Runner
               error: "could not prepare the branch: #{detail}"}
     end
 
-    detach(box_row, dir, <<~SH, "PROMPT_FILE" => WORK_PROMPT, "ISSUE_FILE" => File.join(dir, "issue.md"))
+    skills_env, skills_sh = always_skills(box_row, box, dir)
+    detach(box_row, dir, <<~SH, {"PROMPT_FILE" => WORK_PROMPT, "ISSUE_FILE" => File.join(dir, "issue.md")}.merge(skills_env))
       set -o pipefail
       "$BAY" up #{box} --branch #{BayBox.sh_quote(branch)} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
       #{place_file(box_row, box, "PROMPT_FILE", "work-prompt.md", "the work prompt")}
       #{place_file(box_row, box, "ISSUE_FILE", "issue.md", "the issue")}
+      #{skills_sh}
       echo reviewing > "$DIR/state"
       if "$BAY" run #{box} work >> "$DIR/log" 2>&1; then
         echo done > "$DIR/state"
@@ -1154,6 +1159,26 @@ module Runner
   # and claude answered "Input must be provided". A missing prompt fails the
   # review now, loudly, rather than running it blind.
   def place_prompt(box_row, box) = place_file(box_row, box, "PROMPT_FILE", "review-prompt.md", "the review prompt")
+
+  # The skills every run applies (AlwaysSkills), as the detached script's
+  # environment and the lines that put them in the worktree's .rq/skills/,
+  # emptied first so a skill taken off the list does not stay behind. Each
+  # copy is passed by an environment variable, as the prompt is, so no path
+  # is spliced into the script.
+  def always_skills(box_row, box, dir)
+    found = AlwaysSkills.files(ROOT, log: ->(m) { File.write(File.join(dir, "build.log"), "#{m}\n", mode: "a") })
+    env = {}
+    lines = []
+    skills = "#{worktree(box_row, box)}/.rq/skills"
+    clear = BayBox.sh_quote("rm -rf #{BayBox.sh_quote(skills)} && mkdir -p #{BayBox.sh_quote(skills)}")
+    lines << %(ssh -F "$SSH_CFG" #{host_alias(box_row["login"])} #{clear} < /dev/null || true)
+    found.each_with_index do |(name, path), i|
+      var = "SKILL_#{("A".ord + i).chr}"
+      env[var] = path
+      lines << place_file(box_row, box, var, "skills/#{name}/SKILL.md", "the #{name} skill")
+    end
+    [env, lines.join("\n")]
+  end
 
   # Copies a file from this host into the worktree's .rq/. The source is named
   # by an environment variable of the detached script, so its path is never
