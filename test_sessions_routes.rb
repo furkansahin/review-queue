@@ -19,8 +19,9 @@ WHO = {login: "furkansahin"}
 GitHubOAuth.class_eval { define_method(:exchange) { |_| "gho_x" } }
 GitHubClient.class_eval { define_method(:get) { |_| {"login" => WHO[:login]} } }
 
+ROW = {settled: false}
 def mkrow(repo, n)
-  {key: "#{repo}##{n}", repo: repo.split("/").last, repo_full: repo, number: n, last_at: Time.now - 86_400, settled: false,
+  {key: "#{repo}##{n}", repo: repo.split("/").last, repo_full: repo, number: n, last_at: Time.now - 86_400, settled: ROW[:settled],
    buckets: [:review], quick: false, draft: false, url: "https://github.com/#{repo}/pull/#{n}",
    title: "PR #{n}", ref: "#{repo} ##{n}", author: "someone", state: "To review",
    state_bg: "var(--state-todo-bg)", state_color: "var(--state-todo-fg)", chips: [],
@@ -284,6 +285,13 @@ check("ask without CSRF is blocked", last_response.status, 403)
 
 # --- teardown -------------------------------------------------------------
 # a teardown that works must say so, and must free the pull request
+# A pull request you approved is settled -- and can still want a review.
+DB.exec("UPDATE review_jobs SET state='failed', box_name='rq-ubicloud-6172' WHERE id=$1", [job_id])
+ROW[:settled] = true
+get "/"
+check("a settled row still offers a review", last_response.body.include?('action="/review?tab=all"'), true)
+check("after one that stopped short, as a fresh one", last_response.body.include?(">Review again</button>"), true)
+ROW[:settled] = false
 DB.exec("UPDATE review_jobs SET state='done', box_name='rq-ubicloud-6172' WHERE id=$1", [job_id])
 get "/"
 check("row claims reviewed before teardown", last_response.body.include?("review ✓"), true)

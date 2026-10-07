@@ -571,7 +571,9 @@
       </div>
       <div class="mono" style="text-align: right; font-weight: 500; font-size: 13px; color: <%= r[:age_text_color] %>;"><%= r[:age] %></div>
       <div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center;">
-        <% if reviews_enabled && !r[:settled] %>
+        <%# On every row, settled or not: a pull request you approved can still
+            want a review, and its last one's state is worth seeing. %>
+        <% if reviews_enabled %>
           <% job = jobs_by_key[r[:key]] %>
           <% if job && %w[queued running].include?(job["state"]) %>
             <a class="mini" href="/sessions#job-<%= job["id"] %>" title="a review is running on your baybox"
@@ -585,7 +587,11 @@
                 <%== csrf_review %>
                 <input type="hidden" name="repo" value="<%= r[:repo_full] %>" />
                 <input type="hidden" name="pr" value="<%= r[:number] %>" />
-                <button class="mini" type="submit" title="start an adversarial review on your baybox">Review</button>
+                <% if job && job["state"] == "failed" %>
+                  <button class="mini" type="submit" title="the last review did not finish with an answer: start a fresh one in the same box">Review again</button>
+                <% else %>
+                  <button class="mini" type="submit" title="start an adversarial review on your baybox">Review</button>
+                <% end %>
               </form>
             <% else %>
               <a class="mini" href="/baybox" style="text-decoration: none;"
