@@ -208,12 +208,14 @@ gh.define_singleton_method(:graphql) do |_q, vars|
   asked << vars[:ids].size
   {"nodes" => vars[:ids].map { |id| {"id" => id, "reviewDecision" => "APPROVED", "mergeable" => "MERGEABLE"} } + [nil]}
 end
-got = SVC.send(:review_decisions, (1..150).map { |i| "PR_#{i}" } + [nil, "PR_1"])
+got, failed = SVC.send(:review_decisions, (1..150).map { |i| "PR_#{i}" } + [nil, "PR_1"])
 check("in batches of a hundred", asked, [100, 50])
 check("one answer per pull request", got.size, 150)
 check("keyed by node id", got["PR_7"], {decision: "APPROVED", mergeable: "MERGEABLE"})
+check("and nothing went wrong", failed, nil)
 gh.define_singleton_method(:graphql) { |*_| raise "GitHub 502" }
-check("a failure is an empty answer, never an exception", SVC.send(:review_decisions, ["PR_1"]), {})
+check("a failure is an empty answer, never an exception", SVC.send(:review_decisions, ["PR_1"]).first, {})
+check("but it says what went wrong, for the page", SVC.send(:review_decisions, ["PR_1"]).last, "GitHub 502")
 
 puts "-- the activity columns --"
 # Who and what used to share one line, "someone · changes requested", and

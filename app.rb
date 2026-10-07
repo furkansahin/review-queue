@@ -20,6 +20,7 @@ if REVIEWS_ENABLED
   require_relative "prereview"
   require_relative "snooze_store"
   require_relative "voice"
+  require_relative "health"
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
@@ -529,6 +530,15 @@ class ReviewQueue < Roda
                                    github_write_token_enc=$8
               WHERE id=$9
             SQL
+            # A token saved is a token to look at again now, not in six hours:
+            # the warning about the old one should not outlive it.
+            if github != row["github_token_enc"] || writer != row["github_write_token_enc"]
+              DB.exec(<<~SQL, [row["id"]])
+                UPDATE bayboxes SET health_checked_at = NULL, read_token_state = NULL, read_token_expires_at = NULL,
+                                    write_token_state = NULL, write_token_expires_at = NULL
+                WHERE id = $1
+              SQL
+            end
           else
             priv, pub = BayBox.generate_keypair(comment: "review-queue:#{current_login}")
             # The array is built first: a heredoc body starts on the next line,
@@ -1347,7 +1357,16 @@ class ReviewQueue < Roda
       counts[:issues] = {open: issues.count { |i| !i[:settled] }, total: issues.size}
       snap = snap.merge(counts: counts)
 
-      view("queue", locals: {snap: snap, rows: rows, tab: tab, hide: hide, service: service, drop: drop,
+      # What needs the person, before anything else on the page: a token about
+      # to run out, a morning that did not run, approvals that could not be read.
+      health = begin
+        REVIEWS_ENABLED ? Health.problems(current_login, snap: snap) : []
+      rescue StandardError => e
+        warn "[review-queue] health: #{e.class}: #{e.message}"
+        []
+      end
+
+      view("queue", locals: {snap: snap, rows: rows, tab: tab, hide: hide, service: service, drop: drop, health: health,
                              login: current_login, csrf: csrf_tag("/refresh"),
                              csrf_logout: csrf_tag("/logout"),
                              csrf_snooze: csrf_tag("/snooze"),

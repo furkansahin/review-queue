@@ -261,6 +261,33 @@
       <% end %>
     </div>
 
+    <h2>Tokens</h2>
+    <div class="card">
+      <%
+        token_line = lambda do |which, col, label|
+          next "#{label}: none saved" if box[col].to_s.empty?
+          state = box["#{which}_token_state"]
+          at = box["#{which}_token_expires_at"]
+          text = if state == "refused" then "refused by GitHub"
+                 elsif at && at <= Time.now then "expired #{at.utc.strftime("%b %-d %Y")}"
+                 elsif at then "expires #{at.utc.strftime("%b %-d %Y")} (#{Health.when_left(at, Time.now)})"
+                 elsif state == "ok" then "accepted, no expiry"
+                 else "not checked yet"
+                 end
+          "#{label}: #{text}"
+        end
+      %>
+      <div class="mono" style="font-size: 12px; line-height: 1.8;">
+        <div><%= token_line.call("read", "github_token_enc", "read token") %></div>
+        <div><%= token_line.call("write", "github_write_token_enc", "write token") %></div>
+      </div>
+      <div class="note" style="margin-top: 8px;">
+        Checked with GitHub every few hours, and right after you save a new one. Before one expires,
+        the queue says so at the top, two weeks ahead.
+        <% if box["health_checked_at"] %>Last checked <%= box["health_checked_at"].utc.strftime("%b %-d %H:%M UTC") %>.<% end %>
+      </div>
+    </div>
+
     <h2>Mornings</h2>
     <div class="card">
       <% pr_on = prereview["prereview_on"] == true %>

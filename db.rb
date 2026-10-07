@@ -332,6 +332,16 @@ module DB
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS learn_checked_at timestamptz;
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS learn_note       text;
 
+    -- What the worker last learned about each baybox's tokens and machine:
+    -- whether GitHub takes each token and when it expires, and when it last
+    -- looked. NULL until it has; reset when a token is saved, so a new one is
+    -- looked at within the minute.
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS read_token_state       text;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS read_token_expires_at  timestamptz;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS write_token_state      text;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS write_token_expires_at timestamptz;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS health_checked_at      timestamptz;
+
     -- How each person writes review comments, from what they post: a drafted
     -- comment and what they posted instead (rewritten), unchanged (kept), not
     -- posted (dropped), theirs alone (added), the summary, and their recent
@@ -390,6 +400,9 @@ module DB
     -- recent comments were last read.
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS voice_notes  text NOT NULL DEFAULT '';
     ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS voice_own_at timestamptz;
+    -- The last failure learning the review voice, cleared by the next success.
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS voice_error    text;
+    ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS voice_error_at timestamptz;
 
     -- The last queue each person saw, so a restart shows it at once instead of
     -- making them wait out a rebuild. One row per person, replaced by every

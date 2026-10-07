@@ -15,6 +15,7 @@ require_relative "baybox"
 require_relative "runner"
 require_relative "prereview"
 require_relative "voice"
+require_relative "health"
 
 TICK = Integer(ENV.fetch("RQ_WORKER_TICK", "10"))
 
@@ -179,6 +180,11 @@ if $PROGRAM_NAME == __FILE__
           Voice.tick(log: method(:log))
         rescue StandardError => e
           log("voice failed: #{e.class}: #{e.message}")
+        end
+        begin
+          Health.tick(check_box: ->(box) { Runner.check(box) }, log: method(:log))
+        rescue StandardError => e
+          log("health failed: #{e.class}: #{e.message}")
         end
       end
       start_queued

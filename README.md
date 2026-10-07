@@ -105,6 +105,18 @@ sufficient because `RQ_SCOPE` must be public repositories anyway — if you ever
 repository, this counter stops seeing those reviews. A `+` after the number (`18+`) means the
 pages read did not reach back a full 7 days, so the number is a floor, not a total.
 
+## What needs you
+
+Much of this runs with nobody watching -- the morning reviews, learning the review voice,
+drafting and pushing with the write token -- so when it breaks, the queue says so, on a line at
+the top, and says nothing when all is well. Every few hours, and right after a token is saved,
+the worker asks GitHub whether it takes each token and when it expires (every answer carries
+the expiry), and checks the box can be reached. The page also reads what the morning reviews
+and the voice learning last wrote, and whether this queue could read approvals from GitHub --
+without them an approved pull request of yours shows "Your turn", not "Ready to merge". A token
+is flagged two weeks before it expires, since a new one may wait on an admin's approval. The
+Baybox page shows when each token expires.
+
 ## Skills every run applies
 
 A person's skills repository is installed in their boxes by bay, but whether a skill there is

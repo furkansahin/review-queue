@@ -476,7 +476,7 @@ class QueueService
     decisions = Thread.new { review_decisions(entries.values.map { |e| e[:item]["node_id"] }) }
 
     prs = threaded(entries.values) { |entry| detail(entry, login) }.compact
-    decided = decisions.value
+    decided, decisions_error = decisions.value
     prs.each do |pr|
       d = decided[pr[:node_id]] || {}
       pr[:review_decision] = d[:decision]
@@ -486,7 +486,8 @@ class QueueService
 
     {rows: rows, login: login, fetched_at: Time.now, rate: @gh.rate_remaining, error: nil,
      counts: counts(rows), reviews_7d: weekly.value, merged: merged.value,
-     issues: issue_nodes ? issue_rows(issue_nodes, login) : nil, issues_error: issues_error}
+     issues: issue_nodes ? issue_rows(issue_nodes, login) : nil, issues_error: issues_error,
+     decisions_error: decisions_error}
   end
 
   # Pull requests you reviewed in the last 7 days.
@@ -722,15 +723,21 @@ class QueueService
   # off your list while it still needs you.
   DECISIONS_PER_QUERY = 100
 
+  # [decisions by node id, nil] -- or [{}, what went wrong]. The queue still
+  # builds without them, every row falling back to its own reading of the
+  # reviews; but that reading never says "Ready to merge", so the failure is
+  # kept and the page says it, rather than an approved pull request quietly
+  # showing as "Your turn".
   def review_decisions(ids)
-    ids.compact.uniq.each_slice(DECISIONS_PER_QUERY).each_with_object({}) do |batch, out|
+    out = ids.compact.uniq.each_slice(DECISIONS_PER_QUERY).each_with_object({}) do |batch, acc|
       (@gh.graphql(DECISIONS_GRAPHQL, {ids: batch})["nodes"] || []).each do |node|
         next unless node && node["id"]
-        out[node["id"]] = {decision: node["reviewDecision"], mergeable: node["mergeable"]}
+        acc[node["id"]] = {decision: node["reviewDecision"], mergeable: node["mergeable"]}
       end
     end
-  rescue StandardError
-    {}
+    [out, nil]
+  rescue StandardError => e
+    [{}, e.message.to_s[0, 300]]
   end
 
   # Rows for the issues tab. Nothing is fetched here: the query already carried

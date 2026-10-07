@@ -296,8 +296,10 @@ module Voice
       note = harvest(gh, job)
       next unless note
       DB.exec("UPDATE review_jobs SET learned_at = now(), learn_note = $1 WHERE id = $2", [note, job["id"]])
+      failed(job["login"], nil)
       log.call("voice #{job["login"]} ##{job["pr_number"]}: #{note}")
     rescue StandardError => e
+      failed(job["login"], "could not read your review of ##{job["pr_number"]}: #{e.message[0, 200]}")
       log.call("voice: could not read ##{job["pr_number"]}: #{e.class}: #{e.message[0, 200]}")
     end
 
@@ -309,6 +311,7 @@ module Voice
       gh = read_client(row["login"])
       next unless gh
       n = refresh_own(gh, row["login"])
+      failed(row["login"], nil)
       log.call("voice #{row["login"]}: #{n} recent comments")
     rescue StandardError => e
       # Tried again tomorrow rather than every minute.
@@ -316,7 +319,16 @@ module Voice
         INSERT INTO user_settings (login, voice_own_at) VALUES ($1, now())
         ON CONFLICT (login) DO UPDATE SET voice_own_at = now()
       SQL
+      failed(row["login"], "could not read your recent review comments: #{e.message[0, 200]}")
       log.call("voice: could not read #{row["login"]}'s comments: #{e.class}: #{e.message[0, 200]}")
     end
+  end
+
+  # Kept where the health line on the queue page reads it; nil clears it.
+  def failed(login, message)
+    DB.exec(<<~SQL, [login, message])
+      INSERT INTO user_settings (login, voice_error, voice_error_at) VALUES ($1, $2, CASE WHEN $2::text IS NULL THEN NULL ELSE now() END)
+      ON CONFLICT (login) DO UPDATE SET voice_error = EXCLUDED.voice_error, voice_error_at = EXCLUDED.voice_error_at
+    SQL
   end
 end
