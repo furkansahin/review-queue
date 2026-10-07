@@ -53,7 +53,9 @@ runner_stub = Module.new do
   end
   def box_list(_box_row) = []
   def forget_box_list(_box_row) = nil
+  def answered?(_box_row, _box) = $answered
 end
+$answered = true
 Runner.singleton_class.prepend(runner_stub)
 
 include Rack::Test::Methods
@@ -164,6 +166,16 @@ job = DB.row("SELECT * FROM review_jobs WHERE id = $1", [job["id"]])
 check("it is done", job["state"], "done")
 check("it inspected the branch", $commands.include?("inspect rq-ubicloud-ubicloud-issue-6458"), true)
 check("and stored the summary", JSON.parse(job["summary"].to_s)["ahead"], 2)
+
+# The same stop with no answer after the last step: not done.
+DB.exec("UPDATE review_jobs SET state = 'running', error = NULL WHERE id = $1", [job["id"]])
+$answered = false
+poll_running
+stopped = DB.row("SELECT state, error FROM review_jobs WHERE id = $1", [job["id"]])
+check("a run that stopped without an answer is not done", stopped["state"], "failed")
+check("and says so", stopped["error"].to_s.include?("stopped without giving an answer"), true)
+$answered = true
+DB.exec("UPDATE review_jobs SET state = 'done', error = NULL WHERE id = $1", [job["id"]])
 
 puts "-- the session card --"
 get "/sessions"

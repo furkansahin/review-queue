@@ -506,6 +506,11 @@ module Runner
 
   def teardown(box_row, box)
     return bad_box unless box.to_s.match?(BOX_RE)
+    # Locked when it was made (lock_worktree), and git will not remove a
+    # locked worktree on one --force; bay down would leave it behind.
+    capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]),
+             "git -C #{BayBox.sh_quote(repo_dir(box_row))} worktree unlock #{BayBox.sh_quote(".worktrees/#{box}")} 2>/dev/null; true"],
+            env_for(box_row), timeout: 30)
     res = bay(box_row, "down", box, "--force", timeout: 300)
     FileUtils.rm_rf(state_dir(box_row["login"], box)) if res[:ok]
     res
@@ -557,6 +562,7 @@ module Runner
     detach(box_row, dir, <<~SH, {"VOICE_FILE" => File.size?(voice) ? voice : "/dev/null"}.merge(skills_env))
       set -o pipefail
       "$BAY" up #{box} --branch #{BayBox.sh_quote(branch)} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
+      #{lock_worktree(box_row, box)}
       #{place_prompt(box_row, box)}
       #{place_file(box_row, box, "VOICE_FILE", "voice.md", "the review voice")}
       #{skills_sh}
@@ -610,6 +616,7 @@ module Runner
     detach(box_row, dir, <<~SH, {"PROMPT_FILE" => WORK_PROMPT, "ISSUE_FILE" => File.join(dir, "issue.md")}.merge(skills_env))
       set -o pipefail
       "$BAY" up #{box} --branch #{BayBox.sh_quote(branch)} >> "$DIR/build.log" 2>&1 || { echo failed > "$DIR/state"; exit 1; }
+      #{lock_worktree(box_row, box)}
       #{place_file(box_row, box, "PROMPT_FILE", "work-prompt.md", "the work prompt")}
       #{place_file(box_row, box, "ISSUE_FILE", "issue.md", "the issue")}
       #{skills_sh}
@@ -1160,6 +1167,35 @@ module Runner
   # review now, loudly, rather than running it blind.
   def place_prompt(box_row, box) = place_file(box_row, box, "PROMPT_FILE", "review-prompt.md", "the review prompt")
 
+  def repo_dir(box_row) = (box_row["repo_path"] || "ubicloud").to_s
+
+  # Every box's worktree shares one repository on the machine, registered by
+  # its path there. Inside a box that path does not exist -- the checkout is
+  # mounted at /workspace -- so a `git worktree prune` run in any box sees
+  # every other worktree as gone and unregisters them all. Boxes did, four
+  # times, and broke seventeen worktrees at once. A locked worktree is never
+  # pruned, so each is locked as soon as bay has made it. Best effort: a box
+  # that cannot be locked still runs.
+  def lock_worktree(box_row, box)
+    cmd = "git -C #{BayBox.sh_quote(repo_dir(box_row))} worktree lock " \
+          "--reason #{BayBox.sh_quote("leeghwater: kept from a box's git worktree prune")} " \
+          "#{BayBox.sh_quote(".worktrees/#{box}")} 2>/dev/null || true"
+    %(ssh -F "$SSH_CFG" #{host_alias(box_row["login"])} #{BayBox.sh_quote(cmd)} < /dev/null || true)
+  end
+
+  # Whether the last run in this box ended with an answer: claude's result
+  # event after the last question, or anywhere in a first run's log. A run
+  # can exit 0 without one -- on #6503 it stopped mid-thought, after ten
+  # minutes of work -- and its trace must not then be shown as the review.
+  def answered?(box_row, box)
+    return false unless box.to_s.match?(BOX_RE)
+    path = File.join(state_dir(box_row["login"], box), "log")
+    return false unless File.exist?(path)
+    text = File.binread(path)
+    from = text.rindex("\n== you asked\n") || 0
+    !text.index(%("type":"result"), from).nil?
+  end
+
   # The skills every run applies (AlwaysSkills), as the detached script's
   # environment and the lines that put them in the worktree's .rq/skills/,
   # emptied first so a skill taken off the list does not stay behind. Each
@@ -1444,6 +1480,9 @@ module Runner
     return bad_box unless box.to_s.match?(BOX_RE)
     path = File.join(state_dir(box_row["login"], box), name)
     body = File.exist?(path) ? tail(path, limit) : ""
+    # Cut short, the first line is the end of one: drop it, or the page opens
+    # on half an event printed raw.
+    body = body.partition("\n").last if File.exist?(path) && File.size(path) > limit
     # The log holds claude's raw events. Rendering happens on the way out, so
     # the stored events stay whole and can be read differently later.
     body = StreamRender.all(body) if name == "log"

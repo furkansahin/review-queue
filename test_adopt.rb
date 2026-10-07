@@ -43,6 +43,7 @@ Runner.singleton_class.prepend(Module.new do
      output: text.gsub(/^#{Regexp.escape(Runner::RUN_MARK)}\n?/, "")
                  .gsub(/#{Regexp.escape(Runner::EXIT_MARK)}\d+\n?/, "")}
   end
+  def answered?(_box_row, _box) = BOXSAYS.fetch(:answered, true)
   def run(_box_row, command, timeout: 120, stdin: nil)
     return {ok: true, output: "orphaned", exit_code: 0} if command.start_with?("status")
     {ok: true, output: "", exit_code: 0}
@@ -67,6 +68,17 @@ row = DB.row("SELECT * FROM review_jobs WHERE id = $1", [job["id"]])
 check("the job is done", row["state"], "done")
 check("with the review, without the stamp", row["output"], "the whole review\n")
 check("and no error", row["error"], nil)
+
+puts "-- a run that ends without an answer is not a review --"
+DB.exec("UPDATE review_jobs SET state='running', output=NULL, error=NULL WHERE id=$1", [job["id"]])
+BOXSAYS[:text] = "▸ Bash rspec\n▸ Write memory.md\n#{Runner::EXIT_MARK}0\n"
+BOXSAYS[:answered] = false
+poll_running
+row = DB.row("SELECT * FROM review_jobs WHERE id = $1", [job["id"]])
+check("exit 0 with no answer is a failure", row["state"], "failed")
+check("saying what happened", row["error"].to_s.include?("stopped without giving an answer"), true)
+check("and keeping its last steps to read", row["output"].to_s.include?("Write memory.md"), true)
+BOXSAYS[:answered] = true
 
 puts "-- a run the box failed is a failure --"
 DB.exec("UPDATE review_jobs SET state='running', output=NULL, error=NULL WHERE id=$1", [job["id"]])

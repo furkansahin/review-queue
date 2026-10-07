@@ -252,8 +252,11 @@ FileUtils.rm_f("#{ROOT}/slow-list")
 n = lists.()
 Runner.box_list(BOXROW)
 check("so the next visit asks the machine, and waits for it", lists.(), n + 1)
+File.delete("#{ROOT}/ssh.cmds") if File.exist?("#{ROOT}/ssh.cmds")
 check("teardown asks bay to go down",
       Runner.run(BOXROW, "teardown rq-x-1")[:ok] && calls.include?("down rq-x-1 --force"), true)
+check("having unlocked its worktree first, or git would keep it",
+      File.read("#{ROOT}/ssh.cmds").include?("worktree unlock '.worktrees/rq-x-1'"), true)
 check("a bad box name is refused", Runner.run(BOXROW, "teardown ../etc")[:ok], false)
 check("an unknown verb is refused", Runner.run(BOXROW, "wat")[:ok], false)
 
@@ -349,6 +352,23 @@ Runner.run(BOXROW, "review ubicloud/ubicloud 6175 rq-ubicloud-6175")
 deadline = Time.now + 60
 sleep 0.1 until File.read(File.join(d6175, "state")).strip == "done" || Time.now > deadline
 check("a known voice reaches the box", File.read("#{ROOT}/ssh.stdin").include?("One sentence. Ask."), true)
+check("its worktree is locked once bay has made it, so no box's prune can take it",
+      File.read("#{ROOT}/ssh.cmds").include?("worktree lock --reason") &&
+      File.read("#{ROOT}/ssh.cmds").include?("'.worktrees/rq-ubicloud-6175'"), true)
+
+# Answered or not, read from the run's own log.
+d_ans = Runner.state_dir("furkansahin", "rq-ubicloud-6176")
+FileUtils.mkdir_p(d_ans)
+File.write(File.join(d_ans, "log"), %({"type":"assistant"}\n{"type":"result","result":"the review"}\n))
+check("a run that ended on a result answered", Runner.answered?(BOXROW, "rq-ubicloud-6176"), true)
+File.write(File.join(d_ans, "log"), %({"type":"result","result":"old"}\n\n== you asked\nagain?\n\n{"type":"assistant"}\n))
+check("an answer before the last question is not this one's", Runner.answered?(BOXROW, "rq-ubicloud-6176"), false)
+File.write(File.join(d_ans, "log"), %({"type":"assistant"}\n__RQ_EXIT:0\n))
+check("exit 0 with no result is no answer", Runner.answered?(BOXROW, "rq-ubicloud-6176"), false)
+check("nor is a box with no log", Runner.answered?(BOXROW, "rq-ubicloud-6177"), false)
+File.write(File.join(d_ans, "log"), ("x" * 300) + "\n" + %({"type":"assistant","message":{"content":[{"type":"text","text":"kept"}]}}\n))
+cut = Runner.send(:read_log, BOXROW, "rq-ubicloud-6176", "log", 120)[:output]
+check("a log cut short does not open on half a line", cut.include?("xxx"), false)
 check("so does every always-on skill, into .rq/skills", File.read("#{ROOT}/ssh.cmds").include?(
       "ubicloud/.worktrees/rq-ubicloud-6175/.rq/skills/jeremy-lens/SKILL.md"), true)
 check("with its text", File.read("#{ROOT}/ssh.stdin").include?("A rule from jeremy-lens."), true)

@@ -118,9 +118,13 @@ def poll_running
         next
       end
       if taken[:finished]
-        Jobs.finish(job["id"], taken[:exit_code].to_i.zero? ? "done" : "failed",
+        ok = taken[:exit_code].to_i.zero?
+        unanswered = ok && !Runner.answered?(box, job["box_name"])
+        Jobs.finish(job["id"], ok && !unanswered ? "done" : "failed",
           output: taken[:output],
-          error: taken[:exit_code].to_i.zero? ? nil : "the run failed on the baybox")
+          error: if !ok then "the run failed on the baybox"
+                 elsif unanswered then "Claude stopped without giving an answer -- its last step is below. Ask again in the box below."
+                 end)
         record_summary(job, box)
         log("adopted #{job["box_name"]} and it was finished: #{taken[:exit_code]}")
       else
@@ -144,9 +148,15 @@ def poll_running
         Jobs.finish(job["id"], "failed", error: "could not collect the review: #{result[:error]}") if Jobs.stale?(job)
         next
       end
-      Jobs.finish(job["id"], state == "done" ? "done" : "failed",
-        output: result[:output],
-        error: state == "failed" ? "the run failed on the baybox\n#{detail}" : nil)
+      # Done is claude's exit code, which can be 0 with no answer given: the
+      # run stopped after its last step without a word. That is not a review,
+      # and must not be shown as one.
+      unanswered = state == "done" && !Runner.answered?(box, job["box_name"])
+      error = if state == "failed" then "the run failed on the baybox\n#{detail}"
+              elsif unanswered then "Claude stopped without giving an answer -- its last step is below. Ask again in the box below."
+              end
+      Jobs.finish(job["id"], state == "done" && !unanswered ? "done" : "failed",
+        output: result[:output], error: error)
       record_summary(job, box)
       log("#{job["box_name"]} finished: #{state}")
     when "building", "reviewing", "running"

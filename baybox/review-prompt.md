@@ -24,6 +24,15 @@ applies, whatever their descriptions say. Before you read the change, read each
 loaded that skill: every rule in it is part of the standard. If a skill of the same
 name is installed as well, it is the same skill; apply it once.
 
+## The checkout is shared
+
+This repository is shared by every box on this machine, each in its own worktree under
+`.worktrees/`. Never run `git worktree prune`, `remove`, `move` or `add`, `git gc`, or
+anything else that touches another worktree or deletes a branch you did not make: from
+inside this box every other worktree looks missing, and a single prune once unregistered
+all of them. To look at another commit, use `git show`, `git diff`, or `git archive` into
+a directory under /tmp.
+
 ## 1. Read the change
 
     git diff --stat origin/main
