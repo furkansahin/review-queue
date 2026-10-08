@@ -55,7 +55,12 @@
         background: var(--accent); color: var(--surface); cursor: pointer; }
   .go:hover { filter: brightness(1.08); }
   .go:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
-  .actions { display: flex; align-items: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
+  .actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .pending { margin-top: 16px; padding: 14px 16px; border-radius: 8px; border: 1px solid var(--chip-blue-br);
+             background: var(--chip-blue-bg); font-size: 13px; line-height: 1.5; }
+  textarea.body.framed { border-color: var(--border); background: var(--surface); }
+  .linkish { font: 12px 'IBM Plex Mono', monospace; color: var(--link); background: none; border: 0; padding: 0; cursor: pointer; }
+  .linkish:disabled { opacity: 0.45; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -73,8 +78,6 @@
   <% if error %><div class="banner err"><%= error %></div><% end %>
   <% if job["learn_note"] %>
     <div class="banner ok"><%= job["learn_note"] %> · <a href="/baybox#voice">your review voice</a></div>
-  <% elsif job["draft_url"] %>
-    <div class="banner ok">Once you submit the drafted review on GitHub, what you changed is learned from, for the next reviews.</div>
   <% end %>
 
   <div class="card">
@@ -105,6 +108,9 @@
         the commit the box reviewed<% if plan[:moved] %>; the pull request has moved on since, so GitHub shows these against that older commit<% end %>.
       </p>
 
+      <%# A pending review's comments are on GitHub, and nothing here would change
+          them: the box's findings are shown only when there is something to post. %>
+      <% unless plan[:pending] %>
       <h2>Summary</h2>
       <div class="comment" style="border-style: dashed;">
         <div>
@@ -145,18 +151,41 @@
         </div>
         <% end %>
       <% end %>
-
-      <% if plan[:pending] %>
-        <div class="banner err" style="margin: 16px 0 0;">
-          You already have a pending review on this pull request. GitHub allows one:
-          <a href="<%= plan[:pending] %>" target="_blank" rel="noreferrer">submit or discard it</a>, then come back.
-        </div>
       <% end %>
 
+      <% if plan[:pending] %>
+        <% ours = drafted_id && plan[:pending][:id] == drafted_id %>
+        <div class="pending">
+          <div>
+            <strong><%= ours ? "Your draft is pending on GitHub." : "You have a pending review on this pull request, begun on GitHub." %></strong>
+            Nobody sees it until it is submitted, and GitHub allows one at a time.
+            Its comments are the ones there: <a href="<%= plan[:pending][:url] %>" target="_blank" rel="noreferrer">read or edit them on GitHub ↗</a>.
+          </div>
+          <form method="post" action="/sessions/draft/submit?id=<%= job["id"] %>" style="margin: 0;">
+            <%== csrf_submit %>
+            <input type="hidden" name="review" value="<%= plan[:pending][:id] %>" />
+            <div class="where" style="margin: 12px 0 4px;">its summary</div>
+            <textarea class="body framed" name="summary" rows="2" spellcheck="true" placeholder="(none)"
+                      aria-label="the pending review's summary"><%= plan[:pending][:body] %></textarea>
+            <div class="actions">
+              <% GitHubDraft::EVENTS.each do |event, label| %>
+                <button class="go" type="submit" name="event" value="<%= event %>" <%= "disabled" unless can_write %>><%= label %></button>
+              <% end %>
+            </div>
+          </form>
+          <% if ours %>
+            <form method="post" action="/sessions/draft/discard?id=<%= job["id"] %>" style="margin: 10px 0 0;">
+              <%== csrf_discard %>
+              <input type="hidden" name="review" value="<%= plan[:pending][:id] %>" />
+              <button class="linkish" type="submit" <%= "disabled" unless can_write %>>discard it and its comments, to post again from this page</button>
+            </form>
+          <% end %>
+        </div>
+      <% else %>
+
       <div class="caution" style="margin-top: 16px;">
-        This makes a <strong>pending</strong> review: nobody sees it but you until you submit it on GitHub.
-        Untick what you do not want sent, and click into any comment to say it your way; what you change
-        here is learned from too. Then read it there, and submit it as yours.
+        This posts the review on the pull request under your name: the summary and the comments ticked above,
+        as you have worded them.
       </div>
 
       <form id="draft-form" method="post" action="/sessions/draft?id=<%= job["id"] %>" style="margin: 0;">
@@ -168,9 +197,15 @@
           <% unless can_write %>
             <span class="mono" style="font-size: 11px; color: var(--err-fg);">needs a write token, on the <a href="/baybox">Baybox page</a></span>
           <% end %>
-          <button class="go" type="submit" <%= "disabled" if !can_write || plan[:pending] || total.zero? && plan[:summary].to_s.empty? %>>Create pending review</button>
+          <% GitHubDraft::EVENTS.each do |event, label| %>
+            <button class="go" type="submit" name="event" value="<%= event %>" <%= "disabled" unless can_write %>><%= label %></button>
+          <% end %>
+        </div>
+        <div style="text-align: right; margin-top: 6px;">
+          <button class="linkish" type="submit" name="event" value="" <%= "disabled" unless can_write %>>or leave it pending, to finish on GitHub</button>
         </div>
       </form>
+      <% end %>
     <% end %>
   </div>
 </div>
@@ -180,9 +215,12 @@
 document.querySelectorAll("textarea.body").forEach(function (ta) {
   var mark = ta.parentNode.querySelector(".edited");
   function fit() { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; }
-  function edited() { mark.hidden = ta.value.trim().split(/\s+/).join(" ") === ta.dataset.original.trim().split(/\s+/).join(" "); }
+  function edited() {
+    if (!mark) return;   // a field with nothing to go back to, like a pending review's summary
+    mark.hidden = ta.value.trim().split(/\s+/).join(" ") === ta.dataset.original.trim().split(/\s+/).join(" ");
+  }
   ta.addEventListener("input", function () { fit(); edited(); });
-  mark.querySelector(".revert").addEventListener("click", function () { ta.value = ta.dataset.original; fit(); edited(); });
+  if (mark) mark.querySelector(".revert").addEventListener("click", function () { ta.value = ta.dataset.original; fit(); edited(); });
   fit();
 });
 

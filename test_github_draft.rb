@@ -38,6 +38,7 @@ class FakeGH
   def initialize(token = "t") = (@token = token)
   def get(path) = answer(@token, :get, path)
   def post(path, body) = answer(@token, :post, path, body)
+  def delete(path) = answer(@token, :delete, path)
 end
 def github(head: HEAD, state: "open", reviews: [])
   $calls.clear
@@ -100,16 +101,40 @@ check("on the reviewed commit", sent[:commit_id], HEAD)
 check("with the line comments", sent[:comments], [C_ADD, C_DEL])
 check("the summary first", sent[:body].start_with?("One real problem."), true)
 check("the rest after it, by file and line", sent[:body].include?("- `prog/nexus.rb` line 300: Unrelated: this loop never ends. Second line."), true)
-check("and where it came from", sent[:body].end_with?(GitHubDraft::FOOTER), true)
+check("and nothing added to it: it is posted as the person's", sent[:body].end_with?("Second line."), true)
 check("answering with the review", [res[:ok], res[:url], res[:comments]], [true, "https://github.com/#{REPO}/pull/6503#pullrequestreview-77", 2])
 kept = GitHubDraft.keep(plan, ["1", "2", "nonsense", "99"])
 check("keep counts lines first, then the summary's", [kept[:placed], kept[:loose], kept[:dropped]], [[C_DEL], [C_FAR], 1])
 check("nothing kept and no summary: nothing drafted",
-      GitHubDraft.create(FakeGH.new, GitHubDraft.keep(plan.merge(summary: ""), []))[:error].to_s.include?("nothing to draft"), true)
+      GitHubDraft.create(FakeGH.new, GitHubDraft.keep(plan.merge(summary: ""), []))[:error].to_s.include?("nothing to post"), true)
+
+puts "-- posted with a verdict --"
+github
+GitHubDraft.create(FakeGH.new, plan, event: "APPROVE")
+check("Approve posts it as an approval", writes.last[3][:event], "APPROVE")
+github
+GitHubDraft.create(FakeGH.new, GitHubDraft.keep(plan.merge(summary: ""), []), event: "APPROVE")
+check("an approval needs no words", writes.size, 1)
+github
+check("a comment does: GitHub asks for a summary",
+      GitHubDraft.create(FakeGH.new, GitHubDraft.keep(plan.merge(summary: ""), %w[0 1]), event: "COMMENT")[:error].to_s.include?("needs a summary"), true)
+check("a verdict GitHub does not know is refused", GitHubDraft.create(FakeGH.new, plan, event: "MERGE")[:error].to_s.include?("not a verdict"), true)
+$routes[[:post, "/repos/#{REPO}/pulls/6503/reviews/9/events"]] = {"id" => 9, "html_url" => "https://github.com/x#r9"}
+$routes[[:delete, "/repos/#{REPO}/pulls/6503/reviews/9"]] = {}
+$calls.clear
+res = GitHubDraft.submit_pending(FakeGH.new, REPO, 6503, 9, event: "REQUEST_CHANGES", body: " Fix the loop. ")
+check("a pending review is submitted where it is", writes.map { |c| [c[1], c[2], c[3]] },
+      [[:post, "/repos/#{REPO}/pulls/6503/reviews/9/events", {event: "REQUEST_CHANGES", body: "Fix the loop."}]])
+check("saying how", [res[:ok], res[:event]], [true, "REQUEST_CHANGES"])
+check("asking changes needs words there too",
+      GitHubDraft.submit_pending(FakeGH.new, REPO, 6503, 9, event: "REQUEST_CHANGES", body: " ")[:error].to_s.include?("needs a summary"), true)
+$calls.clear
+check("and can be thrown away", GitHubDraft.discard_pending(FakeGH.new, REPO, 6503, 9)[:ok], true)
+check("by deleting it", writes.map { |c| [c[1], c[2]] }, [[:delete, "/repos/#{REPO}/pulls/6503/reviews/9"]])
 github(reviews: [{"id" => 9, "state" => "PENDING", "user" => {"login" => "FurkanSahin"}, "html_url" => "https://github.com/x#r9"}])
 pend = GitHubDraft.plan(FakeGH.new, REPO, 6503, commit: HEAD, findings: GitHubDraft.parse(json([C_ADD])), login: "furkansahin")
-check("a pending review of yours is found", pend[:pending], "https://github.com/x#r9")
-check("and nothing is drafted over it", [GitHubDraft.create(FakeGH.new, pend)[:error].to_s.include?("already have a pending"), writes], [true, []])
+check("a pending review of yours is found", pend[:pending], {id: 9, body: "", url: "https://github.com/x#r9"})
+check("and nothing is drafted over it", [GitHubDraft.create(FakeGH.new, pend)[:error].to_s.include?("have a pending review"), writes], [true, []])
 github
 $routes[[:post, "/repos/#{REPO}/pulls/6503/reviews"]] = %(GitHub 403 on /x: {"message":"Resource not accessible by personal access token"})
 check("a token that cannot says what it needs", GitHubDraft.create(FakeGH.new, plan)[:error].to_s.include?("Pull requests: Read and write"), true)
@@ -121,6 +146,7 @@ GitHubOAuth.class_eval { define_method(:exchange) { |_| "gho_session" } }
 GitHubClient.class_eval do
   define_method(:get) { |path| path == "/user" ? {"login" => "furkansahin"} : answer(@token, :get, path) }
   define_method(:post) { |path, body| answer(@token, :post, path, body) }
+  define_method(:delete) { |path| answer(@token, :delete, path) }
 end
 QueueService.class_eval do
   define_method(:snapshot) do |force: false|
@@ -199,7 +225,7 @@ kept = JSON.parse(DB.row("SELECT draft_json FROM review_jobs WHERE id = $1", [jo
 check("what was sent is kept, to learn from what you submit",
       [kept[:review_id], kept[:sent], kept[:unticked]], [77, [C_ADD], [C_FAR]])
 check("the summary as sent, without the footer", kept[:summary], "One real problem.")
-check("the page says it will learn from it", last_response.body.include?("what you changed is learned from"), true)
+check("no note about learning, before there is anything learned", last_response.body.include?("Once you submit"), false)
 
 puts "-- edited on the page --"
 check("each comment is a field holding its text", page.include?(%(name="body[0]")) && page.include?(">new_call can raise. verified"), true)
@@ -237,6 +263,53 @@ get "/sessions/draft?id=#{job["id"]}"
 check("the page links to it", last_response.body.include?("pullrequestreview-77"), true)
 get "/sessions"
 check("so does the card", last_response.body.include?("drafted on GitHub"), true)
+
+puts "-- posted from the page --"
+github
+get "/sessions/draft?id=#{job["id"]}"
+page = last_response.body
+check("three verdicts to post with", GitHubDraft::EVENTS.values.all? { |l| page.include?(">#{l}</button>") }, true)
+check("and pending, as the lesser choice", page.include?("or leave it pending"), true)
+$calls.clear
+post "/sessions/draft?id=#{job["id"]}", {"digest" => digest, "keep" => %w[0 1], "event" => "APPROVE", "_csrf" => token}
+check("Approve posts it, approved", writes.last[3][:event], "APPROVE")
+get "/sessions/draft?id=#{job["id"]}"
+check("and says so", last_response.body.include?("posted your review on #6503 as Approve"), true)
+
+# The draft just made, pending on GitHub, is what the page finds next.
+drafted = JSON.parse(DB.row("SELECT draft_json FROM review_jobs WHERE id = $1", [job["id"]])["draft_json"])["review_id"]
+github(reviews: [{"id" => drafted, "state" => "PENDING", "body" => "One real problem.", "user" => {"login" => "furkansahin"},
+                  "html_url" => "https://github.com/#{REPO}/pull/6503#pullrequestreview-#{drafted}"}])
+$routes[[:post, "/repos/#{REPO}/pulls/6503/reviews/#{drafted}/events"]] = {"id" => drafted, "html_url" => "https://github.com/#{REPO}/pull/6503#pullrequestreview-#{drafted}"}
+$routes[[:delete, "/repos/#{REPO}/pulls/6503/reviews/#{drafted}"]] = {}
+get "/sessions/draft?id=#{job["id"]}"
+page = last_response.body
+check("your own pending draft is not an error", page.include?("Your draft is pending on GitHub."), true)
+check("it can be submitted from here, its summary in hand", page.include?(%(action="/sessions/draft/submit?id=#{job["id"]}")) &&
+      page.include?(">One real problem.</textarea>"), true)
+check("or discarded", page.include?("discard it and its comments"), true)
+$calls.clear
+post "/sessions/draft/submit?id=#{job["id"]}", {"review" => drafted.to_s, "event" => "COMMENT", "summary" => "Looks right.",
+                                                 "_csrf" => form.(page, "/sessions/draft/submit")}
+check("submitted with the write token", writes.map { |c| [c[0], c[2], c[3]] },
+      [["github_pat_WRITE", "/repos/#{REPO}/pulls/6503/reviews/#{drafted}/events", {event: "COMMENT", body: "Looks right."}]])
+get "/sessions/draft?id=#{job["id"]}"
+check("and it says so", last_response.body.include?("posted your review on #6503 as Comment"), true)
+$calls.clear
+post "/sessions/draft/discard?id=#{job["id"]}", {"review" => drafted.to_s, "_csrf" => form.(page, "/sessions/draft/discard")}
+check("discarding deletes it", writes.map { |c| [c[1], c[2]] }, [[:delete, "/repos/#{REPO}/pulls/6503/reviews/#{drafted}"]])
+check("and forgets it was drafted", DB.row("SELECT draft_url FROM review_jobs WHERE id = $1", [job["id"]])["draft_url"], nil)
+
+github(reviews: [{"id" => 4242, "state" => "PENDING", "body" => "", "user" => {"login" => "furkansahin"}, "html_url" => "https://github.com/x#r4242"}])
+get "/sessions/draft?id=#{job["id"]}"
+page = last_response.body
+check("one begun on GitHub is named as that", page.include?("begun on GitHub"), true)
+check("can be submitted", page.include?(%(action="/sessions/draft/submit?id=#{job["id"]}")), true)
+check("but is not offered for discarding", page.include?("discard it and its comments"), false)
+$calls.clear
+post "/sessions/draft/discard?id=#{job["id"]}", {"review" => "4242", "_csrf" => form.(page, "/sessions/draft/submit").to_s}
+post "/sessions/draft/discard?id=#{job["id"]}", {"review" => "4242", "_csrf" => token}
+check("nor discarded if asked", writes, [])
 
 $box = {ok: true, head: HEAD, json: nil}
 github

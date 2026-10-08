@@ -779,6 +779,53 @@ class ReviewQueue < Roda
           {error: "could not read ##{job["pr_number"]} from GitHub: #{e.message[0, 200]}"}
         end
 
+        writer = -> { write && GitHubClient.new(Crypto.decrypt(write)) }
+        # The pending review drafted from this page, if one was: the only kind
+        # this page will discard.
+        drafted_id = begin
+          job["draft_url"] && JSON.parse(DB.row("SELECT draft_json FROM review_jobs WHERE id = $1", [job["id"]])["draft_json"].to_s)["review_id"]
+        rescue JSON::ParserError
+          nil
+        end
+        pr = job["pr_number"].to_i
+
+        # Submits the pending review already on GitHub -- drafted here, or begun
+        # there -- with a verdict and the summary as the page holds it.
+        r.post "submit" do
+          check_csrf!
+          review_id = Integer(r.params["review"].to_s, 10, exception: false)
+          res = if write.nil? then {error: "add a write token on the Baybox page first"}
+                elsif review_id.nil? then {error: "no pending review to submit"}
+                else GitHubDraft.submit_pending(writer.call, job["repo"], pr, review_id,
+                                                event: r.params["event"].to_s, body: r.params["summary"].to_s)
+                end
+          if res[:ok]
+            DB.exec("UPDATE review_jobs SET draft_url = $1 WHERE id = $2 AND login = $3",
+                    [res[:url].to_s.empty? ? job["draft_url"] : res[:url], job["id"], current_login])
+            flash!("draft_notice", "posted your review on ##{pr} as #{GitHubDraft::EVENTS[res[:event]]}")
+          else
+            flash!("draft_error", res[:error])
+          end
+          r.redirect here
+        end
+
+        # Throws away the pending review drafted from this page, to post afresh.
+        r.post "discard" do
+          check_csrf!
+          review_id = Integer(r.params["review"].to_s, 10, exception: false)
+          res = if write.nil? then {error: "add a write token on the Baybox page first"}
+                elsif review_id.nil? || review_id != drafted_id then {error: "only a review drafted from this page is discarded here"}
+                else GitHubDraft.discard_pending(writer.call, job["repo"], pr, review_id)
+                end
+          if res[:ok]
+            DB.exec("UPDATE review_jobs SET draft_url = NULL, draft_json = NULL WHERE id = $1 AND login = $2", [job["id"], current_login])
+            flash!("draft_notice", "discarded the pending review on GitHub")
+          else
+            flash!("draft_error", res[:error])
+          end
+          r.redirect here
+        end
+
         # A review from before the box wrote its findings down: ask it to.
         r.post "ask" do
           check_csrf!
@@ -794,9 +841,11 @@ class ReviewQueue < Roda
         r.is do
           r.get do
             plan = %w[done failed].include?(job["state"]) ? read_plan.call(GitHubClient.new(current_token)) : {running: true}
-            view("draft", locals: {job: job, plan: plan, can_write: !write.nil?,
+            view("draft", locals: {job: job, plan: plan, can_write: !write.nil?, drafted_id: drafted_id,
                                    notice: session.delete("draft_notice"), error: session.delete("draft_error"),
                                    csrf: csrf_tag("/sessions/draft"), csrf_ask: csrf_tag("/sessions/draft/ask"),
+                                   csrf_submit: csrf_tag("/sessions/draft/submit"),
+                                   csrf_discard: csrf_tag("/sessions/draft/discard"),
                                    login: current_login},
               layout: false)
           end
@@ -820,14 +869,16 @@ class ReviewQueue < Roda
                   # is not sent, and what was edited is sent as edited.
                   kept = GitHubDraft.keep(plan, r.params["keep"], bodies: r.params["body"],
                                           summary: r.params["summary"])
-                  made = GitHubDraft.create(gh, kept).merge(dropped: kept[:dropped].to_i)
+                  # A verdict posts it; none leaves it pending on GitHub.
+                  event = r.params["event"].to_s
+                  made = GitHubDraft.create(gh, kept, event: event.empty? ? nil : event).merge(dropped: kept[:dropped].to_i)
                   # Kept, so what you submit can be set against it and learned
                   # from: what the box wrote -- the summary, each line comment,
                   # the unticked -- with your edits on the page as the first
                   # rewrite of it.
                   if made[:ok] && made[:id]
                     Voice.record_draft(job["id"], review_id: made[:id], at: Time.now,
-                                       summary: GitHubDraft.body(GitHubDraft.original(kept)).delete_suffix(GitHubDraft::FOOTER).strip,
+                                       summary: GitHubDraft.body(GitHubDraft.original(kept)).strip,
                                        sent: kept[:placed], unticked: kept[:unticked])
                   end
                   made
@@ -839,8 +890,9 @@ class ReviewQueue < Roda
             if res[:ok]
               DB.exec("UPDATE review_jobs SET draft_url = $1 WHERE id = $2 AND login = $3", [res[:url], job["id"], current_login])
               left = res[:dropped].to_i.positive? ? ", leaving out the #{res[:dropped]} you unticked" : ""
-              flash!("draft_notice", "drafted a pending review with #{res[:comments]} line comment#{res[:comments] == 1 ? "" : "s"}#{left}: " \
-                                     "read it on GitHub, then submit it there")
+              lines = "#{res[:comments]} line comment#{res[:comments] == 1 ? "" : "s"}#{left}"
+              flash!("draft_notice", res[:event] ? "posted your review on ##{pr} as #{GitHubDraft::EVENTS[res[:event]]}, with #{lines}"
+                                                 : "left a pending review on ##{pr} with #{lines}: finish it on GitHub, or submit it here")
             else
               flash!("draft_error", res[:error])
             end

@@ -49,6 +49,9 @@ class GitHubClient
   # has pushed since.
   def patch(path, body) = call(:patch, path, body)
 
+  # Discarding a pending review drafted from Leeghwater.
+  def delete(path) = call(:delete, path)
+
   # One round trip for what REST would need one call per issue for. Raises on
   # a GraphQL error as well as an HTTP one: GitHub answers a bad query with 200
   # and an errors array, which would otherwise read as "no results".
@@ -114,7 +117,7 @@ class GitHubClient
   end
 
   def build_request(uri, verb = :get, body = nil)
-    req = {post: Net::HTTP::Post, patch: Net::HTTP::Patch}.fetch(verb, Net::HTTP::Get).new(uri)
+    req = {post: Net::HTTP::Post, patch: Net::HTTP::Patch, delete: Net::HTTP::Delete}.fetch(verb, Net::HTTP::Get).new(uri)
     if body
       req["Content-Type"] = "application/json"
       req.body = JSON.generate(body)

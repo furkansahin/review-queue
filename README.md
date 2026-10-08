@@ -161,12 +161,13 @@ three hours past it. The page shows what the last morning did. It is off unless 
 
 The box writes its findings to `.rq/review.json` as well as in its report: a summary, and each
 finding with its file, line and side. **draft on GitHub →** on a finished review's card shows
-what would be drafted, then makes it a **pending** review on the pull request with your write
-token, one comment per line, against the commit the box reviewed. A pending review is seen by
-nobody but you until you submit it on GitHub, so you read it there, delete what you disagree
-with, and submit it as yours. Findings on lines the pull request does not change go into the
-review's summary, since GitHub cannot take them as line comments. A review from before the box
-wrote this file can be asked for it in a follow-up.
+them on a page where each comment can be unticked or reworded in place, and posts the review
+with your write token -- **Comment**, **Approve** or **Request changes** -- one comment per
+line, against the commit the box reviewed, under your name and with nothing added. Findings on
+lines the pull request does not change go into the summary, since GitHub cannot take them as
+line comments. It can also be left pending, to finish on GitHub; a pending review of yours,
+drafted here or begun there, can be submitted from the same page, and one drafted here
+discarded. A review from before the box wrote this file can be asked for it in a follow-up.
 
 ## E2E on a fork's pull request
 
