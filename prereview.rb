@@ -17,7 +17,8 @@ module Prereview
   # How late a morning still counts: a worker that was down at seven still
   # prepares at half past, but a deploy in the afternoon does not.
   WINDOW_HOURS = 3
-  HOURS = (5..11).freeze
+  # Any hour of the day: some want them ready well before morning.
+  HOURS = (0..23).freeze
   COUNTS = (1..5).freeze
   DEFAULT_TZ = "Europe/Amsterdam"
 

@@ -129,9 +129,10 @@ check("a problem: a line at the top of the queue", page.include?('class="health-
 check("with the way to fix it", page.include?(%(<a href="/baybox">fix it →</a>)), true)
 check("and the approvals one too", page.include?("Could not read approvals from GitHub"), true)
 check("above the tabs", page.index('class="health"') < page.index('<div class="tabs">'), true)
-DB.exec("UPDATE bayboxes SET read_token_expires_at = '2026-10-16 14:19:00+00'")
+soon = (Time.now + 30 * 86_400).utc
+DB.exec("UPDATE bayboxes SET read_token_expires_at = $1", [soon])
 get "/baybox"
-check("the Baybox page says when each token expires", last_response.body.include?("read token: expires Oct 16 2026"), true)
+check("the Baybox page says when each token expires", last_response.body.include?("read token: expires #{soon.strftime("%b %-d %Y")}"), true)
 check("and which is refused", last_response.body.include?("write token: refused by GitHub"), true)
 tok = last_response.body[%r{action="/baybox/save"[^>]*>\s*<input type="hidden" name="_csrf" value="([^"]+)"}m, 1]
 post "/baybox/save", {"host" => "203.0.113.10", "ssh_user" => "ubi", "port" => "22", "github_write_token" => "github_pat_NEW", "_csrf" => tok}

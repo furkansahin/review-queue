@@ -123,7 +123,13 @@ check("the review is queued", DB.rows("SELECT pr_number FROM review_jobs").map {
 check("and the note says when and what", Prereview.settings("furkansahin")["prereview_note"], "2026-10-12 05:10 UTC: prepared #20")
 
 puts "-- the setting --"
-check("an hour too early", Prereview.save("furkansahin", on: true, hour: 3, count: 3, tz: "Europe/Amsterdam"), "pick an hour between 5 and 11")
+check("an hour that is not one", Prereview.save("furkansahin", on: true, hour: 24, count: 3, tz: "Europe/Amsterdam"), "pick an hour between 0 and 23")
+check("two in the night, in UTC, is one", Prereview.save("furkansahin", on: true, hour: 2, count: 3, tz: "UTC"), nil)
+DB.exec("UPDATE user_settings SET prereview_last_on = NULL WHERE login = 'furkansahin'")
+check("and it runs then", Prereview.claim_due(Time.parse("2026-10-23T02:05:00Z")).map { |r| r["login"] }, ["furkansahin"])
+check("not at one", (DB.exec("UPDATE user_settings SET prereview_last_on = NULL WHERE login = 'furkansahin'");
+                     Prereview.claim_due(Time.parse("2026-10-23T01:59:00Z")).map { |r| r["login"] }), [])
+Prereview.save("furkansahin", on: true, hour: 7, count: 3, tz: "Europe/Amsterdam")
 check("too many", Prereview.save("furkansahin", on: true, hour: 7, count: 9, tz: "Europe/Amsterdam"), "pick between 1 and 5 reviews")
 check("a time zone that is not one", Prereview.save("furkansahin", on: true, hour: 7, count: 3, tz: "Mars/Olympus"),
       "Mars/Olympus is not a time zone this server knows")
