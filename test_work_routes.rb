@@ -53,9 +53,9 @@ runner_stub = Module.new do
   end
   def box_list(_box_row) = []
   def forget_box_list(_box_row) = nil
-  def answered?(_box_row, _box) = $answered
+  def run_problem(_box_row, _box) = $problem
 end
-$answered = true
+$problem = nil
 Runner.singleton_class.prepend(runner_stub)
 
 include Rack::Test::Methods
@@ -169,12 +169,24 @@ check("and stored the summary", JSON.parse(job["summary"].to_s)["ahead"], 2)
 
 # The same stop with no answer after the last step: not done.
 DB.exec("UPDATE review_jobs SET state = 'running', error = NULL WHERE id = $1", [job["id"]])
-$answered = false
+$problem = Runner::NO_ANSWER
 poll_running
 stopped = DB.row("SELECT state, error FROM review_jobs WHERE id = $1", [job["id"]])
 check("a run that stopped without an answer is not done", stopped["state"], "failed")
 check("and says so", stopped["error"].to_s.include?("stopped without giving an answer"), true)
-$answered = true
+
+# One that ended on Claude refusing the box's token: failed, and the box
+# remembers it, for the health line and the mornings.
+DB.exec("UPDATE review_jobs SET state = 'running', error = NULL WHERE id = $1", [job["id"]])
+$problem = "#{Runner::SIGN_IN}: Failed to authenticate: OAuth token revoked."
+poll_running
+stopped = DB.row("SELECT state, error FROM review_jobs WHERE id = $1", [job["id"]])
+check("a refused sign-in is a failure, not a review", [stopped["state"], stopped["error"].to_s.include?("OAuth token revoked")], ["failed", true])
+check("and the box knows its token is refused", DB.row("SELECT claude_token_state FROM bayboxes WHERE id = $1", [box["id"]])["claude_token_state"], "refused")
+DB.exec("UPDATE review_jobs SET state = 'running', error = NULL WHERE id = $1", [job["id"]])
+$problem = nil
+poll_running
+check("until a run gets through", DB.row("SELECT claude_token_state FROM bayboxes WHERE id = $1", [box["id"]])["claude_token_state"], "ok")
 DB.exec("UPDATE review_jobs SET state = 'done', error = NULL WHERE id = $1", [job["id"]])
 
 puts "-- the session card --"

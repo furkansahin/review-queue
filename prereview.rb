@@ -60,6 +60,9 @@ module Prereview
     return "not prepared: #{login} is no longer allowed to sign in" unless allowed?(login)
     box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [login])
     return "not prepared: no baybox registered" unless box
+    if box["claude_token_state"] == "refused"
+      return "not prepared: Claude refuses the box's Claude Code token; add a new one on the Baybox page"
+    end
     token = begin
       box["github_token_enc"].to_s.empty? ? nil : Crypto.decrypt(box["github_token_enc"])
     rescue Crypto::Error

@@ -1183,18 +1183,40 @@ module Runner
     %(ssh -F "$SSH_CFG" #{host_alias(box_row["login"])} #{BayBox.sh_quote(cmd)} < /dev/null || true)
   end
 
-  # Whether the last run in this box ended with an answer: claude's result
-  # event after the last question, or anywhere in a first run's log. A run
-  # can exit 0 without one -- on #6503 it stopped mid-thought, after ten
-  # minutes of work -- and its trace must not then be shown as the review.
-  def answered?(box_row, box)
-    return false unless box.to_s.match?(BOX_RE)
+  NO_ANSWER = "Claude stopped without giving an answer -- its last step is below. Ask again in the box below."
+  SIGN_IN = "Claude could not sign in with this box's Claude Code token"
+
+  # What went wrong with the last run in this box, in words, or nil when it
+  # ended on an answer: claude's result event after the last question, or
+  # anywhere in a first run's log, and not an error. A run can end without
+  # one -- on #6503 it stopped mid-thought, after ten minutes of work -- or
+  # end on a result that is an error: from 21 October every run in
+  # furkansahin's boxes ended in a minute on "OAuth token revoked", a result
+  # with is_error set, and was taken for an answer. Neither may be shown as
+  # the review.
+  def run_problem(box_row, box)
+    return NO_ANSWER unless box.to_s.match?(BOX_RE)
     path = File.join(state_dir(box_row["login"], box), "log")
-    return false unless File.exist?(path)
-    text = File.binread(path)
+    return NO_ANSWER unless File.exist?(path)
+    text = File.binread(path).force_encoding(Encoding::UTF_8).scrub("")
     from = text.rindex("\n== you asked\n") || 0
-    !text.index(%("type":"result"), from).nil?
+    line = text[from..].lines.reverse.find { |l| l.include?(%("type":"result")) }
+    return NO_ANSWER unless line
+    data = begin
+      JSON.parse(line)
+    rescue JSON::ParserError
+      return nil   # a result, if not one that can be read
+    end
+    return nil unless data["is_error"]
+    said = data["result"].to_s.strip.gsub(/\s+/, " ")[0, 300]
+    if data["api_error_status"].to_i == 401 || said.match?(/authenticat|oauth token|log in again/i)
+      "#{SIGN_IN}: #{said}"
+    else
+      "Claude stopped on an error: #{said}"
+    end
   end
+
+  def answered?(box_row, box) = run_problem(box_row, box).nil?
 
   # The skills every run applies (AlwaysSkills), as the detached script's
   # environment and the lines that put them in the worktree's .rq/skills/,

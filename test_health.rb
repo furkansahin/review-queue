@@ -104,6 +104,11 @@ check("and cleared by the next success", Health.problems("furkansahin"), [])
 check("approvals that could not be read",
       Health.problems("furkansahin", snap: {decisions_error: "GitHub GraphQL: something"}).first[:text].start_with?("Could not read approvals"), true)
 check("someone with no box is told nothing about one", Health.problems("mohi-kalantari"), [])
+DB.exec("UPDATE bayboxes SET claude_token_state = 'refused'")
+check("a refused Claude token stops everything, and says what to do", Health.problems("furkansahin").first.values_at(:level, :href),
+      [:error, "/baybox"])
+check("in so many words", Health.problems("furkansahin").first[:text].include?("claude setup-token"), true)
+DB.exec("UPDATE bayboxes SET claude_token_state = NULL")
 
 puts "-- through the app --"
 include Rack::Test::Methods

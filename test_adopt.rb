@@ -43,7 +43,7 @@ Runner.singleton_class.prepend(Module.new do
      output: text.gsub(/^#{Regexp.escape(Runner::RUN_MARK)}\n?/, "")
                  .gsub(/#{Regexp.escape(Runner::EXIT_MARK)}\d+\n?/, "")}
   end
-  def answered?(_box_row, _box) = BOXSAYS.fetch(:answered, true)
+  def run_problem(_box_row, _box) = BOXSAYS.fetch(:answered, true) ? nil : Runner::NO_ANSWER
   def run(_box_row, command, timeout: 120, stdin: nil)
     return {ok: true, output: "orphaned", exit_code: 0} if command.start_with?("status")
     {ok: true, output: "", exit_code: 0}

@@ -117,6 +117,11 @@ module Health
                                       "renew it, and paste the new one on the Baybox page, before #{uses} stop.", href: "/baybox"}
         end
       end
+      if box["claude_token_state"] == "refused"
+        out << {level: :error, text: "Claude refuses your box's Claude Code token, so reviews, work and the morning runs all fail. " \
+                                     "Run claude setup-token on your computer and paste what it prints on the Baybox page.",
+                href: "/baybox"}
+      end
       if box["last_error"].to_s.strip != "" && box["health_checked_at"]
         out << {level: :error, text: "Your box could not be reached at the last check: #{box["last_error"].to_s.lines.last.to_s.strip[0, 160]}",
                 href: "/baybox"}

@@ -366,6 +366,15 @@ check("an answer before the last question is not this one's", Runner.answered?(B
 File.write(File.join(d_ans, "log"), %({"type":"assistant"}\n__RQ_EXIT:0\n))
 check("exit 0 with no result is no answer", Runner.answered?(BOXROW, "rq-ubicloud-6176"), false)
 check("nor is a box with no log", Runner.answered?(BOXROW, "rq-ubicloud-6177"), false)
+File.write(File.join(d_ans, "log"), %({"type":"result","subtype":"success","is_error":true,"api_error_status":401,) +
+                                    %("result":"Failed to authenticate: OAuth token revoked. Please log in again."}\n__RQ_EXIT:1\n))
+check("a result that is a refused sign-in is no answer", Runner.answered?(BOXROW, "rq-ubicloud-6176"), false)
+check("and says so, in Claude's words", Runner.run_problem(BOXROW, "rq-ubicloud-6176"),
+      "#{Runner::SIGN_IN}: Failed to authenticate: OAuth token revoked. Please log in again.")
+File.write(File.join(d_ans, "log"), %({"type":"result","is_error":true,"result":"Prompt is too long"}\n))
+check("another error result is an error too", Runner.run_problem(BOXROW, "rq-ubicloud-6176"), "Claude stopped on an error: Prompt is too long")
+File.write(File.join(d_ans, "log"), %({"type":"result","subtype":"success","is_error":false,"result":"the review"}\n))
+check("a good result is an answer", Runner.run_problem(BOXROW, "rq-ubicloud-6176"), nil)
 File.write(File.join(d_ans, "log"), ("x" * 300) + "\n" + %({"type":"assistant","message":{"content":[{"type":"text","text":"kept"}]}}\n))
 cut = Runner.send(:read_log, BOXROW, "rq-ubicloud-6176", "log", 120)[:output]
 check("a log cut short does not open on half a line", cut.include?("xxx"), false)

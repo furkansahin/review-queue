@@ -341,6 +341,10 @@ module DB
     ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS write_token_state      text;
     ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS write_token_expires_at timestamptz;
     ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS health_checked_at      timestamptz;
+    -- Whether Claude took the box's token on its last run: 'ok', 'refused'
+    -- with what it said, or NULL before any run or after a new one is saved.
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS claude_token_state     text;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS claude_token_error     text;
 
     -- How each person writes review comments, from what they post: a drafted
     -- comment and what they posted instead (rewritten), unchanged (kept), not

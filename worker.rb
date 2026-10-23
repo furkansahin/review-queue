@@ -54,6 +54,21 @@ def start_one(job)
   end
 end
 
+# Whether Claude took the box's token on its last run, for the health line on
+# the queue and so the mornings do not start runs it will refuse. A refusal is
+# kept until a run gets through or a new token is saved; :unknown says
+# nothing either way.
+def note_claude_token(box, problem)
+  return if problem == :unknown
+  if problem.to_s.start_with?(Runner::SIGN_IN)
+    DB.exec("UPDATE bayboxes SET claude_token_state = 'refused', claude_token_error = $1 WHERE id = $2", [problem, box["id"]])
+  elsif problem.nil?
+    DB.exec("UPDATE bayboxes SET claude_token_state = 'ok', claude_token_error = NULL WHERE id = $1", [box["id"]])
+  end
+rescue StandardError => e
+  log("could not note the Claude token for #{box["login"]}: #{e.class}: #{e.message}")
+end
+
 # How this person writes review comments, where Runner.review picks it up and
 # puts it in the box. Removed when there is nothing to say, so an old one is
 # not used. Never stops a review: without it the box writes as it would have.
@@ -119,12 +134,11 @@ def poll_running
       end
       if taken[:finished]
         ok = taken[:exit_code].to_i.zero?
-        unanswered = ok && !Runner.answered?(box, job["box_name"])
-        Jobs.finish(job["id"], ok && !unanswered ? "done" : "failed",
+        problem = Runner.run_problem(box, job["box_name"])
+        Jobs.finish(job["id"], ok && problem.nil? ? "done" : "failed",
           output: taken[:output],
-          error: if !ok then "the run failed on the baybox"
-                 elsif unanswered then "Claude stopped without giving an answer -- its last step is below. Ask again in the box below."
-                 end)
+          error: problem || (ok ? nil : "the run failed on the baybox"))
+        note_claude_token(box, problem)
         record_summary(job, box)
         log("adopted #{job["box_name"]} and it was finished: #{taken[:exit_code]}")
       else
@@ -148,15 +162,15 @@ def poll_running
         Jobs.finish(job["id"], "failed", error: "could not collect the review: #{result[:error]}") if Jobs.stale?(job)
         next
       end
-      # Done is claude's exit code, which can be 0 with no answer given: the
-      # run stopped after its last step without a word. That is not a review,
-      # and must not be shown as one.
-      unanswered = state == "done" && !Runner.answered?(box, job["box_name"])
-      error = if state == "failed" then "the run failed on the baybox\n#{detail}"
-              elsif unanswered then "Claude stopped without giving an answer -- its last step is below. Ask again in the box below."
-              end
-      Jobs.finish(job["id"], state == "done" && !unanswered ? "done" : "failed",
+      # Done is the box's word, which a run can earn with no answer given --
+      # stopped after its last step without a word, or ended on an error
+      # such as a refused sign-in. That is not a review, and must not be
+      # shown as one.
+      problem = state == "done" ? Runner.run_problem(box, job["box_name"]) : nil
+      error = state == "failed" ? "the run failed on the baybox\n#{detail}" : problem
+      Jobs.finish(job["id"], state == "done" && problem.nil? ? "done" : "failed",
         output: result[:output], error: error)
+      note_claude_token(box, state == "done" ? problem : :unknown)
       record_summary(job, box)
       log("#{job["box_name"]} finished: #{state}")
     when "building", "reviewing", "running"

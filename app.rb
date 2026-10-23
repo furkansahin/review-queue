@@ -532,6 +532,10 @@ class ReviewQueue < Roda
             SQL
             # A token saved is a token to look at again now, not in six hours:
             # the warning about the old one should not outlive it.
+            # A new Claude token is untried, not refused.
+            if claude != row["claude_token_enc"]
+              DB.exec("UPDATE bayboxes SET claude_token_state = NULL, claude_token_error = NULL WHERE id = $1", [row["id"]])
+            end
             if github != row["github_token_enc"] || writer != row["github_write_token_enc"]
               DB.exec(<<~SQL, [row["id"]])
                 UPDATE bayboxes SET health_checked_at = NULL, read_token_state = NULL, read_token_expires_at = NULL,

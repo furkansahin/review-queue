@@ -94,6 +94,11 @@ DB.exec("UPDATE bayboxes SET github_token_enc = NULL")
 check("no read token: says where to add one", Prereview.run_for("furkansahin", 3), "not prepared: add a GitHub read token on the Baybox page")
 check("someone no longer allowed is not prepared for", Prereview.run_for("stranger", 3).include?("no longer allowed"), true)
 check("no baybox: says so", Prereview.run_for("mohi-kalantari", 3), "not prepared: no baybox registered")
+DB.exec("UPDATE bayboxes SET claude_token_state = 'refused'")
+DB.exec("DELETE FROM review_jobs")
+check("a Claude token known refused: nothing started", [Prereview.run_for("furkansahin", 3).include?("Claude refuses"),
+                                                        DB.row("SELECT count(*) AS n FROM review_jobs")["n"].to_i], [true, 0])
+DB.exec("UPDATE bayboxes SET claude_token_state = NULL")
 
 puts "-- what you snoozed stays out --"
 DB.exec("UPDATE bayboxes SET github_token_enc = $1", [Crypto.encrypt("github_pat_READ")])
