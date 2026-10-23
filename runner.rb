@@ -203,6 +203,14 @@ module Runner
     raise ArgumentError, "RQ_CLAUDE_MODEL #{m.inspect} is not a model name" unless m.match?(/\A[a-z0-9][a-z0-9.\-]*(\[[a-z0-9]+\])?\z/)
   end
 
+  # How hard every run thinks: xhigh, the step below max. Overridable with
+  # RQ_CLAUDE_EFFORT, and checked against what the CLI takes, since it lands
+  # in a shell command too.
+  EFFORTS = %w[low medium high xhigh max].freeze
+  EFFORT = ENV.fetch("RQ_CLAUDE_EFFORT", "xhigh").tap do |e|
+    raise ArgumentError, "RQ_CLAUDE_EFFORT #{e.inspect} is not one of #{EFFORTS.join(", ")}" unless EFFORTS.include?(e)
+  end
+
   # Each run brings Claude Code up to date before it starts. bay installs it in
   # a cached layer of the box image, so every box gets whatever version was
   # current when that layer was first built on the machine -- 2.1.274, which
@@ -211,7 +219,7 @@ module Runner
   # output goes to a file, not the trace, and a failed update never stops the
   # run: the run then says what it needs, in claude's own words.
   UPDATE = "claude update > .rq/update.log 2>&1 || true"
-  CLAUDE = "#{UPDATE}; claude -p --model #{BayBox.sh_quote(MODEL)} --effort max"
+  CLAUDE = "#{UPDATE}; claude -p --model #{BayBox.sh_quote(MODEL)} --effort #{EFFORT}"
   #
   # Both read their text from a file in the worktree rather than a command
   # line: free text never gets parsed by a shell, and the path is relative

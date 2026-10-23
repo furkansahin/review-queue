@@ -114,14 +114,14 @@ check("and carries the skills repo", toml.include?("furkansahin/skills"), true)
 check("it defines the review command", toml.include?("[commands]") && toml.include?("review ="), true)
 check("and the follow-up command", toml.include?("ask ="), true)
 check("the review is pinned to an exact model, not an alias",
-      toml.include?("--model 'claude-opus-5-5'") && toml.include?("--effort max"), true)
+      toml.include?("--model 'claude-opus-5-5'") && toml.include?("--effort xhigh"), true)
 check("which is Opus 5.5 unless configured", Runner::MODEL, ENV.fetch("RQ_CLAUDE_MODEL", "claude-opus-5-5"))
 # Without this the box refuses rspec, psql and ruby, and every finding comes
 # back read-only -- the harness cannot verify anything.
 check("all three may actually run things",
       toml.scan("--dangerously-skip-permissions").size, 3)
 check("so are the follow-up and the work",
-      toml.scan("--model 'claude-opus-5-5'").size == 3 && toml.scan("--effort max").size == 3, true)
+      toml.scan("--model 'claude-opus-5-5'").size == 3 && toml.scan("--effort xhigh").size == 3, true)
 check("and each first brings Claude Code up to date", toml.scan("claude update").size, 3)
 
 # The commands themselves, run in bash against a claude that records how it
