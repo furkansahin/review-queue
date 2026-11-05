@@ -219,7 +219,18 @@ module Runner
   # output goes to a file, not the trace, and a failed update never stops the
   # run: the run then says what it needs, in claude's own words.
   UPDATE = "claude update > .rq/update.log 2>&1 || true"
-  CLAUDE = "#{UPDATE}; claude -p --model #{BayBox.sh_quote(MODEL)} --effort #{EFFORT}"
+  # The Claude token saved now, not the one the box was made with. A box's
+  # environment is fixed when bay creates its container, so a token replaced
+  # on the Baybox page never reached the boxes already made: a follow-up in
+  # one from early October was signed in with a token revoked weeks before,
+  # while new boxes had the new one. Before every run this host writes the
+  # saved token into the shared checkout's git directory (put_token) -- in
+  # no worktree, so never committed -- and each run loads it first, keeping
+  # the box's own only when there is none.
+  TOKEN_FILE = "leeghwater/claude-token"
+  CURRENT_TOKEN = %(t="$(cat "$(git rev-parse --git-common-dir 2>/dev/null)/#{TOKEN_FILE}" 2>/dev/null)"; ) +
+                  %(if [ -n "$t" ]; then export CLAUDE_CODE_OAUTH_TOKEN="$t"; fi; unset t)
+  CLAUDE = "#{CURRENT_TOKEN}; #{UPDATE}; claude -p --model #{BayBox.sh_quote(MODEL)} --effort #{EFFORT}"
   #
   # Both read their text from a file in the worktree rather than a command
   # line: free text never gets parsed by a shell, and the path is relative
@@ -553,6 +564,7 @@ module Runner
     File.write(File.join(dir, "build.log"), "")
 
     prepare!(box_row)
+    put_token(box_row)
     branch = review_branch(pr_number)
     prep = prepare_review_branch(box_row, pr_number, box)
     File.write(File.join(dir, "build.log"), prep[:output].to_s)
@@ -611,6 +623,7 @@ module Runner
     File.write(File.join(dir, "issue.md"), issue_text(repo, issue_number, branch, issue))
 
     prepare!(box_row)
+    put_token(box_row)
     prep = prepare_branch(box_row, branch)
     File.write(File.join(dir, "build.log"), prep[:output].to_s)
     unless prep[:ok]
@@ -1031,6 +1044,7 @@ module Runner
     end
 
     prepare!(box_row)
+    put_token(box_row)
     # Into the worktree on the machine, because the bay command reads it from
     # inside the container. Bounded: a prompt is a question, not a payload.
     placed = put_file(box_row, "#{worktree(box_row, box)}/.rq/followup.txt", prompt.to_s.byteslice(0, FOLLOWUP_MAX))
@@ -1176,6 +1190,24 @@ module Runner
   def place_prompt(box_row, box) = place_file(box_row, box, "PROMPT_FILE", "review-prompt.md", "the review prompt")
 
   def repo_dir(box_row) = (box_row["repo_path"] || "ubicloud").to_s
+
+  # Writes the Claude token saved now where every run in this user's boxes
+  # reads it (TOKEN_FILE), readable by them alone; with none saved, removes
+  # it, and the boxes fall back to their own. Best effort: a run without it
+  # still has the token its box was made with.
+  def put_token(box_row)
+    path = "#{repo_dir(box_row)}/.git/#{TOKEN_FILE}"
+    token = decrypt_or_nil(box_row["claude_token_enc"])
+    cmd = if token
+      "umask 077 && mkdir -p #{BayBox.sh_quote(File.dirname(path))} && cat > #{BayBox.sh_quote(path)}"
+    else
+      "rm -f #{BayBox.sh_quote(path)}"
+    end
+    capture(["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"]), cmd],
+            env_for(box_row), timeout: 30, stdin: token.to_s)
+  rescue Error, Crypto::Error => e
+    {ok: false, output: "", exit_code: nil, error: e.message}
+  end
 
   # Every box's worktree shares one repository on the machine, registered by
   # its path there. Inside a box that path does not exist -- the checkout is

@@ -18,6 +18,7 @@ def check(name, got, want)
   puts format("  %s  %-54s got=%-26s want=%s", ok ? "ok  " : "FAIL", name, got.inspect[0, 26], want.inspect[0, 26])
 end
 
+DB.setup!   # the schema as this code expects it, whichever test ran first
 DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
 priv, pub = BayBox.generate_keypair
 box = DB.row(<<~SQL, ["furkansahin", "10.0.0.5", "ubi", 22, Crypto.encrypt(priv), pub])

@@ -134,6 +134,7 @@ Dir.mktmpdir("rq-cmd") do |wt|
   File.write(File.join(fakebin, "claude"), <<~SH)
     #!/usr/bin/env bash
     echo "$*" >> "#{wt}/claude.calls"
+    echo "${CLAUDE_CODE_OAUTH_TOKEN:-none}" >> "#{wt}/claude.tokens"
     if [ "$1" = update ]; then echo "Updating to 9.9.9..."; [ -f "#{wt}/update-fails" ] && exit 7; exit 0; fi
     echo '{"type":"result","result":"done"}'
     [ -f "#{wt}/run-fails" ] && exit 3
@@ -159,6 +160,20 @@ Dir.mktmpdir("rq-cmd") do |wt|
   FileUtils.touch(File.join(wt, "run-fails"))
   _, log = run.call
   check("a failed review is stamped with the review's own code", log.include?("#{Runner::EXIT_MARK}3"), true)
+  FileUtils.rm_f(File.join(wt, "run-fails"))
+
+  # The token: the one saved now, from the checkout's git directory, over the
+  # one the box was made with.
+  system("git", "init", "-q", wt)
+  tokens = lambda do |env|
+    FileUtils.rm_f(File.join(wt, "claude.tokens"))
+    system({"PATH" => "#{fakebin}:#{ENV["PATH"]}"}.merge(env), "bash", "-c", Runner::REVIEW_CMD, chdir: wt, out: File::NULL, err: File::NULL)
+    File.read(File.join(wt, "claude.tokens")).lines.map(&:strip).uniq
+  end
+  check("with no saved token, the box's own", tokens.call("CLAUDE_CODE_OAUTH_TOKEN" => "box-made-with"), ["box-made-with"])
+  FileUtils.mkdir_p(File.join(wt, ".git", "leeghwater"))
+  File.write(File.join(wt, ".git", Runner::TOKEN_FILE), "saved-now")
+  check("with one saved, that one, for the update and the run", tokens.call("CLAUDE_CODE_OAUTH_TOKEN" => "box-made-with"), ["saved-now"])
 end
 check("it defines the work command", toml.include?("work ="), true)
 check("the work reads its own prompt", toml.include?(".rq/work-prompt.md"), true)
@@ -564,8 +579,13 @@ File.delete("#{ROOT}/ssh.stdin") if File.exist?("#{ROOT}/ssh.stdin")
 File.delete("#{ROOT}/ssh.cmds") if File.exist?("#{ROOT}/ssh.cmds")
 res = Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: STDIN_TEXT)
 check("it is accepted once the review is done", res[:ok], true)
+# Two things go to the machine before the run: the Claude token saved now,
+# then the question.
+check("the saved Claude token goes first, for this run to sign in with",
+      File.read("#{ROOT}/ssh.stdin").start_with?("sk-ant-oat01-TESTTOKEN") &&
+      File.read("#{ROOT}/ssh.cmds").include?("ubicloud/.git/leeghwater/claude-token"), true)
 check("the question is written into the box worktree",
-      File.read("#{ROOT}/ssh.stdin"), STDIN_TEXT)
+      File.read("#{ROOT}/ssh.stdin").delete_prefix("sk-ant-oat01-TESTTOKEN"), STDIN_TEXT)
 check("at the path the bay command reads",
       File.read("#{ROOT}/ssh.cmds").include?("ubicloud/.worktrees/rq-ubicloud-6172/.rq/followup.txt"), true)
 # Stamped before the run is detached, or the worker reads the previous run's
@@ -587,7 +607,7 @@ File.delete("#{ROOT}/ssh.stdin")
 # The ceiling is the one a review with a comment per line needs; a typed
 # question has its own 8 KB check in its route.
 Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "x" * 70_000)
-check("and it is bounded", File.size("#{ROOT}/ssh.stdin"), Runner::FOLLOWUP_MAX)
+check("and it is bounded", File.size("#{ROOT}/ssh.stdin") - "sk-ant-oat01-TESTTOKEN".bytesize, Runner::FOLLOWUP_MAX)
 check("an empty question is refused", Runner.run(BOXROW, "ask rq-ubicloud-6172", stdin: "  ")[:ok], false)
 File.delete("#{ROOT}/ssh.stdin") if File.exist?("#{ROOT}/ssh.stdin")
 File.delete("#{ROOT}/ssh.cmds") if File.exist?("#{ROOT}/ssh.cmds")
