@@ -345,6 +345,15 @@ module DB
     -- with what it said, or NULL before any run or after a new one is saved.
     ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS claude_token_state     text;
     ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS claude_token_error     text;
+    -- Tearing down every box at once (wipe.rb): when it was asked for, NULL
+    -- when nothing is under way; the boxes still to go, one per line, NULL
+    -- until the worker has listed them; how many went; the ones that would
+    -- not, with why; and what to say when it is over.
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS wipe_requested_at      timestamptz;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS wipe_todo              text;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS wipe_done              integer NOT NULL DEFAULT 0;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS wipe_failed            text;
+    ALTER TABLE bayboxes ADD COLUMN IF NOT EXISTS wipe_note              text;
 
     -- How each person writes review comments, from what they post: a drafted
     -- comment and what they posted instead (rewritten), unchanged (kept), not
@@ -353,7 +362,7 @@ module DB
     CREATE TABLE IF NOT EXISTS voice_examples (
       id         bigserial PRIMARY KEY,
       login      text        NOT NULL,
-      job_id     bigint      REFERENCES review_jobs(id) ON DELETE CASCADE,
+      job_id     bigint      REFERENCES review_jobs(id) ON DELETE SET NULL,
       repo       text        NOT NULL,
       pr_number  integer     NOT NULL,
       path       text        NOT NULL DEFAULT '',
@@ -364,6 +373,15 @@ module DB
       at         timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS voice_examples_login_idx ON voice_examples (login, at DESC);
+    -- What was learned outlives the run it was learned from: forgetting a
+    -- torn-down review deleted its examples with it while this cascaded.
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'voice_examples_job_id_fkey' AND confdeltype = 'c') THEN
+        ALTER TABLE voice_examples DROP CONSTRAINT voice_examples_job_id_fkey;
+        ALTER TABLE voice_examples ADD CONSTRAINT voice_examples_job_id_fkey
+          FOREIGN KEY (job_id) REFERENCES review_jobs(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
     -- The branch's diff and each commit's patch, as JSON, recorded with the
     -- summary when a run stops, so the changes page reads it from here rather
     -- than asking the box on every load. Kept out of the list queries: it

@@ -79,7 +79,7 @@ def check(name, got, want)
   $fail += 1 unless ok
   puts format("  %s  %-52s got=%-24s want=%s", ok ? "ok  " : "FAIL", name, got.inspect[0,24], want.inspect[0,24])
 end
-def csrf_for(body, path) = body[/action="#{Regexp.escape(path)}[^"]*"[^>]*>\s*<input type="hidden" name="[^"]+" value="([^"]+)"/m, 1]
+def csrf_for(body, path) = body[/action="#{Regexp.escape(path)}(?:\?[^"]*)?"[^>]*>\s*<input type="hidden" name="[^"]+" value="([^"]+)"/m, 1]
 
 DB.exec("TRUNCATE review_jobs, bayboxes RESTART IDENTITY CASCADE")
 priv, pub = BayBox.generate_keypair

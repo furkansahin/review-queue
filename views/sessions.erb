@@ -349,11 +349,17 @@
   </div>
 
   <% unless gone.empty? %>
+    <form id="forget-all" method="post" action="/sessions/forget-all" style="display: none;"
+          onsubmit="return confirm('Forget all <%= gone.size %> torn-down reviews? Their records and review text are deleted; what was learned of your review voice stays.');">
+      <%== csrf_forget_all %>
+    </form>
     <details data-keep="gone-section">
       <summary style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase;
                       color: var(--muted-2); font-family: 'IBM Plex Mono', monospace;
                       font-weight: 600; margin: 26px 0 10px; cursor: pointer;">
         Torn down (<%= gone.size %>) — box gone, review kept
+        <button class="mini" type="submit" form="forget-all" style="margin-left: 10px; text-transform: none; letter-spacing: 0;"
+                title="delete all of these records and their review text">Forget all</button>
       </summary>
       <% gone.each do |j| %>
         <div class="card" style="opacity: 0.75;">
@@ -390,10 +396,40 @@
     </details>
   <% end %>
 
-  <h2>Boxes on your baybox<%= boxes.empty? ? "" : " (#{boxes.size})" %></h2>
+  <div style="display: flex; align-items: baseline; gap: 12px;">
+    <h2>Boxes on your baybox<%= boxes.empty? ? "" : " (#{boxes.size})" %></h2>
+    <div style="flex: 1;"></div>
+    <% if boxes.size > 1 && !(wipe && wipe[:running]) %>
+      <form method="post" action="/sessions/teardown-all" style="margin: 0;"
+            onsubmit="return confirm('Tear down all <%= boxes.size %> boxes? Their disks are freed, and a review still running in one stops.');">
+        <%== csrf_teardown_all %>
+        <button class="mini" type="submit" title="bay down --force, for every box">Tear down all</button>
+      </form>
+    <% end %>
+  </div>
   <div class="sub" style="margin-bottom: 10px;">
     What bay actually has. A box outlives its review and keeps its disk until you tear it down.
   </div>
+  <% if wipe && wipe[:running] %>
+    <div class="mono" id="wipe" style="padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px;
+         background: var(--chip-blue-bg); border: 1px solid var(--chip-blue-br); color: var(--chip-blue-fg);">
+      Tearing down all your boxes, one at a time<%= wipe[:left] ? ": #{wipe[:done]} gone, #{wipe[:left]} to go" : "" %>.
+    </div>
+    <script>
+    // Until it is over: reload to show how far it has got, unless something
+    // is being typed that a reload would lose.
+    setTimeout(function check() {
+      var typing = Array.prototype.some.call(document.querySelectorAll("textarea, input[type=text]"),
+                                             function (el) { return el.value.trim() !== ""; });
+      if (typing) setTimeout(check, 10000); else location.reload();
+    }, 10000);
+    </script>
+  <% elsif wipe && wipe[:note] %>
+    <div class="mono" style="padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px;
+         background: var(--chip-blue-bg); border: 1px solid var(--chip-blue-br); color: var(--chip-blue-fg);">
+      <%= wipe[:note] %>
+    </div>
+  <% end %>
   <% if boxes.empty? %>
     <div class="empty">No boxes.</div>
   <% end %>

@@ -6,6 +6,8 @@
 #   2. poll running jobs   — status, then result when it is finished
 #   3. adopt orphans       — a review this host started but lost, which is
 #                            still running in the box
+#   4. tear down boxes     — one a tick, for whoever asked for all of theirs
+#                            to go (wipe.rb)
 #
 # The review runs detached here, so neither step waits out the minutes a review
 # takes. bay drives the user's Docker over ssh; the containers are still theirs.
@@ -16,6 +18,7 @@ require_relative "runner"
 require_relative "prereview"
 require_relative "voice"
 require_relative "health"
+require_relative "wipe"
 
 TICK = Integer(ENV.fetch("RQ_WORKER_TICK", "10"))
 
@@ -213,6 +216,12 @@ if $PROGRAM_NAME == __FILE__
       end
       start_queued
       poll_running
+      # One box a tick, so a long wipe never stops the polling above.
+      begin
+        Wipe.tick(runner: Runner, log: method(:log))
+      rescue StandardError => e
+        log("wipe failed: #{e.class}: #{e.message}")
+      end
     rescue StandardError => e
       log("tick failed: #{e.class}: #{e.message}")
     end

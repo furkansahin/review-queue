@@ -273,6 +273,25 @@ check("teardown asks bay to go down",
 check("having unlocked its worktree first, or git would keep it",
       File.read("#{ROOT}/ssh.cmds").include?("worktree unlock '.worktrees/rq-x-1'"), true)
 check("a bad box name is refused", Runner.run(BOXROW, "teardown ../etc")[:ok], false)
+
+# What a box left in Docker after its worktree went: only this dashboard's
+# boxes, never one still wanted, and nothing that is not plainly an id.
+listing = <<~OUT
+  container 3f2a9c bay-ubicloud-rq-ubicloud-ubicloud-6209
+  volume bay-ubicloud-rq-ubicloud-ubicloud-6209_box-pgdata bay-ubicloud-rq-ubicloud-ubicloud-6209
+  volume bay-repo-rq-ubicloud-ubicloud-6632_box-mise bay-repo-rq-ubicloud-ubicloud-6632
+  network 77ab01 bay-ubicloud-rq-ubicloud-ubicloud-6209
+  container 9d9d9d bay-ubicloud-rq-ubicloud-ubicloud-7000
+  container 1a1a1a bay-ubicloud-jesse-hack
+  container 2b2b2b someone-elses-project
+  volume ;rm-rf bay-ubicloud-rq-ubicloud-ubicloud-6209
+OUT
+check("leftovers: this dashboard's boxes only, sparing what is kept",
+      Runner.leftovers(listing, keep: ["rq-ubicloud-ubicloud-7000"]),
+      [["container", "3f2a9c", "rq-ubicloud-ubicloud-6209"],
+       ["volume", "bay-ubicloud-rq-ubicloud-ubicloud-6209_box-pgdata", "rq-ubicloud-ubicloud-6209"],
+       ["volume", "bay-repo-rq-ubicloud-ubicloud-6632_box-mise", "rq-ubicloud-ubicloud-6632"],
+       ["network", "77ab01", "rq-ubicloud-ubicloud-6209"]])
 check("an unknown verb is refused", Runner.run(BOXROW, "wat")[:ok], false)
 
 puts "-- status and logs come from this host now --"

@@ -535,6 +535,45 @@ module Runner
     res
   end
 
+  # What a box leaves in Docker when its worktree went before it did: bay
+  # finds a box by its worktree, so bay down cannot find these again, and
+  # bay list does not show them. One was found running two months after its
+  # teardown, Postgres and all. Each bay compose project is named
+  # bay-<config>-<box>; only this dashboard's boxes (rq-...) are touched, and
+  # none named in keep.
+  LEFTOVERS = "docker ps -a --filter label=com.docker.compose.project --format 'container {{.ID}} {{.Label \"com.docker.compose.project\"}}'; " \
+              "docker volume ls --filter label=com.docker.compose.project --format 'volume {{.Name}} {{.Label \"com.docker.compose.project\"}}'; " \
+              "docker network ls --filter label=com.docker.compose.project --format 'network {{.ID}} {{.Label \"com.docker.compose.project\"}}'"
+  DOCKER_ID = /\A[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\z/
+
+  # [[kind, id, box]] from what LEFTOVERS printed.
+  def leftovers(listing, keep: [])
+    listing.to_s.lines.filter_map do |line|
+      kind, id, project = line.split
+      box = project.to_s[/\Abay-[a-z0-9._-]*?-(rq-[a-z0-9-]+)\z/, 1]
+      next unless %w[container volume network].include?(kind) && id.to_s.match?(DOCKER_ID)
+      next unless box&.match?(BOX_RE) && !keep.include?(box)
+      [kind, id, box]
+    end
+  end
+
+  def sweep(box_row, keep: [])
+    ssh = ["ssh", "-F", ssh_config_path(box_row["login"]), host_alias(box_row["login"])]
+    found = capture([*ssh, LEFTOVERS], env_for(box_row), timeout: 60)
+    return found unless found[:ok]
+    gone = leftovers(found[:output], keep: keep)
+    return {ok: true, output: "", exit_code: 0, boxes: []} if gone.empty?
+    ids = ->(kind) { gone.select { |k, _, _| k == kind }.map { |_, id, _| BayBox.sh_quote(id) }.join(" ") }
+    # Containers first: a volume or network still in use will not go.
+    script = [("docker rm -f #{ids.("container")}" unless ids.("container").empty?),
+              ("docker volume rm #{ids.("volume")}" unless ids.("volume").empty?),
+              ("docker network rm #{ids.("network")}" unless ids.("network").empty?)].compact.join("; ")
+    res = capture([*ssh, script], env_for(box_row), timeout: 180)
+    res.merge(boxes: gone.map(&:last).uniq.sort)
+  rescue Error, Crypto::Error => e
+    {ok: false, output: "", exit_code: nil, error: e.message}
+  end
+
   def skills(box_row, _url)
     # The value lives in this user's bay.local.toml, which prepare! rewrites
     # from the database on every command. So storing it is the whole job.

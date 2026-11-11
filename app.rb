@@ -24,6 +24,7 @@ if REVIEWS_ENABLED
   require_relative "jobs"
   require_relative "baybox"
 require_relative "runner"
+require_relative "wipe"
 require_relative "stream_render"
 require_relative "transcript"
 require_relative "markdown"
@@ -730,6 +731,19 @@ class ReviewQueue < Roda
         r.redirect "/sessions"
       end
 
+      # Every box at once. Only asked for here: the worker tears them down one
+      # a tick (wipe.rb), and this page shows how far it has got.
+      r.post "teardown-all" do
+        check_csrf!
+        if DB.row("SELECT 1 FROM bayboxes WHERE login = $1", [current_login]).nil?
+          flash!("sessions_error", "no baybox registered")
+        else
+          Wipe.request(current_login)
+          flash!("sessions_notice", "Tearing down all your boxes, one at a time. This page shows how far it has got.")
+        end
+        r.redirect "/sessions"
+      end
+
       # A follow-up question in the box that already ran the review.
       r.post "ask" do
         check_csrf!
@@ -996,6 +1010,26 @@ class ReviewQueue < Roda
         r.redirect "/sessions"
       end
 
+      # The whole torn-down list at once. Kept: a review whose draft is still
+      # pending on GitHub, since what you change in it before submitting is
+      # learned from (Voice.tick) and that needs the record.
+      r.post "forget-all" do
+        check_csrf!
+        gone = DB.rows(<<~SQL, [current_login, Voice::WATCH_DAYS]).size
+          DELETE FROM review_jobs
+          WHERE login = $1 AND torn_down_at IS NOT NULL
+            AND NOT (draft_json IS NOT NULL AND learned_at IS NULL
+                     AND (draft_json::jsonb ->> 'at')::timestamptz > now() - $2::int * interval '1 day')
+          RETURNING id
+        SQL
+        kept = DB.row("SELECT count(*) AS n FROM review_jobs WHERE login = $1 AND torn_down_at IS NOT NULL",
+                      [current_login])["n"].to_i
+        flash!("sessions_notice", "Forgot #{gone} torn-down #{gone == 1 ? "review" : "reviews"}." +
+          (kept.zero? ? "" : " Kept #{kept}: #{kept == 1 ? "its draft is" : "their drafts are"} still pending on GitHub, " \
+                             "and what you change before submitting is learned from."))
+        r.redirect "/sessions"
+      end
+
       # Pushes an issue's branch and opens a draft pull request from it.
       #
       # Only from here, and only on a press: this is the one thing the app does
@@ -1202,15 +1236,19 @@ class ReviewQueue < Roda
         # Boxes outlive their reviews, so ask the baybox what actually exists
         # rather than trusting our own rows.
         boxes = box ? Runner.box_list(box) : []
-        view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, baybox: box,
+        wipe = Wipe.status(current_login)
+        Wipe.seen(current_login) if wipe && !wipe[:running] && wipe[:note]
+        view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, baybox: box, wipe: wipe,
                                   login: current_login,
                                   error: session.delete("sessions_error"),
                                   notice: session.delete("sessions_notice"),
                                   csrf_teardown: csrf_tag("/sessions/teardown"),
+                                  csrf_teardown_all: csrf_tag("/sessions/teardown-all"),
                                   csrf_cancel: csrf_tag("/sessions/cancel"),
                                   csrf_ask: csrf_tag("/sessions/ask"),
                                   csrf_publish: csrf_tag("/sessions/publish"),
-                                  csrf_forget: csrf_tag("/sessions/forget")},
+                                  csrf_forget: csrf_tag("/sessions/forget"),
+                                  csrf_forget_all: csrf_tag("/sessions/forget-all")},
           layout: false)
       end
     end
