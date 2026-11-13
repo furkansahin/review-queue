@@ -142,12 +142,25 @@
     end
   }
 %>
+<%
+  wiping = wipe && wipe[:running]
+  wipe_confirm = JSON.generate("Tear down all #{boxes.size} boxes? Their disks are freed, and a review still running in one stops.")
+%>
 <div class="bar">
   <div style="display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.01em;">
     <a href="/" title="Leeghwater: the queue" style="color: inherit;"><%== Logo.svg(20, fill: last_fill) %></a>Sessions
   </div>
   <a class="mono" style="font-size: 12px;" href="/">← back to the queue</a>
   <div style="flex: 1;"></div>
+  <%# Also by the box list, but that is at the foot of a long page. %>
+  <% if wiping %>
+    <a class="mono" href="#wipe" style="font-size: 11px;">tearing down your boxes…</a>
+  <% elsif boxes.size > 1 %>
+    <form method="post" action="/sessions/teardown-all" style="margin: 0;" onsubmit="return confirm(<%= wipe_confirm %>);">
+      <%== csrf_teardown_all %>
+      <button class="mini" type="submit" title="bay down --force, for every box">Tear down all <%= boxes.size %> boxes</button>
+    </form>
+  <% end %>
   <div class="mono" style="font-size: 11px; color: var(--muted-2);">
     @<%= login %><%= baybox ? " · baybox #{baybox["host"]}" : " · no baybox registered" %>
   </div>
@@ -399,9 +412,8 @@
   <div style="display: flex; align-items: baseline; gap: 12px;">
     <h2>Boxes on your baybox<%= boxes.empty? ? "" : " (#{boxes.size})" %></h2>
     <div style="flex: 1;"></div>
-    <% if boxes.size > 1 && !(wipe && wipe[:running]) %>
-      <form method="post" action="/sessions/teardown-all" style="margin: 0;"
-            onsubmit="return confirm('Tear down all <%= boxes.size %> boxes? Their disks are freed, and a review still running in one stops.');">
+    <% if boxes.size > 1 && !wiping %>
+      <form method="post" action="/sessions/teardown-all" style="margin: 0;" onsubmit="return confirm(<%= wipe_confirm %>);">
         <%== csrf_teardown_all %>
         <button class="mini" type="submit" title="bay down --force, for every box">Tear down all</button>
       </form>
@@ -410,7 +422,7 @@
   <div class="sub" style="margin-bottom: 10px;">
     What bay actually has. A box outlives its review and keeps its disk until you tear it down.
   </div>
-  <% if wipe && wipe[:running] %>
+  <% if wiping %>
     <div class="mono" id="wipe" style="padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px;
          background: var(--chip-blue-bg); border: 1px solid var(--chip-blue-br); color: var(--chip-blue-fg);">
       Tearing down all your boxes, one at a time<%= wipe[:left] ? ": #{wipe[:done]} gone, #{wipe[:left]} to go" : "" %>.

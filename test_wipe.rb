@@ -151,6 +151,8 @@ get "/sessions"
 page = last_response.body
 check("a button for all of them", page.include?(">Tear down all</button>"), true)
 check("which asks first, with how many", page.include?("Tear down all 2 boxes?"), true)
+check("and one at the top, not only at the foot of a long page",
+      page.index(">Tear down all 2 boxes</button>").to_i.between?(1, page.index('<div class="wrap">')), true)
 tok = page[%r{action="/sessions/teardown-all"[^>]*>\s*<input type="hidden" name="_csrf" value="([^"]+)"}m, 1]
 post "/sessions/teardown-all", {"_csrf" => tok}
 check("asked, back to the page", last_response.location.to_s.end_with?("/sessions"), true)
@@ -161,6 +163,7 @@ page = last_response.body
 check("while it runs: a line, not the button", [page.include?("Tearing down all your boxes, one at a time"),
                                                page.include?(">Tear down all</button>")], [true, false])
 check("and the page follows it", page.include?("location.reload()"), true)
+check("the top says so too", [page.include?(">tearing down your boxes…</a>"), page.include?("Tear down all 2 boxes</button>")], [true, false])
 fake.boxes["furkansahin"] = %w[rq-ubicloud-ubicloud-1 rq-ubicloud-ubicloud-2]
 Wipe.tick(runner: fake)
 check("how far it has got, on the page", (get("/sessions"); last_response.body.include?("1 gone, 1 to go")), true)
