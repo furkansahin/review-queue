@@ -48,10 +48,33 @@ check("the follow-up's trace is its own", ask_trace.text.include?("rspec spec/th
 check("and does not repeat the review's", ask_trace.text.include?("git diff"), false)
 check("the answer is the answer", answer.text.strip, "# Repair items\n\n1. Do the thing.")
 
-puts "-- the newest answer is the one left open --"
-check("only one is open", SECTIONS.count(&:open), 1)
-check("and it is the last answer", SECTIONS.rindex(&:open), SECTIONS.length - 1)
-check("so the review closes when a follow-up answers", review.open, false)
+puts "-- the review and the newest answer are the ones left open --"
+check("two are open", SECTIONS.count(&:open), 2)
+check("the newest answer", SECTIONS.last.open, true)
+check("and the review stays open when a follow-up answers: it is what you refer back to", review.open, true)
+
+puts "-- read from its end, the log has lost the review's start --"
+# What the page holds after a follow-up: the stored text is the rendered end
+# of the log, and the review's own run is longer than that window.
+rendered = StreamRender.all(RAW)
+cut = rendered[rendered.index("▸ ")..]   # partway into the review's trace, past its boundary
+secs = Transcript.sections(cut)
+check("the review is still the review, not bay preparing the box",
+      secs.map { |x| [x.kind, x.title] }.first(2), [[:trace, "what the review ran"], [:answer, "the review"]])
+check("rendered as an answer", secs[1].text.strip, "## Findings\n\nOne real bug.")
+check("and open, with the newest answer", secs.select(&:open).map(&:title), ["the review", "the answer"])
+past = rendered[rendered.index(StreamRender::ASKED)..]   # past the review altogether
+secs = Transcript.sections("#{StreamRender::RUN}\n" + past, review: "## Findings\n\nOne real bug.\n")
+check("a review pushed out of the window is put back, first", [secs.first.kind, secs.first.title, secs.first.open],
+      [:answer, "the review", true])
+check("once", Transcript.sections(rendered, review: "## Findings\n\nOne real bug.\n").count { |x| x.title == "the review" }, 1)
+trace_only = "▸ Bash: rspec\n▸ Bash: rubocop\n#{StreamRender::RUN}\n" + past
+check("partway into its trace: a trace, not a build",
+      Transcript.sections(trace_only).first.then { |x| [x.kind, x.title] }, [:trace, "what the review ran"])
+
+puts "-- the first answer, to keep --"
+check("is the review", Transcript.first_answer(rendered).strip, "## Findings\n\nOne real bug.")
+check("none before there is one", Transcript.first_answer(StreamRender.all("#{StreamRender::RUN_MARK}\n" + tool("ls"))), nil)
 
 puts "-- a review on its own --"
 only = Transcript.sections(StreamRender.all([

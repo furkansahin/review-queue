@@ -1,6 +1,7 @@
 require "json"
 require_relative "db"
 require_relative "baybox"
+require_relative "transcript"
 
 # The review job queue. A job moves queued -> running -> done|failed.
 #
@@ -220,9 +221,20 @@ module Jobs
   end
 
   def finish(id, state, output: nil, error: nil)
-    DB.exec(<<~SQL, [state, output, error, id])
-      UPDATE review_jobs SET state = $1, output = $2, error = $3, finished_at = now() WHERE id = $4
+    DB.exec(<<~SQL, [state, output, error, id, output && Transcript.first_answer(output)])
+      UPDATE review_jobs SET state = $1, output = $2, error = $3, finished_at = now(),
+                             first_answer = COALESCE(first_answer, $5)
+      WHERE id = $4
     SQL
+  end
+
+  # The kept review for several jobs, as {id => text}; see first_answer in
+  # db.rb. Only for the cards the page prints.
+  def first_answers(login, ids)
+    return {} if ids.empty?
+    holders = ids.each_index.map { |i| "$#{i + 2}" }.join(", ")
+    DB.rows("SELECT id, first_answer FROM review_jobs WHERE login = $1 AND id IN (#{holders}) AND first_answer IS NOT NULL",
+            [login, *ids]).each_with_object({}) { |r, h| h[r["id"]] = r["first_answer"] }
   end
 
   # A follow-up puts a finished job back to work in the same box, so the page
@@ -238,12 +250,15 @@ module Jobs
   # row. It happened in production -- a follow-up marked done 0.1s after it
   # was asked.
   def reopen(id, login)
-    DB.row(<<~SQL, [login, id])
+    # A job finished before first_answer was kept has its review only in its
+    # output, and the follow-up about to run will push it out of there.
+    review = Transcript.first_answer(output(login, id))
+    DB.row(<<~SQL, [login, id, review])
       UPDATE review_jobs
       -- started_at drives the staleness timeout, so a follow-up on a job from
       -- last week would be given up on at the first blip, discarding the answer.
       SET state = 'running', phase = 'starting', finished_at = NULL, error = NULL,
-          started_at = now()
+          started_at = now(), first_answer = COALESCE(first_answer, $3)
       WHERE login = $1 AND id = $2 AND state IN ('done', 'failed')
       RETURNING *
     SQL

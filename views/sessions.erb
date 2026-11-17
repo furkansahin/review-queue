@@ -124,6 +124,29 @@
   chars = ->(j) { j["output_bytes"].to_i }
   has_output = ->(j) { chars.call(j).positive? }
   inline = ->(j) { outputs[j["id"]] }
+  review_of = ->(j) { reviews[j["id"]] }
+  # What a live panel shows, and how many bytes of the stored text come before
+  # it, which the tail counts from. While a follow-up runs, only its own run:
+  # the review it is about has a panel of its own above it.
+  live_part = ->(j) {
+    text = inline.call(j).to_s
+    base = 0
+    if review_of.call(j)
+      cut = nil
+      text.scan(Transcript::BOUNDARY) { cut = Regexp.last_match.end(0) }
+      if cut
+        base = text[0...cut].bytesize
+        text = text[cut..]
+      end
+    end
+    # The browser drops a newline right after <pre>, and the offset would be
+    # a byte short of what it counted.
+    if text.start_with?("\n")
+      base += 1
+      text = text[1..]
+    end
+    [text, base]
+  }
   # A work session is about an issue, and GitHub's /pull/ path does not
   # redirect for one, so the link has to know.
   gh_link = ->(j) { "https://github.com/#{j["repo"]}/#{j["kind"] == "work" ? "issues" : "pull"}/#{j["pr_number"]}" }
@@ -135,12 +158,7 @@
     end
   }
   can_write = baybox && !baybox["github_write_token_enc"].to_s.empty?
-  human = ->(n) {
-    if n < 1024 then "#{n} bytes"
-    elsif n < 1_048_576 then "#{(n / 1024.0).round} KB"
-    else "#{(n / 1_048_576.0).round(1)} MB"
-    end
-  }
+  human = method(:human_size)
 %>
 <%
   wiping = wipe && wipe[:running]
@@ -218,11 +236,20 @@
           machine. Claude's output appears here as soon as it starts.
         </div>
       <% end %>
+      <% live_text, live_base = live_part.call(j) %>
+      <% if (rv = review_of.call(j)) %>
+        <%# A follow-up is running: the review it asks about, as it reads when
+            finished, not as raw markdown at the top of the live log. %>
+        <details data-keep="sec-<%= j["id"] %>-review" open>
+          <summary><%= j["kind"] == "work" ? "the work" : "the review" %> <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%= human.call(rv.bytesize) %></span></summary>
+          <div class="md"><%== Markdown.render(rv) %></div>
+        </details>
+      <% end %>
       <details data-keep="live-<%= j["id"] %>" open>
-        <summary>claude output
+        <summary><%= rv ? "this run" : "claude output" %>
           <span class="mono" id="s-<%= j["id"] %>" style="color: var(--muted-2);"><%= j["phase"] || "starting" %></span>
         </summary>
-        <pre class="tail" id="t-<%= j["id"] %>" data-job="<%= j["id"] %>"><%= inline.call(j) %></pre>
+        <pre class="tail" id="t-<%= j["id"] %>" data-job="<%= j["id"] %>" data-base="<%= live_base %>"><%= live_text %></pre>
       </details>
     </div>
   <% end %>
@@ -262,26 +289,7 @@
       <div class="sub">finished <%= j["finished_at"] %><%= j["error"] ? " · #{j["error"]}" : "" %></div>
       <% if has_output.call(j) %>
         <% if (full = inline.call(j)) %>
-          <%# One panel per stage, in the order they happened. Only the newest
-              answer is open: the rest are there to open, not to scroll past. %>
-          <% Transcript.sections(full).each_with_index do |sec, n| %>
-            <details data-keep="sec-<%= j["id"] %>-<%= n %>" <%= sec.open ? "open" : "" %>>
-              <%# <%== : these are fixed attribute strings. With <%= their quotes were
-                  escaped, and the browser read class=&quot;tail&quot; as no tail
-                  class at all -- a 200-line trace with no scroll box. %>
-              <summary <%== sec.kind == :answer ? "" : 'style="color: var(--muted-2);"' %>><%=
-                j["kind"] == "work" ? sec.title.sub("the review", "the work") : sec.title %> <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%=
-                sec.kind == :question ? "" : human.call(sec.text.bytesize) %></span></summary>
-              <% if sec.dropped %>
-                <div class="sub" style="padding: 6px 0 0;">… <%= sec.dropped %> earlier lines not shown</div>
-              <% end %>
-              <% if sec.kind == :answer %>
-                <div class="md"><%== Markdown.render(sec.text) %></div>
-              <% else %>
-                <pre <%== sec.kind == :trace || sec.kind == :build ? 'class="tail"' : "" %>><%= sec.text %></pre>
-              <% end %>
-            </details>
-          <% end %>
+          <%== render("_sections", locals: {j: j, sections: Transcript.sections(full, review: review_of.call(j)), human: human}) %>
         <% else %>
           <details data-keep="review-<%= j["id"] %>" data-review="<%= j["id"] %>">
             <summary>claude's review (<%= human.call(chars.call(j)) %>) — older, loads when opened</summary>
@@ -393,10 +401,7 @@
           <div class="sub">box removed <%= j["torn_down_at"] %></div>
           <% if has_output.call(j) %>
             <% if (full = inline.call(j)) %>
-              <details data-keep="gonerev-<%= j["id"] %>">
-                <summary>claude's review (<%= human.call(full.bytesize) %>)</summary>
-                <pre><%= full %></pre>
-              </details>
+              <%== render("_sections", locals: {j: j, sections: Transcript.sections(full, review: review_of.call(j)), human: human}) %>
             <% else %>
               <details data-keep="gonerev-<%= j["id"] %>" data-review="<%= j["id"] %>">
                 <summary>claude's review (<%= human.call(chars.call(j)) %>) — loads when opened</summary>
@@ -534,7 +539,15 @@ var RQ = (function () {
           .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
           .then(function (data) {
             if (!data.found) { throw "gone"; }
-            pre.textContent = data.review;
+            if (data.html) {
+              // The panels, rendered the way a printed card's are.
+              var box = document.createElement("div");
+              box.innerHTML = data.html;
+              pre.replaceWith(box);
+              wire(box);
+            } else {
+              pre.textContent = data.review;
+            }
           })
           .catch(function () {
             // Put the link back, so the panel is never a dead end.
@@ -658,7 +671,14 @@ function swapIn(id, card, html) {
   document.querySelectorAll("pre.tail[data-job]").forEach(function (pre) {
     var id = pre.dataset.job;
     var status = document.getElementById("s-" + id);
-    var offset = new Blob([pre.textContent]).size;   // bytes, to match the server
+    // Two different things are counted. The tail sends the stored, rendered
+    // text, so its offset is what this panel holds plus whatever came before
+    // it (data-base). The stream reads the raw log, a megabyte where the
+    // rendered text is a dozen kilobytes; sending it the rendered count made
+    // it start far back and print most of the run a second time. It starts
+    // from where the log is now instead, and counts from its own answers.
+    var offset = Number(pre.dataset.base || 0) + new Blob([pre.textContent]).size;
+    var rawOffset = "end";
     var stopped = false;
 
     function atBottom() {
@@ -677,13 +697,13 @@ function swapIn(id, card, html) {
 
     function live() {
       if (!window.EventSource) { return tick(); }
-      var es = new EventSource("/sessions/stream?id=" + encodeURIComponent(id) + "&offset=" + offset);
+      var es = new EventSource("/sessions/stream?id=" + encodeURIComponent(id) + "&offset=" + rawOffset);
       var got = false;
 
       es.addEventListener("log", function (e) {
         got = true;
         var d = JSON.parse(e.data);
-        offset = d.offset;
+        rawOffset = d.offset;
         append(d.text);
         if (status) { status.textContent = "live"; }
       });
@@ -691,7 +711,7 @@ function swapIn(id, card, html) {
       es.addEventListener("end", function (e) {
         got = true;
         var d = JSON.parse(e.data);
-        offset = d.offset;
+        rawOffset = d.offset;
         stopped = true;
         if (status) { status.textContent = d.state; }
         es.close();
@@ -720,6 +740,8 @@ function swapIn(id, card, html) {
           if (d.error) { throw d.error; }
           if (d.chunk) {
             var stick = atBottom();
+            // Replaced, not continued: this is the whole text again.
+            if (d.reset) { pre.textContent = ""; }
             pre.textContent += d.chunk;
             offset = d.length;
             if (stick) { pre.scrollTop = pre.scrollHeight; }

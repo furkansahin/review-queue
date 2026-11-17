@@ -387,6 +387,10 @@ module DB
     -- than asking the box on every load. Kept out of the list queries: it
     -- runs to a megabyte on a big branch.
     ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS diff    text;
+    -- The first answer a box gave, the review itself, kept apart from output:
+    -- output is the rendered end of the log, and a follow-up or two pushes the
+    -- review out of it -- the very thing the questions refer back to.
+    ALTER TABLE review_jobs ADD COLUMN IF NOT EXISTS first_answer text;
     -- A second GitHub token, kept apart from github_token_enc on purpose. That
     -- one is written into the box, where claude runs unattended over issue text
     -- anyone can comment on. This one can push, so it never goes in: the

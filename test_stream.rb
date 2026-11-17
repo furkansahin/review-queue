@@ -94,6 +94,26 @@ puts "-- an offset past the end resends the whole log --"
 get "/sessions/stream?id=#{JOB_ID}&offset=999999"
 check("rather than sending nothing for ever", last_response.body.include?("first line"), true)
 
+puts "-- from the end: the page holds rendered text, and cannot count the raw log --"
+# What a page asks for when it opens mid-run. It used to send the size of the
+# rendered text it held as the offset into the raw log -- a dozen kilobytes
+# into a megabyte -- and got most of the run printed a second time.
+first = %({"type":"system","subtype":"init","model":"first line"}\n)
+second = %({"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"second line"}}]}}\n)
+being_written = %({"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"third line"}}]}})
+File.write(File.join(dir, "log"), first + second + being_written)
+get "/sessions/stream?id=#{JOB_ID}&offset=end"
+check("nothing already written is resent", [last_response.body.include?("first line"), last_response.body.include?("second line")], [false, false])
+check("the line being written comes whole", last_response.body.include?("third line"), true)
+check("and the offset it gives is the log's own", last_response.body[/"offset":(\d+)/, 1].to_i,
+      (first + second + being_written).bytesize)
+File.open(File.join(dir, "log")) do |f|
+  check("a line start, found by looking back in steps", StreamRender.line_start(f, step: 7), (first + second).bytesize)
+end
+File.write(File.join(dir, "log"), being_written)
+File.open(File.join(dir, "log")) { |f| check("no newline at all: the start", StreamRender.line_start(f), 0) }
+File.write(File.join(dir, "log"), first + second)
+
 puts "-- it is another user's log, so there is nothing to see --"
 WHO[:login] = "mohi-kalantari"
 o = Rack::Test::Session.new(Rack::MockSession.new(app))
@@ -118,6 +138,10 @@ puts "-- polling still works, so the fallback is real --"
 DB.exec("UPDATE review_jobs SET output = $1, state = 'running' WHERE id = $2", ["first line\nsecond line\n", JOB_ID])
 get "/sessions/tail?id=#{JOB_ID}&offset=0"
 check("the poll route still answers", JSON.parse(last_response.body)["chunk"].include?("second line"), true)
+check("and it is more, not a replacement", JSON.parse(last_response.body)["reset"], false)
+get "/sessions/tail?id=#{JOB_ID}&offset=999999"
+check("a resend from the start says so, or the page prints it twice", JSON.parse(last_response.body).values_at("reset", "chunk"),
+      [true, "first line\nsecond line\n"])
 
 FileUtils.remove_entry(ROOT, true)
 puts

@@ -327,6 +327,13 @@ class ReviewQueue < Roda
   # queue last showed, in whole percent; nil, the mark as drawn, before it has.
   def last_fill = (v = session["fill"]).is_a?(Integer) ? v.clamp(0, 100) : nil
 
+  def human_size(n)
+    if n < 1024 then "#{n} bytes"
+    elsif n < 1_048_576 then "#{(n / 1024.0).round} KB"
+    else "#{(n / 1_048_576.0).round(1)} MB"
+    end
+  end
+
   route do |r|
     if REDIRECT_HOSTS.include?(r.host.to_s.downcase)
       # 308 for anything but a read, so a browser does not turn a form's POST
@@ -1120,6 +1127,9 @@ class ReviewQueue < Roda
         # nginx buffers a proxied response by default, which would hold every
         # line back until the stream ended -- the opposite of the point.
         response["X-Accel-Buffering"] = "no"
+        # "end": from where the log is now. The page holds the rendered text,
+        # and has no idea how far into the raw log that reaches.
+        from_end = r.params["offset"] == "end"
         offset = r.params["offset"].to_s.to_i
         offset = 0 if offset.negative?
         box_name = job["box_name"]
@@ -1136,6 +1146,9 @@ class ReviewQueue < Roda
               # An offset past the end means the log was replaced by a shorter
               # one, so send it whole rather than sending nothing for ever.
               offset = 0 if offset > f.size
+              # From the end, but from the start of the line being written:
+              # the cursor renders whole lines, and half a JSON event is noise.
+              offset = StreamRender.line_start(f) if from_end
               f.seek(offset)
               loop do
                 chunk = f.read
@@ -1207,8 +1220,10 @@ class ReviewQueue < Roda
         # sequence instead.
         chunk = job["chunk"].to_s.dup.force_encoding(Encoding::UTF_8)
         chunk = chunk.scrub("") unless chunk.valid_encoding?
+        # reset: the text was replaced, and this chunk is all of it, not more.
         JSON.generate(state: job["state"], phase: job["phase"], length: job["length"].to_i,
-                      chunk: chunk, done: !%w[queued running].include?(job["state"]))
+                      chunk: chunk, done: !%w[queued running].include?(job["state"]),
+                      reset: offset > job["length"].to_i)
       end
 
       # One stored review, for a panel that was not printed with the page.
@@ -1221,7 +1236,13 @@ class ReviewQueue < Roda
         if r.params["format"] == "json"
           response["Content-Type"] = "application/json"
           response["Cache-Control"] = "no-store"
-          next JSON.generate(found: !text.nil?, review: review, noise: noise)
+          # html: the panels a printed card has, review rendered and open.
+          html = if text
+                   job = DB.row("SELECT id, kind FROM review_jobs WHERE login = $1 AND id = $2", [current_login, id])
+                   render("_sections", locals: {j: job, human: method(:human_size),
+                                                sections: Transcript.sections(text, review: Jobs.first_answers(current_login, [id])[id])})
+                 end
+          next JSON.generate(found: !text.nil?, review: review, noise: noise, html: html)
         end
         view("review", locals: {id: id, found: !text.nil?, review: review, noise: noise},
           layout: false)
@@ -1231,14 +1252,16 @@ class ReviewQueue < Roda
         jobs = Jobs.for_user(current_login)
         # Only the reviews this page is going to print. The rest carry their
         # size and load from /sessions/review when their panel is opened.
-        outputs = Jobs.outputs(current_login, Jobs.inline_ids(jobs))
+        inline = Jobs.inline_ids(jobs)
+        outputs = Jobs.outputs(current_login, inline)
+        reviews = Jobs.first_answers(current_login, inline)
         box = DB.row("SELECT * FROM bayboxes WHERE login = $1", [current_login])
         # Boxes outlive their reviews, so ask the baybox what actually exists
         # rather than trusting our own rows.
         boxes = box ? Runner.box_list(box) : []
         wipe = Wipe.status(current_login)
         Wipe.seen(current_login) if wipe && !wipe[:running] && wipe[:note]
-        view("sessions", locals: {jobs: jobs, outputs: outputs, boxes: boxes, baybox: box, wipe: wipe,
+        view("sessions", locals: {jobs: jobs, outputs: outputs, reviews: reviews, boxes: boxes, baybox: box, wipe: wipe,
                                   login: current_login,
                                   error: session.delete("sessions_error"),
                                   notice: session.delete("sessions_notice"),

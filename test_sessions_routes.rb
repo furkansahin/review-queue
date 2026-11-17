@@ -488,7 +488,7 @@ check("no attribute is escaped into the markup", b.include?("=&quot;"), false)
 # With the class fixed, a finished trace matches pre.tail -- and streaming for
 # every pre.tail would poll /sessions/tail?id=undefined for each of them.
 check("only panels that follow a job stream", b.include?('querySelectorAll("pre.tail[data-job]")'), true)
-check("the live panel carries its job", b.match?(/<pre class="tail" id="t-\d+" data-job="\d+">/), true)
+check("the live panel carries its job", b.match?(/<pre class="tail" id="t-\d+" data-job="\d+" data-base="\d+">/), true)
 check("every log panel starts at its end", b.include?("pre.scrollTop = pre.scrollHeight;"), true)
 DB.exec("TRUNCATE review_jobs RESTART IDENTITY CASCADE")
 

@@ -62,6 +62,24 @@ module StreamRender
     end
   end
 
+  # Where the line now being written to an open log begins: just past its
+  # last newline, so a reader starting there gets whole lines. A JSON event
+  # can run to megabytes, so this looks back in steps rather than at all of it.
+  def line_start(file, step: 65_536)
+    size = file.size
+    at = size
+    while at.positive?
+      from = [at - step, 0].max
+      file.seek(from)
+      chunk = file.read(at - from)
+      if (i = chunk.rindex("\n"))
+        return from + i + 1
+      end
+      at = from
+    end
+    0
+  end
+
   # The whole of a stored run, rendered at once.
   def all(text)
     cursor = Cursor.new

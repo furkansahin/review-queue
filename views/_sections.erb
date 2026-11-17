@@ -1,0 +1,24 @@
+<%# One panel per stage of a box's log, in the order they happened (see
+    Transcript.sections): the review and the newest answer open, rendered;
+    the traces closed. For a finished card, a torn-down one, and a review
+    fetched when its panel is first opened. %>
+<% sections.each_with_index do |sec, n| %>
+  <%# The review keeps its own key: a review put back at the top would
+      otherwise take over the remembered state of whatever panel was first. %>
+  <details data-keep="sec-<%= j["id"] %>-<%= sec.kind == :answer && sec.title == "the review" ? "review" : n %>" <%= sec.open ? "open" : "" %>>
+    <%# <%== : these are fixed attribute strings. With <%= their quotes were
+        escaped, and the browser read class=&quot;tail&quot; as no tail
+        class at all -- a 200-line trace with no scroll box. %>
+    <summary <%== sec.kind == :answer ? "" : 'style="color: var(--muted-2);"' %>><%=
+      j["kind"] == "work" ? sec.title.sub("the review", "the work") : sec.title %> <span class="mono" style="font-size: 11px; color: var(--muted-3);"><%=
+      sec.kind == :question ? "" : human.call(sec.text.bytesize) %></span></summary>
+    <% if sec.dropped %>
+      <div class="sub" style="padding: 6px 0 0;">… <%= sec.dropped %> earlier lines not shown</div>
+    <% end %>
+    <% if sec.kind == :answer %>
+      <div class="md"><%== Markdown.render(sec.text) %></div>
+    <% else %>
+      <pre <%== sec.kind == :trace || sec.kind == :build ? 'class="tail"' : "" %>><%= sec.text %></pre>
+    <% end %>
+  </details>
+<% end %>
